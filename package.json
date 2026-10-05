@@ -2,7 +2,7 @@
   "name": "sitelens-ai-reality-inspector",
   "version": "1.0.0",
   "private": false,
-  "description": "SiteLens AI Reality Inspector — construction imagery analysed by an NVIDIA open-source model on Nebius Token Factory, with mandatory human verification. Nebius x NVIDIA Global AI Hackathon.",
+  "description": "SiteLens AI Reality Inspector — real construction imagery analysed by a vision model on Nebius Token Factory, with deterministic comparison and mandatory human verification. Nebius x NVIDIA Global AI Hackathon.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -10,12 +10,12 @@
   },
   "main": "src/index.ts",
   "scripts": {
-    "demo": "node --experimental-strip-types demo/run-demo.ts",
-    "ui": "node --experimental-strip-types demo/run-ui.ts",
-    "eval": "node --experimental-strip-types demo/run-eval.ts",
+    "demo": "node --env-file-if-exists=.env --experimental-strip-types demo/run-demo.ts",
+    "ui": "node --env-file-if-exists=.env --experimental-strip-types demo/run-ui.ts",
+    "eval": "node --env-file-if-exists=.env --experimental-strip-types demo/run-eval.ts",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "start": "node --experimental-strip-types demo/run-demo.ts"
+    "start": "node --env-file-if-exists=.env --experimental-strip-types demo/run-demo.ts"
   },
   "keywords": [
     "construction",

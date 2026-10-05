@@ -13,7 +13,13 @@ import {
   createProvider,
 } from '../src/providers/factory.ts';
 import { RealityInspector } from '../src/inspector.ts';
-import { redactSecrets, resolveCredentials, resolveProviderConfig } from '../src/config.ts';
+import {
+  redactSecrets,
+  resolveCredentials,
+  resolveProviderConfig,
+  DEFAULT_NEBIUS_MODEL,
+} from '../src/config.ts';
+import { classifyEligibility, ELIGIBILITY_NOT_ELIGIBLE, ELIGIBILITY_NOT_VERIFIED } from '../src/eligibility.ts';
 
 const IMAGE = {
   bytes: Buffer.from('fake-jpeg-bytes'),
@@ -250,10 +256,47 @@ test('sends the credential as a bearer header and the image as a data URL', asyn
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.headers['Authorization'], 'Bearer test-key-1234567890');
   const sent = JSON.parse(calls[0]?.body ?? '{}');
-  assert.equal(sent.model, 'nvidia/nemotron-3-nano-omni');
+  // The default model is asserted via the exported constant rather than
+  // hard-coded, so changing it (with the documented evidence) is one edit.
+  assert.equal(sent.model, DEFAULT_NEBIUS_MODEL);
+  // The response must be bounded, or a reasoning model can burn the whole
+  // deadline and the inspector hangs instead of failing closed.
+  assert.ok(typeof sent.max_tokens === 'number' && sent.max_tokens > 0);
   const userMessage = sent.messages[1];
   assert.equal(userMessage.content[1].type, 'image_url');
   assert.ok(String(userMessage.content[1].image_url.url).startsWith('data:image/jpeg;base64,'));
+});
+
+test('the default model is the bake-off winner, not a text-only NVIDIA id', () => {
+  // Locked in because it is an evidence-backed finding, not a preference. A
+  // controlled bake-off ran the same five real construction photographs through
+  // all three vision-capable models with a byte-identical prompt and schema, at
+  // max_tokens=3000:
+  //
+  //   gemma-3-27b-it     2/5 usable images,  5 valid elements, avg 5897 ms
+  //   Qwen3.8-27B        1/5 usable images,  5 valid elements, avg 12863 ms
+  //   MiniCPM-V-4_5      4/5 usable images, 16 valid elements, avg  6228 ms
+  //
+  // MiniCPM won on inspection yield and comparison usefulness, not on speed.
+  assert.equal(DEFAULT_NEBIUS_MODEL, 'openbmb/MiniCPM-V-4_5');
+  // It is still a real call on real imagery, just not an NVIDIA one, so the
+  // product must never claim hackathon eligibility.
+  assert.equal(classifyEligibility({ provider: 'nebius-nvidia', model: DEFAULT_NEBIUS_MODEL }),
+    ELIGIBILITY_NOT_ELIGIBLE);
+});
+
+test('every NVIDIA model in the catalogue is classified text-only by evidence, not by name', () => {
+  // An NVIDIA id is NOT_VERIFIED (intended for the requirement, not proven
+  // callable). Eligibility follows the model that actually ran.
+  for (const nvidia of [
+    'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
+    'nvidia/nemotron-3-super-120b-a12b',
+    'nvidia/Nemotron-3-Ultra-550b-a55b',
+    'nvidia/Nemotron-3_5-Lightning',
+  ]) {
+    assert.equal(classifyEligibility({ provider: 'nebius-nvidia', model: nvidia }),
+      ELIGIBILITY_NOT_VERIFIED, nvidia + ' must not be claimed eligible');
+  }
 });
 
 test('never falls back to the demo provider when Nebius is selected', () => {
@@ -298,7 +341,7 @@ test('every observation is created AI_GENERATED and UNVERIFIED', async () => {
     assert.equal(observation.origin, 'AI_GENERATED');
     assert.equal(observation.verificationStatus, 'UNVERIFIED');
     assert.equal(observation.review, null);
-    assert.equal(observation.model, 'nvidia/nemotron-3-nano-omni');
+    assert.equal(observation.model, DEFAULT_NEBIUS_MODEL);
     assert.equal(observation.provider, 'nebius-nvidia');
   }
 });

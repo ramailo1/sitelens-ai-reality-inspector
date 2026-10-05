@@ -1,18 +1,9 @@
 /**
  * Demo provenance regression tests.
  *
- * Two defects were fixed in demo/run-demo.ts after live runs:
- *
- *  1. Provenance (provider/model/hackathon-eligibility) was skipped entirely
- *     when a run produced zero observations, because the function returned
- *     early. A judge running the demo with a content-free capture therefore
- *     never saw WHICH model ran.
- *  2. Eligibility was derived from the PROVIDER name alone, so any live Nebius
- *     call printed "YES - ... NVIDIA open-source model" even when a non-NVIDIA
- *     vision model ran. That is exactly the misrepresentation this project must
- *     not make.
- *
- * These tests lock in the corrected eligibility decision.
+ * Guards two defects fixed after live runs: provenance was skipped entirely on a
+ * zero-observation run, and eligibility was derived from the provider name alone
+ * so any live Nebius call printed "YES" even when a non-NVIDIA model ran.
  */
 
 import test from 'node:test';

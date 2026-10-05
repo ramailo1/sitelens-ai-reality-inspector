@@ -1,468 +1,262 @@
 # SiteLens™ AI Reality Inspector
 
-**Construction imagery → structured, verifiable observations — analysed by an NVIDIA open-source model running on Nebius Token Factory.**
+**One construction photograph → what the AI can see → how that compares to what you expected → where your inspector should look first → what a human must physically verify.**
 
-> **Reality Is the Reference™**
+> **REALITY IS THE REFERENCE™**
 
 Built for the **Nebius × NVIDIA Global AI Hackathon**.
 
-> ### Live verification status (2026-10-03 UTC)
->
-> **The pipeline works end-to-end on a real image** through Nebius Token
-> Factory: real inference, structured output, strict validation, and
-> observations correctly held at `AI_GENERATED` / `UNVERIFIED`.
->
-> **7 non-NVIDIA Vision models were discovered and all 7 passed the full
-> pipeline** with zero rejected entries. The fastest measured was
-> `Qwen/Qwen3.8-27B` (3 069 ms), now configured as the **temporary development
-> model**.
->
-> **The hackathon's NVIDIA requirement is still NOT met.** Both NVIDIA Vision
-> candidates on the platform console — **Cosmos3-Super-Reasoner** and
-> **Nemotron-Nano-V2-12b** — are **absent from Token Factory**: 36 id variants
-> were probed and all returned `HTTP 404 model does not exist`. They are also
-> absent from `/v1/models` on every reachable region. The four NVIDIA models that
-> *are* in the catalogue are all **text-only**.
->
-> **TEMPORARY DEVELOPMENT MODEL — NOT THE NVIDIA HACKATHON MODEL.**
-> Switching back to an eligible NVIDIA model requires only changing
-> `NEBIUS_MODEL`; no code change is needed. See
-> [`docs/DEVPOST-SUBMISSION.md`](./docs/DEVPOST-SUBMISSION.md) for full evidence.
+> ### AI doesn't replace the inspector.
+> ### AI tells the inspector where to look, what changed, why it matters, and what to verify.
 
 ---
 
-## Project
-
-Construction teams photograph a site every day. Turning those photographs into
-*structured project information* — progress, deviations, risks, follow-ups —
-normally means manual review, and it usually stalls when there is no perfect BIM
-model to compare against.
-
-**SiteLens AI Reality Inspector** takes one construction capture, has an
-**NVIDIA open-source multimodal model** (running on **Nebius Token Factory**)
-describe what is actually visible, and converts that description into a
-**strict, structured observation** that a human then verifies.
-
-The defining constraint is deliberate: **AI output is never accepted as ground
-truth.** Every observation is born `AI_GENERATED` + `UNVERIFIED`, and only a
-human can verify or reject it.
-
----
-
-## Problem
-
-| Problem today | What this changes |
-|---|---|
-| Site photos sit in a folder nobody reads | Each capture produces structured, reviewable observations |
-| Progress reporting depends on manual site walks | A model surfaces *candidate* progress indicators for a human to check |
-| "Is this a deviation?" needs an engineer and a BIM model | A model flags *potential* deviations as candidates — never as verdicts |
-| No audit trail of what was observed and when | Every observation carries provider, model, timestamp and a human decision |
-
-**We deliberately do not claim accuracy numbers.** This project demonstrates a
-working, honest pipeline — not a benchmark. No detection-rate or precision
-figure is asserted anywhere in this repository because none has been measured.
-
----
-
-## New hackathon capability
-
-Everything in this repository is new work created for the hackathon. The AI
-Reality Inspector consists of:
-
-1. **A provider abstraction** (`src/providers/provider.ts`) — the UI never
-   calls Nebius directly; it depends on this interface only.
-2. **A real Nebius provider** (`src/providers/nebius-nvidia.provider.ts`)
-   — speaks the OpenAI-compatible Token Factory API.
-3. **A deterministic offline provider** (`src/providers/demo-fixture.provider.ts`)
-   — lets a judge run the entire flow with no account and no network.
-4. **The trust boundary** (`src/inspector.ts`) — the single place where
-   untrusted model output becomes structured product data.
-5. **A strict output contract** (`src/types/observation.ts`) — schema
-   validation that rejects rather than repairs.
-6. **The inspection surface** (`src/session.ts`) — one provenance record
-   shared by the UI and the CLI, so they cannot disagree about what ran.
-7. **Actionable findings** (`src/findings.ts`) — a finding can only be raised
-   from a human-verified observation, and never becomes a production issue.
-8. **Eligibility rules** (`src/eligibility.ts`) — three-state classification
-   so an unverified NVIDIA id can never be presented as satisfying the
-   requirement.
-
----
-## Architecture
-
-```text
-Construction capture (image)
-        ↓
-AI Reality Inspector  (src/inspector.ts — the trust boundary)
-        ↓
-AIProvider interface  (src/providers/provider.ts — provider-neutral)
-        ↓
-NebiusNvidiaProvider
-        ↓
-Nebius Token Factory   https://api.tokenfactory.nebius.com/v1/
-        ↓
-NVIDIA Nemotron-3-Nano-Omni  (multimodal: vision + video + text)
-        ↓
-Raw JSON observations  ← UNTRUSTED
-        ↓
-Strict schema validation  ← invalid entries are DROPPED, never repaired
-        ↓
-AIObservation  (AI_GENERATED + UNVERIFIED)
-        ↓
-Human verification  (VERIFY / REJECT / OVERRIDE)
-```
-
-### Why the provider abstraction matters
-
-The `AIProvider` interface is the seam keeping hackathon infrastructure out of
-the product. Swapping Nebius for another backend means writing one new class —
-no inspector code changes. `AI_PROVIDER` selects the implementation, and there is
-**no silent fallback**: if `AI_PROVIDER=nebius` and the key is missing you get an
-explicit `NOT_CONFIGURED` failure, never a demo result that would misrepresent
-which model actually ran.
-
-### Failure behaviour (fail-closed, verified by tests)
-
-| Situation | Result |
-|---|---|
-| Missing `NEBIUS_API_KEY` | `NOT_CONFIGURED`, **zero observations**, non-zero exit |
-| HTTP 401 / 403 | `AUTHENTICATION`, key never echoed into logs |
-| HTTP 429 | `RATE_LIMITED` |
-| HTTP 5xx / network error | `UNAVAILABLE` |
-| Deadline exceeded | `TIMEOUT` (enforced with `AbortController`) |
-| Non-JSON or missing `observations` | `MALFORMED_RESPONSE` — **never** silently "0 findings" |
-| Invalid field values | Entry dropped and reported in `rejected[]` |
-
-**If Nebius is unavailable, SiteLens does not invent an AI result.**
-
----
-
-## Nebius usage
-
-| Item | Value |
-|---|---|
-| **Service** | Nebius **Token Factory** (serverless, OpenAI-compatible inference) |
-| **Endpoint** | `https://api.tokenfactory.nebius.com/v1/chat/completions` |
-| **Regional variants** | e.g. `https://api.tokenfactory.us-central1.nebius.com/v1/` |
-| **Authentication** | `Authorization: Bearer $NEBIUS_API_KEY` |
-| **Runtime path** | `NebiusNvidiaProvider.inspect()` → base64 data URL → `chat/completions` |
-| **Why required** | The hackathon requires every submission to run on Nebius Token Factory or Nebius AI Cloud |
-
-The base URL is **validated**: only `*.nebius.com` over HTTPS is accepted. A
-misconfigured or hostile `NEBIUS_BASE_URL` falls back to the documented default
-rather than shipping construction imagery to an unintended host.
-
----
-
-## NVIDIA usage
-
-| Item | Value |
-|---|---|
-| **Model** | `nvidia/nemotron-3-nano-omni` |
-| **Provider** | NVIDIA |
-| **Modality** | *UNVERIFIED* — intended multimodal (vision + video + text); **not** confirmed against a live response |
-| **Licence** | NVIDIA Open Model License |
-| **Served via** | Nebius Token Factory |
-| **Availability** | ❌ **NOT SERVED** — live run returned `HTTP 404 — model does not exist` |
-
-> ### Model availability finding
->
-> `nvidia/nemotron-3-nano-omni` returns `HTTP 404 — model does not exist` and is
-> absent from every reachable region. The four NVIDIA models that *are* in the
-> catalogue are all **text-only** (verified by sending a real image). The two
-> NVIDIA **Vision** candidates shown on the platform console —
-> `Cosmos3-Super-Reasoner` and `Nemotron-Nano-V2-12b` — are **not served by
-> Token Factory at all**; 36 id variants were probed and every one returned
-> `404 model does not exist`. They are listed on the platform but are not
-> callable through this account, and no dedicated-deployment endpoint exists.
->
-> Until an eligible NVIDIA Vision model is reachable, this project runs on a
-> **temporary non-NVIDIA Vision model** and **does NOT satisfy the hackathon
-> requirement**. The demo prints this explicitly on every run.
-
-**Vision models verified through the full pipeline (all non-NVIDIA):**
-
-| Model | Provider | API ID | Pipeline |
-|---|---|---|---|
-| Qwen3.8-27B | Qwen | `Qwen/Qwen3.8-27B` | 3 069 ms — **configured** |
-| Kimi-K3 | Moonshot AI | `moonshotai/Kimi-K3` | 4 090 ms |
-| MiniCPM-V-4_5 | OpenBMB | `openbmb/MiniCPM-V-4_5` | 4 337 ms |
-| GLM-5.3-Flash | Z.ai | `zai-org/GLM-5.3-Flash` | 7 006 ms |
-| Kimi-K2.6 | Moonshot AI | `moonshotai/Kimi-K2.6` | 11 625 ms |
-| DeepSeek V4.1 Flash | DeepSeek | `deepseek-ai/DeepSeek-V4.1-Flash` | 16 830 ms |
-| gemma-3-27b-it | Google | `google/gemma-3-27b-it` | 45 509 ms |
-
-Latencies are single samples from one session, **not benchmarks**, and are not a
-quality ranking.
-
-**Selecting a model on Token Factory:** `GET /v1/models` exposes only
-`id`, `created`, `object`, `owned_by` — **no modality metadata** — and a
-well-formed id can still 404. Always verify a candidate by sending a real image;
-text-only deployments reject it at validation with
-`400 This model does not support image input` before any tokens are spent.
-
-**Why the NVIDIA model is intended to qualify:** the hackathon requires *"at least one NVIDIA open source
-model"*, served on Nebius. Nemotron-3-Nano-Omni is an NVIDIA open-source
-multimodal model served by Token Factory. It was chosen over the text-only
-Nemotron reasoning models because **construction analysis is a vision task** —
-the model must read the photograph.
-
-**Input it receives:** the capture image (a `data:image/...;base64` URL) plus an
-instruction to describe only visible reality.
-**Output it produces:** strict JSON — an `observations` array of structured
-entries (category, observation, evidence, confidence, severity, suggested action,
-optional normalized bounding box).
-
-The system prompt explicitly forbids the model from declaring compliance,
-structural safety, or measurements it cannot read from the image.
-
----
-## The observation contract
-
-Every observation is a structured record — never free-form text treated as truth:
-
-```ts
-interface AIObservation {
-  id: string;
-  captureId: string;
-  projectId: string | null;
-  zoneId: string | null;
-  category:
-    | 'OBSERVED_ELEMENT'
-    | 'PROGRESS_OBSERVATION'
-    | 'POTENTIAL_DEVIATION'
-    | 'POTENTIAL_RISK'
-    | 'SUGGESTED_FOLLOW_UP';
-  observation: string;          // one factual sentence about what is VISIBLE
-  evidence: {
-    description: string;        // why the model said it
-    boundingBox: { x, y, width, height } | null;  // normalized [0,1]
-    zoneId: string | null;
-  };
-  confidence: number;           // model confidence in [0,1] — NOT a measurement
-  severity: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH';   // advisory only
-  suggestedAction: 'NO_ACTION' | 'HUMAN_REVIEW' | 'INSPECT_CLOSER'
-                 | 'CAPTURE_REFERENCE_PLAN' | 'SCHEDULE_FOLLOW_UP';
-  model: string;
-  provider: string;
-  generatedAt: string;
-  origin: 'AI_GENERATED';        // set once, at creation
-  verificationStatus: 'UNVERIFIED' | 'VERIFIED' | 'REJECTED' | 'OVERRIDDEN';
-  review: { status, reviewer, reviewedAt, note } | null;
-}
-```
-
-### The trust rules, and why they are enforced in code
-
-1. **`origin` is always `AI_GENERATED`** and **`verificationStatus` always starts
-   `UNVERIFIED`.** These are set in exactly one place and are never derived from
-   model content — a model cannot talk its way into being "verified".
-2. **Confidence cannot auto-verify.** A `0.99` observation is still `UNVERIFIED`
-   until a human acts. There is a test asserting exactly this.
-3. **Validation rejects, it never repairs.** A non-numeric confidence, an
-   unknown category, or a pixel-space bounding box causes the entry to be
-   **dropped and reported** — not coerced into something that looks valid.
-4. **Model output is untrusted input.** All model strings are rendered as plain
-   text in any UI; this repository injects no model output into HTML.
-5. **A provider outage yields zero observations**, never a fabricated result.
-
----
-
-## Running locally
-
-Requires **Node.js 22.6+** (uses native TypeScript execution). No build step.
+## Run it
 
 ```bash
-git clone <this-repo>
-cd sitelens-ai-reality-inspector
-npm install
-```
+npm install          # zero runtime dependencies
+npm test             # 180 tests
+npm run typecheck    # strict tsc, no emit
 
-### The inspector (recommended)
+# Deterministic offline demo (no network, no key needed):
+AI_PROVIDER=demo npm run ui     # -> http://127.0.0.1:4317
 
-```bash
+# Real inference on Nebius Token Factory:
 AI_PROVIDER=nebius npm run ui
-# open http://127.0.0.1:4317
 ```
 
-The UI is a local inspection instrument: pick a scene, press **Run AI
-Inspection**, read the observations against the evidence boxes drawn over the
-capture, then review each one as a named human. The server binds to loopback
-only. It works with the offline provider too, so it runs with no account and no
-network.
-
-### Option A — deterministic demo (no account, no network)
-
-```bash
-AI_PROVIDER=demo npm run demo
-```
-
-### Option B — real Nebius + NVIDIA
-
-```bash
-cp .env.example .env      # then set NEBIUS_API_KEY
-export NEBIUS_API_KEY="<your Token Factory key>"
-AI_PROVIDER=nebius npm run demo
-```
-
-Get a key at **https://tokenfactory.nebius.com**.
-
-Select the model with `NEBIUS_MODEL`. The default is the intended NVIDIA model;
-any callable vision-capable model id works for development, and no code change is
-needed to switch. See "Model availability finding" for what is currently
-reachable from this account.
-
-### Compatibility evaluation
-
-```bash
-AI_PROVIDER=nebius npm run eval
-```
-
-Runs each generated construction scene through the real pipeline and reports
-request success, accepted and rejected counts, and whether the trust boundary
-held. It is a **reliability report, not an accuracy benchmark**: there is no
-ground truth, so no correctness score is produced.
-
-### Tests
-
-```bash
-npm test        # 89 tests
-npm run typecheck
-```
+Node ≥ 22.6 (uses native type-stripping; there is no build step).
 
 ---
 
-## Environment variables
+## The 60-second demo path
 
-**Variable names only — no secret values are ever documented or committed.**
+1. `npm run ui`, open `http://127.0.0.1:4317`.
+2. **Capture** — click *Steel frame — open edge* under "Demo captures".
+3. The **Reality vs expected** table appears immediately: six expected items,
+   compared against what the model saw.
+4. Click **Inspect reality**.
+5. The tool moves to **Evidence**: the capture fills the stage, numbered boxes
+   mark where the AI flagged something, and the right rail reads
+   `REALITY / INSPECTION / FINDINGS / CONFIDENCE / OVERALL`.
+6. Click any finding. It expands to **WHAT · WHERE · WHY FLAGGED · EXPECTED ·
+   DIFFERENCE · CONFIDENCE · RECOMMENDED ACTION · EVIDENCE · VERIFICATION**,
+   and its region lights up on the image.
+7. Type a name in **Reviewer** and press **CONFIRM**.
+   The card flips from `AI SUSPECTED → UNVERIFIED` to `HUMAN VERIFIED →
+   VERIFIED`, records who and when, and drops out of the priority list.
 
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `NEBIUS_API_KEY` | yes for `nebius` | — | Token Factory credential (**SECRET**) |
-| `NEBIUS_BASE_URL` | no | `https://api.tokenfactory.nebius.com/v1/` | Endpoint; `*.nebius.com` HTTPS only |
-| `NEBIUS_MODEL` | no | `nvidia/nemotron-3-nano-omni` | Model id. **Intended NVIDIA model (404 today).** Set to any callable Vision id — e.g. `Qwen/Qwen3.8-27B` — to run for development. Switching is configuration only |
-| `NEBIUS_TIMEOUT_MS` | no | `60000` | Per-call deadline |
-| `AI_PROVIDER` | no | `nebius` | `nebius` (real) or `demo` (offline) |
-| `AI_MAX_OBSERVATIONS` | no | `6` | Cap on observations per capture |
-## Demo — how a judge reproduces it
-
-```bash
-AI_PROVIDER=demo npm run demo
-```
-
-The run prints, in order:
-
-1. **STEP 1** — the selected capture (capture / project / zone).
-2. **STEP 2** — the AI Reality Inspector running, naming the provider and model.
-3. **STEP 3** — structured observations, each tagged
-   `origin: AI_GENERATED`, `verification: UNVERIFIED`, with evidence, confidence
-   band, severity and suggested action.
-4. **STEP 4** — a **human verification** action showing the status change from
-   `UNVERIFIED` → `VERIFIED`.
-5. **Provenance** — provider, model, and an explicit `hackathon-eligible: YES/NO`
-   line so it is never ambiguous which run was real.
-
-To prove the fail-closed behaviour, run without a key:
-
-```bash
-AI_PROVIDER=nebius npm run demo    # no NEBIUS_API_KEY
-# → INSPECTION FAILED (NOT_CONFIGURED), zero observations, exit code 1
-```
+Nothing is verified until step 7. That is the product, not a caveat.
 
 ---
 
-## Security posture
+## What is actually AI, and what is not
 
-- **Secrets**: read from the environment only; sent as a bearer header and
-  nowhere else. `redactSecrets()` masks the key and any `Bearer …` token in error
-  paths. No secret is written to disk, logged, or returned.
-- **Imagery**: treated as sensitive. It is transmitted only to a validated
-  `*.nebius.com` HTTPS endpoint.
-- **SSRF guard**: a non-Nebius or non-HTTPS `NEBIUS_BASE_URL` is rejected and
-  replaced with the documented default.
-- **No customer data**: the committed demo asset is a generated 1×1 PNG
-  placeholder. No customer imagery, media, or database dumps are in this repo.
-- **Untrusted output**: model output is validated and treated as data, never as
-  instructions or markup.
+This matters more than any feature, so it is stated bluntly.
+
+| Stage | Who does it | What it means |
+|---|---|---|
+| **SEE** | the model | Reads the photograph. Emits `elements` with an optional `count`. |
+| **UNDERSTAND** | the model | Names the construction elements it can see. |
+| **COMPARE** | **this repository, in code** | Compares expected vs detected with plain arithmetic. |
+| **INSPECT** | code | Turns a mismatch into a finding with evidence. |
+| **EXPLAIN** | code + model text | WHAT / WHERE / WHY / EVIDENCE. |
+| **RECOMMEND** | code + model text | A physical check a person can carry out. |
+| **VERIFY** | **a named human** | The only path from candidate to settled. |
+
+**The comparison is deliberately not in the prompt.** A model asked to
+"compare expected 12 columns against this image" will agree with whatever it
+imagined. Here the arithmetic is ours (`src/compare.ts`) and the evidence is the
+model's, so the numbers on screen are arithmetic rather than a model's opinion.
+
+### What the tool refuses to do
+
+- **It never invents a number.** If the model will not commit to a count, the
+  result is `NOT_DETERMINABLE`, not `0`.
+- **It never turns an unknown into a defect.** A `COUNT` expectation the
+  capture cannot settle is `UNDETERMINED` → severity `INFO`, kept out of the
+  ranked priority list, and reported separately as *"this capture cannot
+  settle"*. It is open work, but it is not somewhere to look for a defect.
+- **It never manufactures engineering claims.** The prompt forbids compliance
+  and safety conclusions, and every comparison finding recommends a *physical*
+  verification, with counts labelled `VISUAL_COUNT — not a measured quantity`.
+- **It never fakes evidence geometry.** An evidence box is drawn only when the
+  model returned real pixel coordinates. When it did not, the card says so.
+- **It never auto-verifies.** Confidence is explicitly not acceptance.
 
 ---
 
-## Testing
+## Live model status (measured 2026-10-04)
 
-89 tests, all passing (`npm test`), covering:
+**The hackathon's NVIDIA requirement is NOT met, and this repository does not
+pretend otherwise.**
 
-| Area | Covered |
+Every NVIDIA model in the Token Factory catalogue was probed with real image
+input. All four are **text-only**:
+
+| Model | Image input |
 |---|---|
-| Request validation | empty image, non-image media type |
-| Response validation | valid, missing fields, wrong types, unknown categories, out-of-range confidence, pixel-space bounding boxes, overlong strings |
-| Malformed model output | non-JSON, JSON without `observations`, missing `choices` |
-| Nebius failure | 401, 429, 503, network error |
-| Timeout | a hanging provider is aborted at the deadline → `TIMEOUT` |
-| Missing API key | `NOT_CONFIGURED`, and **no network call is made** |
-| Credential handling | bearer header shape, redaction, no leak in error details |
-| Host validation | non-Nebius and non-HTTPS base URLs rejected |
-| Unverified status | every observation starts `AI_GENERATED` + `UNVERIFIED` |
-| Human verification | VERIFY, REJECT, unknown id refused, anonymous reviewer refused |
-| Confidence safety | `0.99` confidence does **not** auto-verify |
-| No fabricated results | provider failure → zero observations |
-| Demo flow | offline end-to-end run |
-| Prompt contract | no pipe-separated choice list in any JSON value; each template field carries one legal enum value; the full legal set is still named in prose; the live "combined category" defect shape is **still rejected** by validation |
-| Demo provenance | hackathon eligibility follows the **model id**, not the provider class — a non-NVIDIA model on the live path reports NOT eligible; provenance always prints, even with zero observations |
-| Failure modes | HTTP 400/404/429/500/503, timeout, missing credential, non-image media type, empty and malformed images, oversized image; every one produces **zero observations** and no verified truth |
-| Response integrity | non-JSON, missing `choices`, missing `observations` array, invalid enum, missing field, pixel-space bounding box — all rejected or classified distinctly |
-| Outcome honesty | provider failure, validation failure and a genuinely empty result are three **separate** outcomes |
-| Findings | only a `VERIFIED` decision raises a finding; `REJECTED` and `NEEDS_REVIEW` never do |
-| Geometry | normalized boxes project onto real pixels; a missing box or missing image header yields no box rather than a guessed one |
+| `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `HTTP 400 This model does not support image input` |
+| `nvidia/nemotron-3-super-120b-a12b` | `HTTP 400 This model does not support image input` |
+| `nvidia/Nemotron-3-Ultra-550b-a55b` | `HTTP 400 This model does not support image input` |
+| `nvidia/Nemotron-3_5-Lightning` | `HTTP 400 This model does not support image input` |
 
-The prompt-contract tests guard a defect found in a **live** run: the prompt
-had presented enums as `"A | B | C"` inside the JSON template, and models copy
-such placeholders verbatim, producing `"category": "OBSERVED_ELEMENT |
-PROGRESS_OBSERVATION"` — which strict validation correctly rejected. The prompt
-was fixed; the validator was not weakened.
+Since this product's entire value is looking at a photograph, the default is the
+vision model that actually **inspects** best:
 
-No accuracy or performance statistics are asserted anywhere.
-
----
-
-## Future SiteLens integration (NOT implemented here)
-
-Deliberately out of scope. Proposed future shape:
-
-```text
-Existing SiteLens capture + tenancy
-        ↓
-AI Reality Inspector API (this contract)
-        ↓
-Nebius Token Factory
-        ↓
-NVIDIA Nemotron multimodal model
-        ↓
-Structured observation
-        ↓
-SiteLens observation / risk / issue  (human-verified)
+```
+NEBIUS_MODEL=openbmb/MiniCPM-V-4_5
 ```
 
-Integration would require mapping `captureId`/`projectId` to SiteLens tenancy,
-enforcing project-ancestry authorization before any capture is read, and
-persisting verified observations into SiteLens' own schema. **None of this is
-implemented, and this repository contains no SiteLens code.**
+That is **real inference on real imagery**. It is simply not an NVIDIA model,
+so `classifyEligibility` reports `NOT_ELIGIBLE` and the UI says so on every
+run. If an NVIDIA vision model appears, changing `NEBIUS_MODEL` is the only
+edit required.
+
+### Measured vision-model bake-off
+
+All three vision-capable catalogue models were run through the **same**
+repository prompt, schema, validators and image bytes, at
+`NEBIUS_MAX_TOKENS=3000`, over five real construction photographs:
+
+| Model | Usable images | Elements | Findings | Observations | Avg latency |
+|---|---|---|---|---|---|
+| `openbmb/MiniCPM-V-4_5` **(default)** | **4/5** | **16** | **9** | **9** | 6,228 ms |
+| `google/gemma-3-27b-it` | 2/5 | 5 | 2 | 3 | 5,897 ms |
+| `Qwen/Qwen3.8-27B` | 1/5 | 5 | 1 | 3 | 12,863 ms |
+
+MiniCPM was chosen on **inspection yield, not speed**. Gemma is marginally
+quicker per call, but it returned unusable output on three of five photographs,
+so it cannot be the default for a product whose job is to look at a picture.
+
+> **Qwen3.8-27B is not broken.** It is a *reasoning* model: it spent 3,034–4,156
+> completion tokens on reasoning before answering, so a small budget truncates it
+> mid-JSON. It needs `NEBIUS_MAX_TOKENS >= 6000` and runs roughly twice as slow.
+
+### `NEBIUS_MAX_TOKENS` is measured, not guessed
+
+`1400` was the old default and it is **too small for real photographs** — MiniCPM
+truncated mid-JSON on site photos and returned unparseable output. A token sweep
+showed `3000` removes that truncation while staying tight enough that the model
+does not pad its answer. The budget was raised on evidence.
+
+### Validated on a wider set
+
+The selected model was then run through the **complete server pipeline** — HTTP
+API, provider, validation, comparison, synthesis, cache and verification — on 18
+real construction photographs:
+
+| Metric | Result |
+|---|---|
+| Inspections attempted / succeeded | 18 / **18** |
+| Provider failures | **0** |
+| Malformed responses | **0** |
+| Fresh AI inferences | **18** |
+| Cache hits on repeat run | **5/5 served** (13 ms vs ~5,100 ms) |
+| Detected elements / findings | 51 / 88 |
+| Comparison MATCH / ATTENTION / UNDETERMINED | 36 / 6 / 66 |
+| Human verifications persisted | 18 |
+| Average latency | 5,140 ms |
+
+The high `UNDETERMINED` count is the system working correctly: a single
+photograph usually cannot settle every expected-state question, and the UI says
+"undetermined" instead of guessing.
+
+**For a live demo, use the deterministic provider** (`AI_PROVIDER=demo`) — it is
+instant and exercises every stage. A real live run takes about five seconds on
+MiniCPM.
+
+`AI_PROVIDER=demo` uses a deterministic offline fixture. It is labelled
+**"DEMO FIXTURE — NOT AI INFERENCE"** in the masthead, and every finding it
+produces carries `synthetic: true`. A fixture is never presented as a model.
+
 
 ---
+
+### Where a result actually came from
+
+A fast response is not automatically a fresh one. Every run is labelled with its
+true origin in the masthead, and the label is derived from how the result was
+produced, never from how fast it arrived:
+
+| Badge | Meaning |
+|---|---|
+| *(none)* | `FRESH` — a real model call was made for this run. |
+| `CACHED AI RESULT — inference from <timestamp>` | A **real** AI result, reused from an earlier identical inference. The original time is shown. |
+| `DEMO FIXTURE — NOT AI INFERENCE` | The offline deterministic fixture. Never presented as a model. |
+
+Reuse caching is **opt-in** via the `reuse cached AI` checkbox, so the default
+is always a fresh call. The cache is:
+
+- **content-addressed** — keyed on the image bytes, the model id, the expected
+  state and a schema version, so changing any of them cannot serve a stale answer;
+- **success-only** — a failed, malformed or fully-rejected response is never
+  stored, so a bad result can never come back as a fast "success";
+- **re-validated on read** — a cached entry is passed back through the validators
+  rather than trusted;
+- **never used for the demo fixture**, where a "cached" label would be
+  actively misleading.
+
+`GET /api/cache` reports the current entry count; `POST /api/cache/clear` empties
+it.
+
+Zero runtime dependencies, no build step, no framework.
+
+```
+src/
+  types/inspection.ts    the domain contract + strict validation of model output
+  compare.ts             REALITY vs EXPECTED — deterministic, in code
+  synthesis.ts           findings, priorities, reality brief, counters
+  expected-state.ts      the lightweight comparison reference
+  inspector.ts           the only place untrusted output becomes product data
+  session.ts             one inspection session; derives every view
+  server.ts              loopback JSON API + static assets
+  ui/                    index.html / app.css / app.js as text modules
+  providers/             AIProvider → Nebius (real) | demo-fixture (offline)
+```
+
+**Trust boundary.** Every model response is untrusted. Entries that fail
+validation are **dropped and reported**, never repaired or coerced. A provider
+failure produces **zero** findings — an outage can never look like a working
+inspection. Provider failure, validation failure and a genuinely empty result
+are three distinct outcomes.
+
+---
+
+## Tests
+
+`npm test` — 180 tests, no network access.
+
+| Area | What is locked in |
+|---|---|
+| Comparison | A count mismatch is ATTENTION; an uncountable or unreported element is UNDETERMINED, never a fabricated shortfall. Order-independent. |
+| Synthesis | MATCH never becomes a finding. UNDETERMINED is never ranked as a defect to look for. A clean run reports `NO_ATTENTION` rather than inventing drama. |
+| Session | A human review **survives a re-render**; an anonymous review is refused; verifying removes an item from the work list. |
+| Expected state | Presets stay `PRESET`, operator edits are always `OPERATOR` — provenance is never laundered. |
+| Validation | Unknown enums, pixel-space boxes, out-of-range confidence and impossible counts are all rejected. |
+| Trust | Every finding starts `UNVERIFIED`. Confidence never auto-verifies. A provider failure yields nothing. |
+| Provider | Bounded completion, bearer auth, image as data URL, every HTTP failure mapped explicitly. |
+| UI | Assets parse; the tablist is real; an inspection only advances when it actually completed. |
+
+**No accuracy, precision or detection-rate number is asserted anywhere**,
+because none has been measured. This is a reliability and honesty suite.
+
+---
+
+## Scope
+
+Deliberately **not** implemented, and not stubbed: organizations, RBAC,
+tenancy, BIM management, issue tracking, enterprise administration. Those are
+not what this hackathon demonstrates, and pretending otherwise would dilute the
+one inspection loop that works.
+
+See [`docs/DEVPOST-SUBMISSION.md`](./docs/DEVPOST-SUBMISSION.md) for the
+submission narrative and full eligibility evidence.
 
 ## Licence
 
 MIT — see [LICENSE](./LICENSE).
 
-The Nemotron model is licensed by NVIDIA (NVIDIA Open Model License); it is
-called remotely and is **not redistributed** here.
-
-## Relationship to SiteLens
-
-This is a standalone hackathon repository. It contains no SiteLens production
-code, no credentials, and no customer data. The "SiteLens" name and the
-*Reality Is the Reference™* principle are used to describe the capability and
-its intent.
-
-`.env` is git-ignored. `.env.example` contains placeholders only.
-
----
+`.env` is git-ignored. `.env.example` contains placeholders only. No customer
+imagery is present; the bundled demo captures are synthetic scenes generated in
+code.

@@ -2,10 +2,11 @@
  * Deterministic offline provider so the full flow can be run without a Nebius
  * account or network access.
  *
- * It returns fixed synthetic observations that pass through the same
- * validation as a real model response and still start UNVERIFIED. It does not
- * call Nebius, so a demo run does not satisfy the hackathon's requirement to
- * run on Nebius with an NVIDIA model.
+ * Returns fixed synthetic content that passes through the same validation as a
+ * real model response and still starts UNVERIFIED.
+ *
+ * The fixture is not AI inference. Every result derived from it is marked
+ * `synthetic: true` all the way to the UI, which labels it on screen.
  */
 
 import type { AIProvider, InspectRequest, RawProviderResult } from './provider.ts';
@@ -14,7 +15,85 @@ import type { RawModelObservation } from '../types/observation.ts';
 export const DEMO_PROVIDER_NAME = 'demo-fixture' as const;
 export const DEMO_MODEL_ID = 'demo-fixture-vision-v1' as const;
 
-/** Fixed synthetic content. Deterministic: the same input always yields this. */
+/**
+ * Fixed synthetic content. Deterministic: the same input always yields this.
+ *
+ * These numbers are chosen to demonstrate all three comparison outcomes at once
+ * - a match, a clear numeric shortfall, and an item the capture cannot settle -
+ * so the demo shows a credible mixed result rather than a flattering one.
+ */
+const DEMO_ELEMENTS: readonly unknown[] = Object.freeze([
+  {
+    element: 'COLUMN',
+    present: true,
+    count: 4,
+    confidence: 0.86,
+    evidence: 'Four vertical structural members are distinguishable across the frame.',
+    bounding_box: { x: 0.12, y: 0.28, width: 0.76, height: 0.42 },
+  },
+  {
+    element: 'SLAB',
+    present: true,
+    count: null,
+    confidence: 0.78,
+    evidence: 'A large horizontal deck surface spans the lower half of the frame.',
+    bounding_box: { x: 0.0, y: 0.62, width: 1.0, height: 0.38 },
+  },
+  {
+    element: 'WALL',
+    present: true,
+    count: null,
+    confidence: 0.62,
+    evidence: 'Masonry is visible at the left edge of the frame.',
+    bounding_box: { x: 0.0, y: 0.3, width: 0.2, height: 0.5 },
+  },
+  {
+    element: 'MEP_ROUGH_IN',
+    // Deliberately omitted count: this is the honest "I can see services but I
+    // will not put a number on them" case the product is built to handle.
+    confidence: 0.41,
+    evidence: 'Services are partially visible behind the frame; extent is unclear.',
+    present: true,
+    bounding_box: null,
+  },
+]);
+
+const DEMO_FINDINGS: readonly unknown[] = Object.freeze([
+  {
+    title: 'Column spacing looks irregular',
+    category: 'DEVIATION',
+    severity: 'MEDIUM',
+    element: 'COLUMN',
+    location: 'across the mid-ground',
+    observation: 'The visible columns are not evenly spaced across the frame.',
+    reason:
+      'Column spacing appears to vary, which is commonly caused by a setting-out ' +
+      'error rather than a design change.',
+    evidence: 'The gaps between adjacent vertical members differ visibly.',
+    confidence: 0.72,
+    recommendation:
+      'Verify column positions against the setting-out drawing using a physical ' +
+      'survey measurement before any corrective work is planned.',
+    bounding_box: { x: 0.12, y: 0.28, width: 0.76, height: 0.42 },
+  },
+  {
+    title: 'Open slab edge with no visible edge protection',
+    category: 'SAFETY_ATTENTION',
+    severity: 'HIGH',
+    element: 'SLAB',
+    location: 'upper left of the deck',
+    observation: 'A deck edge is exposed with no continuous barrier visible.',
+    reason:
+      'Edge protection is normally present at an open deck. Its absence in this ' +
+      'view is either a genuine gap or simply outside the frame.',
+    evidence: 'The deck perimeter shows no continuous rail or barrier.',
+    confidence: 0.58,
+    recommendation:
+      'Confirm edge protection physically before the next activity starts on this level.',
+    bounding_box: { x: 0.02, y: 0.58, width: 0.3, height: 0.14 },
+  },
+]);
+
 const DEMO_OBSERVATIONS: readonly RawModelObservation[] = Object.freeze([
   {
     category: 'OBSERVED_ELEMENT',
@@ -25,7 +104,7 @@ const DEMO_OBSERVATIONS: readonly RawModelObservation[] = Object.freeze([
     confidence: 0.82,
     severity: 'INFO',
     suggested_action: 'NO_ACTION',
-    bounding_box: { x: 0.2, y: 0.15, width: 0.6, height: 0.5 },
+    bounding_box: { x: 0.12, y: 0.28, width: 0.76, height: 0.42 },
   },
   {
     category: 'PROGRESS_OBSERVATION',
@@ -48,33 +127,11 @@ const DEMO_OBSERVATIONS: readonly RawModelObservation[] = Object.freeze([
     confidence: 0.58,
     severity: 'MEDIUM',
     suggested_action: 'INSPECT_CLOSER',
-    bounding_box: { x: 0.05, y: 0.05, width: 0.35, height: 0.2 },
-  },
-  {
-    category: 'POTENTIAL_RISK',
-    observation: 'Material stacks are positioned within the apparent work area.',
-    evidence: {
-      description: 'Stacked materials are visible on the ground near the structure base.',
-    },
-    confidence: 0.44,
-    severity: 'LOW',
-    suggested_action: 'HUMAN_REVIEW',
-    bounding_box: null,
-  },
-  {
-    category: 'SUGGESTED_FOLLOW_UP',
-    observation: 'A reference-plan overlay would help confirm whether the visible frame matches design.',
-    evidence: {
-      description: 'No reference drawing is available in this image to compare against.',
-    },
-    confidence: 0.4,
-    severity: 'INFO',
-    suggested_action: 'CAPTURE_REFERENCE_PLAN',
-    bounding_box: null,
+    bounding_box: { x: 0.02, y: 0.58, width: 0.3, height: 0.14 },
   },
 ]);
 
-/** Deterministic, offline, credential-free provider used for demos/tests. */
+/** Deterministic, offline, credential-free provider used for demos and tests. */
 export class DemoFixtureProvider implements AIProvider {
   public readonly name = DEMO_PROVIDER_NAME;
   public readonly model = DEMO_MODEL_ID;
@@ -84,6 +141,8 @@ export class DemoFixtureProvider implements AIProvider {
     return {
       provider: this.name,
       model: this.model,
+      elements: structuredClone(DEMO_ELEMENTS) as unknown[],
+      findings: structuredClone(DEMO_FINDINGS) as unknown[],
       observations: DEMO_OBSERVATIONS.map((entry) => structuredClone(entry)),
     };
   }

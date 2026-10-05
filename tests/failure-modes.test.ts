@@ -105,8 +105,6 @@ test('an oversized image is rejected by the provider, not silently truncated', a
   assert.equal(inspector.listObservations(IMAGE.captureId).length, 0);
 });
 
-// ---- transport and HTTP failures -----------------------------------------
-
 for (const status of [400, 404, 429, 500, 503] as const) {
   test(`HTTP ${status} produces no observation and no verified truth`, async () => {
     await assertNoTruthFromFailure(
@@ -166,8 +164,6 @@ test('a hanging provider is aborted at the deadline and yields nothing', async (
   assert.equal(outcome.status, 'FAILED');
   if (outcome.status === 'FAILED') assert.equal(outcome.kind, 'TIMEOUT');
 });
-
-// ---- malformed responses -------------------------------------------------
 
 test('a non-JSON body is MALFORMED_RESPONSE, never an empty success', async () => {
   const provider = providerReturning({ body: 'this is not json' });
@@ -236,8 +232,6 @@ test('invalid enum, missing field and pixel-space boxes are all rejected', async
   assert.equal(result.observations.length, 0);
   assert.equal(result.rejected.length, 3);
 });
-
-// ---- trust boundary ------------------------------------------------------
 
 test('only a VERIFIED decision raises a finding', async () => {
   const capture = demoCaptures()[0];
@@ -331,7 +325,80 @@ test('anonymous review is refused rather than recorded unattributed', () => {
   assert.equal(reviewed, null);
 });
 
-// ---- provenance on degenerate results ------------------------------------
+// ---- session completion status is about usable output, not observations ----
+
+test('elements-only response is COMPLETED, not VALIDATION_EMPTY', async () => {
+  const capture = demoCaptures()[0];
+  assert.ok(capture);
+  const content = JSON.stringify({
+    observations: [],
+    elements: [{
+      element: 'COLUMN', present: true, count: 4,
+      confidence: 0.72, evidence: 'Four poured columns visible mid-frame.',
+    }],
+    findings: [],
+  });
+  const session = new InspectionSession(
+    providerReturning({ body: envelope(content) }),
+    capture, 'proj_elems', 'zone_elems',
+  );
+  const view = await session.run();
+
+  assert.equal(view.observations.length, 0);
+  assert.ok(view.detections.length > 0, 'the elements must survive validation');
+  assert.equal(view.outcome, 'COMPLETED');
+});
+
+test('findings-only response is COMPLETED, not VALIDATION_EMPTY', async () => {
+  const capture = demoCaptures()[0];
+  assert.ok(capture);
+  const content = JSON.stringify({
+    observations: [],
+    elements: [],
+    findings: [{
+      title: 'Formwork left in place',
+      observation: 'Column formwork still on at level 2.',
+      reason: 'Not yet struck, which is normal at this stage.',
+      evidence: 'Timber shutters visible around the column heads.',
+      recommendation: 'Confirm the strike sequence with the site engineer.',
+      category: 'INCOMPLETE_WORK', severity: 'LOW', confidence: 0.6,
+    }],
+  });
+  const session = new InspectionSession(
+    providerReturning({ body: envelope(content) }),
+    capture, 'proj_find', 'zone_find',
+  );
+  const view = await session.run();
+
+  assert.equal(view.observations.length, 0);
+  assert.ok(view.inspectionFindings.length > 0, 'the findings must survive validation');
+  assert.equal(view.outcome, 'COMPLETED');
+});
+
+test('a genuinely empty response is still VALIDATION_EMPTY', async () => {
+  const capture = demoCaptures()[0];
+  assert.ok(capture);
+  const session = new InspectionSession(
+    providerReturning({ body: envelope('{"observations":[],"elements":[],"findings":[]}') }),
+    capture, 'proj_empty2', 'zone_empty2',
+  );
+  assert.equal((await session.run()).outcome, 'VALIDATION_EMPTY');
+});
+
+test('a fully rejected response is still VALIDATION_FAILED, not COMPLETED', async () => {
+  const capture = demoCaptures()[0];
+  assert.ok(capture);
+  const content = JSON.stringify({
+    observations: [{ ...VALID_ENTRY, category: 'NOT_A_CATEGORY' }],
+    elements: [{ element: 'NOT_AN_ELEMENT', present: 'yes' }],
+    findings: [],
+  });
+  const session = new InspectionSession(
+    providerReturning({ body: envelope(content) }),
+    capture, 'proj_bad2', 'zone_bad2',
+  );
+  assert.equal((await session.run()).outcome, 'VALIDATION_FAILED');
+});
 
 test('provenance survives a zero-observation run', async () => {
   const capture = demoCaptures()[0];
@@ -372,8 +439,6 @@ test('provenance records a failed run as not executed, with no observations', as
   assert.ok(view.failure);
 });
 
-// ---- geometry ------------------------------------------------------------
-
 test('a missing or malformed image header yields no dimensions, not a guess', () => {
   assert.equal(readImageDimensions(Buffer.from('not an image at all')), null);
   assert.equal(readImageDimensions(Buffer.alloc(4)), null);
@@ -404,8 +469,6 @@ test('normalized boxes project onto real pixel coordinates', () => {
   assert.equal(projected.width, 192);
   assert.equal(projected.height, 120);
 });
-
-// ---- eligibility cannot be falsely claimed --------------------------------
 
 test('a non-NVIDIA model on the live path is never reported eligible', () => {
   assert.equal(

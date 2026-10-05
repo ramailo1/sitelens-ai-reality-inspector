@@ -1,18 +1,13 @@
 /**
  * Compatibility evaluation.
  *
- * These cases measure whether the pipeline behaves reliably across a spread of
- * construction conditions and hostile inputs. They are a RELIABILITY suite, not
- * an accuracy benchmark: there is no ground truth here, so no correctness score
- * is computed and none should be inferred. A model that returns plausible text
- * for a scene it cannot see would still pass.
+ * A RELIABILITY suite, not an accuracy benchmark: there is no ground truth here,
+ * so no correctness score is computed and none should be inferred. A model that
+ * returns plausible text for a scene it cannot see would still pass.
  *
- * What is measured:
- *   - whether the request completed
- *   - whether structured output parsed
- *   - how many entries survived strict validation
- *   - whether invalid output was rejected rather than repaired
- *   - whether the trust boundary held on every path
+ * What is measured: whether the request completed, whether structured output
+ * parsed, how many entries survived strict validation, whether invalid output
+ * was rejected rather than repaired, and whether the trust boundary held.
  */
 
 import { createProvider } from './providers/factory.ts';

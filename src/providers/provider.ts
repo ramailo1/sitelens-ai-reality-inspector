@@ -1,10 +1,10 @@
 /**
  * Provider abstraction for the AI Reality Inspector.
  *
- * The inspector depends on this interface only, so provider details (endpoints,
- * credentials) stay out of the rest of the codebase. Providers return raw,
- * unvalidated output; validation belongs to the inspector so every provider is
- * held to the same trust boundary.
+ * The inspector depends on this interface only, so endpoints and credentials
+ * stay out of the rest of the codebase. Providers return raw, unvalidated
+ * output; validation belongs to the inspector so every provider is held to the
+ * same trust boundary.
  */
 
 import type { RawModelObservation } from '../types/observation.ts';
@@ -24,6 +24,12 @@ export interface InspectRequest {
   /** Optional project scope, for provenance. Never sent to the model. */
   readonly projectId?: string | null | undefined;
   readonly zoneId?: string | null | undefined;
+  /**
+   * The operator's expected state, rendered as a short plain-text list.
+   * Sent as LOOK-FOR context only: the provider never compares, and the
+   * deterministic comparison happens back in the inspector.
+   */
+  readonly expectedSummary?: string | null | undefined;
 }
 
 /** Metadata describing WHICH model/provider produced a result. */
@@ -38,6 +44,10 @@ export interface ProviderMetadata {
  */
 export interface RawProviderResult extends ProviderMetadata {
   readonly observations: readonly RawModelObservation[];
+  /** What the model says it can SEE. Unvalidated until the inspector checks it. */
+  readonly elements: readonly unknown[];
+  /** Candidate attention areas. Unvalidated until the inspector checks it. */
+  readonly findings: readonly unknown[];
 }
 
 /**

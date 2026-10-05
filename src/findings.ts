@@ -163,10 +163,6 @@ export class FindingLedger {
     return [...this.rows.values()];
   }
 
-  public byCapture(captureId: string): Finding[] {
-    return this.all().filter((f) => f.captureId === captureId);
-  }
-
   /** Advance a finding's lifecycle. The only way a finding leaves OPEN. */
   public setState(id: string, state: FindingState): Finding | null {
     const existing = this.rows.get(id);

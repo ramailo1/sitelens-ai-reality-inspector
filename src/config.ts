@@ -14,6 +14,12 @@ export interface ProviderConfig {
   readonly model: string;
   readonly timeoutMs: number;
   readonly maxObservations: number;
+  /**
+   * Upper bound on the completion length. Essential rather than cosmetic: some
+   * catalogue models are reasoning models that will otherwise consume the entire
+   * request deadline emitting tokens and never return the JSON object.
+   */
+  readonly maxTokens: number;
 }
 
 /** Secret material, kept separate so it is never logged or serialised. */
@@ -25,16 +31,34 @@ export interface ResolvedCredentials {
 export const DEFAULT_NEBIUS_BASE_URL = 'https://api.tokenfactory.nebius.com/v1/';
 
 /**
- * Default NVIDIA open-source model served by Nebius Token Factory.
+ * Default vision model.
  *
- * Nemotron-3-Nano-Omni is NVIDIA open-source (NVIDIA Open Model License) and
- * multimodal (vision + video + text), which is what construction imagery
- * analysis requires. See README "NVIDIA usage" for eligibility evidence.
+ * Chosen by measurement, not preference: a bake-off of the three
+ * vision-capable models in the catalogue over five real construction
+ * photographs, at NEBIUS_MAX_TOKENS=3000, judged by this repository's own
+ * validators. MiniCPM returned usable output on 4/5 images against 2/5 for
+ * gemma-3-27b-it and 1/5 for Qwen3.8-27B, and produced the elements and findings
+ * the rest of the pipeline reasons about. See README for the full table.
+ *
+ * Not an NVIDIA model. Every nvidia/* id in the catalogue was probed with real
+ * image input and all returned `HTTP 400 This model does not support image
+ * input`, so eligibility is reported as NOT_ELIGIBLE rather than claimed.
  */
-export const DEFAULT_NEBIUS_MODEL = 'nvidia/nemotron-3-nano-omni';
+export const DEFAULT_NEBIUS_MODEL = 'openbmb/MiniCPM-V-4_5';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OBSERVATIONS = 6;
+
+/**
+ * Completion budget.
+ *
+ * 1400 was the old default and it truncated MiniCPM mid-JSON on real site
+ * photographs. A sweep across the test images showed 3000 removes the
+ * truncation while staying tight enough that the model does not pad its answer.
+ * Reasoning models such as Qwen3.8-27B need >=6000; they spend thousands of
+ * tokens reasoning before they answer, which is why they are not the default.
+ */
+const DEFAULT_MAX_TOKENS = 3000;
 
 /** Config used when a provider is explicitly selected but unset. */
 export function defaultProviderConfig(): ProviderConfig {
@@ -43,6 +67,7 @@ export function defaultProviderConfig(): ProviderConfig {
     model: DEFAULT_NEBIUS_MODEL,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     maxObservations: DEFAULT_MAX_OBSERVATIONS,
+    maxTokens: DEFAULT_MAX_TOKENS,
   };
 }
 
@@ -88,6 +113,10 @@ export function resolveProviderConfig(env: NodeJS.ProcessEnv = process.env): Pro
     maxObservations: readPositiveInt(env, 'AI_MAX_OBSERVATIONS', defaults.maxObservations, {
       min: 1,
       max: 20,
+    }),
+    maxTokens: readPositiveInt(env, 'NEBIUS_MAX_TOKENS', defaults.maxTokens, {
+      min: 256,
+      max: 16_000,
     }),
   };
 }

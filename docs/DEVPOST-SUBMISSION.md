@@ -177,33 +177,25 @@ the real defect was found in the code rather than papered over in the validator.
 
 ---
 
-### Temporary development model
+### Development model
 
-> # ⚠️ TEMPORARY DEVELOPMENT MODEL — NOT THE NVIDIA HACKATHON MODEL
+> **Configured model: `openbmb/MiniCPM-V-4_5`** (OpenBMB).
 >
-> **Configured model: `Qwen/Qwen3.8-27B`** (Qwen).
->
-> This model is used **only to keep the product building** while Nebius
-> determines when an eligible NVIDIA Vision model becomes reachable. It **does
-> not** satisfy the hackathon's NVIDIA requirement and **must not** be submitted
-> as if it did. Every demo run prints this explicitly.
+> This model is **not** an NVIDIA model and therefore does **not** satisfy the
+> hackathon's NVIDIA requirement. It must not be submitted as if it did. Every
+> demo run prints this explicitly.
 
-**Selected on measured technical criteria only** — it is not a quality ranking:
+**Selected on measured technical criteria only** — it is not a quality ranking.
 
-| Criterion | Measured |
-|---|---|
-| Real-image inference | ✅ HTTP 200, image processed (`image_tokens: 64`) |
-| SiteLens pipeline | ✅ 4–6 observations, **0 rejected** |
-| Strict validation | ✅ passed unmodified |
-| Trust state | ✅ `AI_GENERATED` / `UNVERIFIED`, `review: null` |
-| Latency | ✅ **3 069 ms** — lowest measured of the 7 candidates |
-| Provider changes required | **none** |
-| Reproducibility | ✅ confirmed on a second independent run (6 observations) |
+The full bake-off in the README is the current selection evidence: MiniCPM
+returned usable structured output on 4 of 5 real construction photographs
+against 2/5 for `google/gemma-3-27b-it` and 1/5 for `Qwen/Qwen3.8-27B`, and the
+complete server pipeline was then validated on 18 real images with 0 provider
+failures.
 
 Other verified candidates remain available purely by changing `NEBIUS_MODEL`:
-`moonshotai/Kimi-K3`, `openbmb/MiniCPM-V-4_5`, `zai-org/GLM-5.3-Flash`,
-`moonshotai/Kimi-K2.6`, `deepseek-ai/DeepSeek-V4.1-Flash`,
-`google/gemma-3-27b-it`.
+`moonshotai/Kimi-K3`, `zai-org/GLM-5.3-Flash`, `moonshotai/Kimi-K2.6`,
+`deepseek-ai/DeepSeek-V4.1-Flash`, `google/gemma-3-27b-it`, `Qwen/Qwen3.8-27B`.
 
 Switching to an eligible NVIDIA model later requires **configuration only** —
 no code change.

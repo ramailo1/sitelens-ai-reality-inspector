@@ -165,7 +165,10 @@ function validateString(
   return trimmed;
 }
 
-function validateBoundingBox(value: unknown, issues: ValidationIssue[]): BoundingBox | null {
+export function validateBoundingBox(
+  value: unknown,
+  issues: ValidationIssue[],
+): BoundingBox | null {
   if (value === undefined || value === null) return null;
   if (!isPlainObject(value)) {
     issues.push({ field: 'bounding_box', message: 'bounding_box must be an object when present' });

@@ -1,23 +1,19 @@
 /**
  * Hackathon eligibility.
  *
- * The hackathon requires the inference to run on Nebius Token Factory using an
- * NVIDIA open-source model. Eligibility must therefore be a property of the
- * MODEL IDENTITY that actually ran, never of the provider class or of a logo.
+ * The hackathon requires inference on Nebius Token Factory using an NVIDIA
+ * open-source model, so eligibility is a property of the model id that actually
+ * ran, never of the provider class or a logo.
  *
- * Three outcomes are distinguished deliberately:
+ *   ELIGIBLE      an NVIDIA model confirmed callable on Nebius.
+ *   NOT_ELIGIBLE  a real call that cannot satisfy the requirement, e.g. a
+ *                 non-NVIDIA model or the offline fixture.
+ *   NOT_VERIFIED  an NVIDIA id not yet proven callable. Claiming eligibility
+ *                 here would be the false claim this project must avoid.
  *
- *   ELIGIBLE      - an NVIDIA model that has been confirmed callable on Nebius.
- *   NOT_ELIGIBLE  - a real call that cannot satisfy the requirement, e.g. a
- *                   non-NVIDIA model, or the offline fixture.
- *   NOT_VERIFIED  - an NVIDIA model id that is intended for the requirement but
- *                   has not yet been proven callable. Claiming eligibility here
- *                   would be exactly the false claim this project must avoid.
- *
- * VERIFIED_ELIGIBLE_MODELS is intentionally EMPTY. It is populated only after a
- * candidate has been probed live: authenticated, listed by the provider,
- * confirmed to accept image input, and run end to end through the inspector.
- * Until then every NVIDIA id resolves to NOT_VERIFIED.
+ * VERIFIED_ELIGIBLE_MODELS is empty until a candidate has been probed live:
+ * authenticated, listed by the provider, confirmed to accept image input, and
+ * run end to end.
  */
 
 export const ELIGIBILITY_ELIGIBLE = 'ELIGIBLE' as const;

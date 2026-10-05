@@ -2,15 +2,59 @@
  * Turns raw provider output into structured observations. This is the only
  * place untrusted model output becomes product data.
  *
- * Observations are always created AI_GENERATED + UNVERIFIED, invalid entries
- * are dropped rather than coerced, and a provider failure propagates as a
- * failure so an outage never yields a fabricated result.
+ * Observations always start AI_GENERATED + UNVERIFIED, invalid entries are
+ * dropped rather than coerced, and a provider failure propagates as a failure so
+ * an outage never yields a fabricated result.
  */
 
 import { randomUUID } from 'node:crypto';
 import type { AIProvider, InspectRequest, ProviderFailureKind } from './providers/provider.ts';
 import { ProviderError } from './providers/provider.ts';
-import { confidenceBand, validateModelObservation } from './types/observation.ts';
+import {
+  confidenceBand,
+  validateModelObservation,
+} from './types/observation.ts';
+import { validateDetectedElement, validateModelFinding } from './types/inspection.ts';
+import type { DetectedElement, InspectionFinding } from './types/inspection.ts';
+import type { RawModelObservation } from './types/observation.ts';
+import type { InferenceOrigin, InspectionCache } from './cache.ts';
+import { computeCacheKey } from './cache.ts';
+import type { RawProviderResult } from './providers/provider.ts';
+
+/** Re-serialise a validated observation back to the raw provider shape, so the
+ *  cache holds provider output rather than product data. Re-validating it on a
+ *  hit is what makes a cached entry safe to serve. */
+function toCacheableObservation(o: AIObservation): Record<string, unknown> {
+  return {
+    category: o.category,
+    observation: o.observation,
+    evidence: { description: o.evidence.description },
+    confidence: o.confidence,
+    severity: o.severity,
+    suggested_action: o.suggestedAction,
+    ...(o.evidence.boundingBox === null ? {} : { bounding_box: o.evidence.boundingBox }),
+  };
+}
+
+function toCacheableFinding(f: InspectionFinding): Record<string, unknown> {
+  return {
+    title: f.title,
+    category: f.category,
+    severity: f.severity,
+    observation: f.observation,
+    reason: f.reason,
+    evidence: f.evidence,
+    confidence: f.confidence,
+    recommendation: f.recommendation,
+    ...(f.element === null ? {} : { element: f.element }),
+    ...(f.location === null ? {} : { location: f.location }),
+    ...(f.expected === null ? {} : { expected: f.expected }),
+    ...(f.difference === null ? {} : { difference: f.difference }),
+    ...(f.boundingBox === null ? {} : { bounding_box: f.boundingBox }),
+  };
+}
+
+export type { InferenceOrigin };
 import type {
   AIObservation,
   ObservationReview,
@@ -30,6 +74,23 @@ export interface InspectionResult {
   /** Display-only band per observation index, aligned to `observations`. */
   readonly bands: readonly ('LOW' | 'MEDIUM' | 'HIGH')[];
   readonly inspectedAt: string;
+  /**
+   * What the model reported it can SEE, strictly validated. Kept separate from
+   * `rejected` so a bad element entry cannot change the observation counts.
+   */
+  readonly elements?: readonly DetectedElement[];
+  /** Model-proposed attention areas, strictly validated. */
+  readonly modelFindings?: readonly InspectionFinding[];
+  /** Rejected element/finding entries, reported but never silently dropped. */
+  readonly rejectedInspection?: readonly { readonly issues: readonly ValidationIssue[] }[];
+  /**
+   * Where this run's AI output came from. Always present so the UI can show
+   * FRESH AI INFERENCE, CACHED AI RESULT or DEMO FIXTURE honestly.
+   */
+  readonly inferenceOrigin?: InferenceOrigin;
+  /** When a CACHED result was served, when the original inference happened. */
+  readonly originalInferenceAt?: string | null;
+  readonly originalLatencyMs?: number | null;
 }
 
 export type InspectionOutcome =
@@ -70,6 +131,11 @@ export interface InspectOptions {
   readonly image: InspectRequest['image'];
   readonly projectId?: string | null | undefined;
   readonly zoneId?: string | null | undefined;
+  /**
+   * The expected state rendered as short plain text. Sent to the model only as
+   * look-for context; the actual comparison happens in compare.ts, in code.
+   */
+  readonly expectedSummary?: string | null | undefined;
 }
 
 /** In-memory observation store. Demo scope only — not a product database. */
@@ -107,6 +173,8 @@ export class RealityInspector {
   private readonly store: ObservationStore;
   private readonly now: () => Date;
   private readonly idFactory: () => string;
+  /** Wall time of the most recent real provider call, for the cache record. */
+  private lastLatencyMs = 0;
 
   constructor(options: {
     provider: AIProvider;
@@ -127,15 +195,56 @@ export class RealityInspector {
    * this as a failure; the inspector never converts an outage into a result.
    */
   async inspectCapture(options: InspectOptions): Promise<InspectionResult> {
+    const started = Date.now();
     const raw = await this.provider.inspect({
       image: options.image,
       projectId: options.projectId ?? null,
       zoneId: options.zoneId ?? null,
+      expectedSummary: options.expectedSummary ?? null,
     });
+    this.lastLatencyMs = Date.now() - started;
 
+    return { ...this.buildFromPayload(raw, options), inferenceOrigin: 'FRESH' };
+  }
+
+  /**
+   * Turn a provider payload into a validated result.
+   *
+   * Shared by the live path and the cache path so a cached result is validated
+   * by exactly the same rules as a fresh one. A cache entry is raw provider
+   * output, never pre-validated product data.
+   */
+  private buildFromPayload(
+    raw: RawProviderResult,
+    options: InspectOptions,
+  ): InspectionResult {
     const observations: AIObservation[] = [];
     const rejected: { issues: readonly ValidationIssue[] }[] = [];
     const bands: ('LOW' | 'MEDIUM' | 'HIGH')[] = [];
+
+    // The SEE layer. Kept in its own arrays so a malformed element entry can
+    // never disturb the observation bookkeeping below.
+    const elements: DetectedElement[] = [];
+    const modelFindings: InspectionFinding[] = [];
+    const rejectedInspection: { issues: readonly ValidationIssue[] }[] = [];
+
+    for (const entry of raw.elements ?? []) {
+      const validated = validateDetectedElement(entry);
+      if (!validated.ok) {
+        rejectedInspection.push({ issues: validated.issues });
+        continue;
+      }
+      elements.push(validated.value);
+    }
+
+    for (const entry of raw.findings ?? []) {
+      const validated = validateModelFinding(entry);
+      if (!validated.ok) {
+        rejectedInspection.push({ issues: validated.issues });
+        continue;
+      }
+      modelFindings.push(validated.value);
+    }
 
     for (const entry of raw.observations) {
       const validated = validateModelObservation(entry);
@@ -184,16 +293,83 @@ export class RealityInspector {
       rejected,
       bands,
       inspectedAt: this.now().toISOString(),
+      elements,
+      modelFindings,
+      rejectedInspection,
+      originalInferenceAt: null,
+      originalLatencyMs: null,
     };
+  }
+
+  /**
+   * Inspect, preferring a cached successful result.
+   *
+   * On a hit the provider is NOT called. The result is rebuilt through the same
+   * validator as a fresh inference and is labelled `CACHED`, carrying the time of
+   * the original inference. Failures are never cached, so a hit always means
+   * "this exact image was successfully inspected before".
+   */
+  async inspectCached(
+    options: InspectOptions & { readonly cache: InspectionCache; readonly useCache: boolean },
+  ): Promise<InspectionResult> {
+    const key = computeCacheKey({
+      imageBytes: options.image.bytes,
+      model: this.provider.model,
+      expectedSummary: options.expectedSummary ?? '',
+    });
+
+    if (options.useCache) {
+      const hit = options.cache.lookup(key);
+      if (hit !== null) {
+        const rebuilt = this.buildFromPayload(
+          {
+            provider: this.provider.name,
+            model: hit.originalModel,
+            observations: hit.payload.observations as readonly RawModelObservation[],
+            elements: hit.payload.elements,
+            findings: hit.payload.findings,
+          },
+          options,
+        );
+        return {
+          ...rebuilt,
+          inferenceOrigin: 'CACHED',
+          originalInferenceAt: hit.originalInferenceAt,
+          originalLatencyMs: hit.originalLatencyMs,
+        };
+      }
+    }
+
+    const fresh = await this.inspectCapture(options);
+    if (fresh.inferenceOrigin === 'FRESH') {
+      // Only a genuinely accepted result is storable. An empty or fully rejected
+      // response would otherwise be served back forever as a fast "success".
+      options.cache.store(
+        key,
+        {
+          observations: fresh.observations.map(toCacheableObservation),
+          elements: fresh.elements ?? [],
+          findings: (fresh.modelFindings ?? []).map(toCacheableFinding),
+        },
+        {
+          model: this.provider.model,
+          latencyMs: this.lastLatencyMs,
+          acceptedEntries: fresh.observations.length
+            + (fresh.elements?.length ?? 0)
+            + (fresh.modelFindings?.length ?? 0),
+        },
+      );
+    }
+    return fresh;
   }
 
   /**
    * Inspect one capture and classify the outcome.
    *
-   * The distinction between "the model failed", "the model answered but the
-   * answer was unusable" and "the model had nothing to report" is what lets the
-   * UI stay honest. Collapsing them would let a validation failure look like a
-   * working inspection.
+   * "the model failed", "the model answered but the answer was unusable" and
+   * "the model had nothing to report" stay distinct, so the UI can remain
+   * honest: collapsing them would let a validation failure look like a working
+   * inspection.
    */
   async inspect(options: InspectOptions): Promise<InspectionOutcome> {
     let result: InspectionResult;
@@ -248,9 +424,5 @@ export class RealityInspector {
 
   public listObservations(captureId: string): AIObservation[] {
     return this.store.listByCapture(captureId);
-  }
-
-  public getStore(): ObservationStore {
-    return this.store;
   }
 }

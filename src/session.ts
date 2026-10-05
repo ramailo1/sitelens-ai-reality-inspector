@@ -7,21 +7,80 @@
  *
  * The record always states which model ran, what image was inspected, how many
  * observations survived validation and what the trust state is - including when
- * the run produced nothing at all. A zero-result inspection must never be
- * mistaken for a run that never happened.
+ * the run produced nothing at all, so a zero-result inspection is never mistaken
+ * for a run that never happened.
  */
 
 import { RealityInspector } from './inspector.ts';
 import type { InspectionOutcome, InspectionResult } from './inspector.ts';
 import type { AIProvider } from './providers/provider.ts';
+import { ProviderError } from './providers/provider.ts';
 import { classifyEligibility, describeEligibility } from './eligibility.ts';
 import type { HackathonEligibility } from './eligibility.ts';
 import { findingFrom, FindingLedger } from './findings.ts';
 import type { Finding } from './findings.ts';
 import { readImageDimensions, toPixelBox } from './image-metadata.ts';
+import { compareExpectedState } from './compare.ts';
+import type { ComparisonRow } from './types/inspection.ts';
+import {
+  buildCounters,
+  buildPriorities,
+  buildRealityBrief,
+  synthesizeFindings,
+} from './synthesis.ts';
+import type { RealityCounters } from './synthesis.ts';
+import { expectedSummaryFor } from './expected-state.ts';
+import { defaultExpectedState } from './expected-state.ts';
+import type {
+  DetectedElement,
+  ExpectedState,
+  InspectionFinding,
+  InspectionPriority,
+  RealityBrief,
+} from './types/inspection.ts';
 import type { AIObservation, ValidationIssue } from './types/observation.ts';
+import type { InferenceOrigin } from './cache.ts';
+import { inspectionCache } from './cache.ts';
 import type { DemoCapture } from './captures.ts';
 import { demoCaptures } from './captures.ts';
+
+/**
+ * One element the model reported it can see, with its evidence geometry.
+ * `countBasis` is always present so the UI can label a number as a visual
+ * estimate or admit that none exists.
+ */
+export interface DetectedElementView {
+  readonly element: string;
+  readonly present: boolean;
+  readonly count: number | null;
+  readonly countBasis: 'VISUAL_COUNT' | 'NOT_DETERMINABLE';
+  readonly confidence: number;
+  readonly evidence: string;
+  readonly boundingBox: AIObservation['evidence']['boundingBox'];
+  readonly pixelBox: ReturnType<typeof toPixelBox>;
+  readonly localized: boolean;
+}
+
+/** A finding plus everything the detail view needs to draw its evidence. */
+export interface FindingView extends Omit<InspectionFinding, 'id'> {
+  readonly id: string;
+  readonly pixelBox: ReturnType<typeof toPixelBox>;
+  readonly localized: boolean;
+  /** Null when the model gave no location and we refuse to invent one. */
+  readonly region: string | null;
+}
+
+export interface ComparisonView extends ComparisonRow {
+  readonly pixelBox: ReturnType<typeof toPixelBox>;
+}
+
+/** A recorded human decision against an inspection finding. */
+export interface FindingReview {
+  readonly status: 'VERIFIED' | 'REJECTED' | 'NEEDS_REVIEW';
+  readonly reviewer: string;
+  readonly reviewedAt: string;
+  readonly note: string | null;
+}
 
 /** Everything needed to render one observation with its evidence geometry. */
 export interface ObservationView {
@@ -76,6 +135,33 @@ export interface SessionView {
   readonly observations: readonly ObservationView[];
   readonly findings: readonly Finding[];
   readonly failure: { readonly kind: string; readonly message: string; readonly detail: string | null } | null;
+
+  /** WHAT EXISTS ON SITE, as reported by the model. */
+  readonly detections: readonly DetectedElementView[];
+  /** The comparison reference in force for this run. */
+  readonly expected: ExpectedState;
+  /** REALITY vs EXPECTED, one row per expected item. */
+  readonly comparison: readonly ComparisonView[];
+  /** Candidate attention areas, all UNVERIFIED until a human acts. */
+  readonly inspectionFindings: readonly FindingView[];
+  /** Where an inspector should look first. */
+  readonly priorities: readonly InspectionPriority[];
+  /** The short factual summary. */
+  readonly brief: RealityBrief;
+  /** Headline counters for the inspection panel. */
+  readonly counters: RealityCounters;
+  /**
+   * FRESH AI INFERENCE | CACHED AI RESULT | DEMO FIXTURE.
+   *
+   * Always reported so the UI can never imply a live model call when the
+   * result came from the cache or from the offline fixture.
+   */
+  readonly inferenceOrigin: InferenceOrigin;
+  /** Set when CACHED: when the real inference behind this result happened. */
+  readonly originalInferenceAt: string | null;
+  readonly originalLatencyMs: number | null;
+  /** True when the result came from the deterministic offline fixture. */
+  readonly isDemoFixture: boolean;
 }
 
 /** Minimal structural view of a provider, so sessions are testable. */
@@ -96,36 +182,94 @@ export class InspectionSession {
   private readonly capture: DemoCapture;
   private readonly projectId: string | null;
   private readonly zoneId: string | null;
+  /** The comparison reference. Editable, and always reported back to the UI. */
+  private expected: ExpectedState;
   private outcome: InspectionOutcome | null = null;
   private startedAt = 0;
   private latencyMs = 0;
+  /** Human review of an inspection finding, keyed by stable content key. */
+  private readonly reviewsByKey = new Map<string, FindingReview>();
+  /** Findings from the most recent view(), so a review can resolve its id. */
+  private currentFindings: readonly FindingView[] = [];
 
   public constructor(
     provider: AIProviderLike,
     capture: DemoCapture,
     projectId: string | null,
     zoneId: string | null,
+    expected?: ExpectedState,
   ) {
     this.provider = provider;
     this.capture = capture;
     this.projectId = projectId;
     this.zoneId = zoneId;
+    this.expected = expected ?? defaultExpectedState();
     this.inspector = new RealityInspector({ provider });
     this.ledger = new FindingLedger();
   }
 
+  /** Replace the expected state. Takes effect on the next inspection run. */
+  setExpectedState(expected: ExpectedState): SessionView {
+    this.expected = expected;
+    // The derived rows were computed against the old reference, so they must
+    // not be shown next to the new one until the capture is re-inspected.
+    this.reviewsByKey.clear();
+    return this.view();
+  }
+
+  getExpectedState(): ExpectedState {
+    return this.expected;
+  }
+
   /** Run the model. Safe to call repeatedly; the last run is what is rendered. */
-  async run(): Promise<SessionView> {
+  async run(options: { readonly useCache?: boolean } = {}): Promise<SessionView> {
     this.startedAt = Date.now();
-    this.outcome = await this.inspector.inspect({
-      image: {
-        bytes: this.capture.bytes,
-        mediaType: this.capture.mediaType,
-        captureId: this.capture.id,
-      },
-      projectId: this.projectId,
-      zoneId: this.zoneId,
-    });
+    // The deterministic fixture is never served from cache: it costs nothing,
+    // and a "cached" label on synthetic data would be actively misleading.
+    const useCache = options.useCache === true && this.provider.name !== 'demo-fixture';
+    try {
+      const result = await this.inspector.inspectCached({
+        image: {
+          bytes: this.capture.bytes,
+          mediaType: this.capture.mediaType,
+          captureId: this.capture.id,
+        },
+        projectId: this.projectId,
+        zoneId: this.zoneId,
+        expectedSummary: expectedSummaryFor(this.expected),
+        cache: inspectionCache,
+        useCache,
+      });
+      // Provider failure, validation failure and a genuinely empty answer stay
+      // three distinct outcomes; collapsing them would let an outage look like a
+      // completed inspection.
+      //
+      // "Completed" means the validators accepted something. A response carrying
+      // only valid elements or only valid findings is real usable output, so
+      // keying this on observations.length alone reported a successful
+      // inspection as VALIDATION_EMPTY.
+      const usable = result.observations.length > 0
+        || (result.elements?.length ?? 0) > 0
+        || (result.modelFindings?.length ?? 0) > 0;
+      this.outcome = {
+        status: usable
+          ? 'COMPLETED'
+          : result.rejected.length > 0
+            ? 'VALIDATION_FAILED'
+            : 'VALIDATION_EMPTY',
+        result,
+        validationFailures: result.rejected,
+      };
+    } catch (error: unknown) {
+      if (error instanceof ProviderError) {
+        this.outcome = {
+          status: 'FAILED', kind: error.kind,
+          message: error.message, detail: error.detail ?? null,
+        };
+      } else {
+        throw error;
+      }
+    }
     this.latencyMs = Date.now() - this.startedAt;
     return this.view();
   }
@@ -158,7 +302,43 @@ export class InspectionSession {
     return this.view();
   }
 
-  /** Render the current state without re-running inference. */
+  /**
+   * Record a human decision against an inspection finding.
+   *
+   * This is the ONLY way a finding leaves UNVERIFIED, and the only path from
+   * "AI suspected" to "human verified". An anonymous review is refused: an
+   * unattributed verification would make the whole trust chain meaningless.
+   */
+  reviewFinding(input: {
+    readonly findingId: string;
+    readonly decision: 'VERIFIED' | 'REJECTED' | 'NEEDS_REVIEW';
+    readonly reviewer: string;
+    readonly note?: string | null | undefined;
+  }): SessionView {
+    if (typeof input.reviewer !== 'string' || input.reviewer.trim().length === 0) {
+      return this.view();
+    }
+    // Find the finding by the id the UI currently holds, then remember the
+    // decision under its stable key so it survives the next re-render.
+    const current = this.currentFindings.find((f) => f.id === input.findingId);
+    if (current === undefined) return this.view();
+
+    this.reviewsByKey.set(
+      `${current.origin}|${current.comparisonId ?? ''}|${current.title.trim().toLowerCase()}`,
+      {
+        status: input.decision,
+        reviewer: input.reviewer.trim(),
+        reviewedAt: new Date().toISOString(),
+        note: input.note ?? null,
+      },
+    );
+
+    // A VERIFIED inspection finding is recorded in the session's own audit
+    // trail above. The legacy observation ledger is a SEPARATE product: it
+    // records findings raised from a verified OBSERVATION, and is deliberately
+    // untouched by the inspection-finding loop.
+    return this.view();
+  }
   view(): SessionView {
     const outcome = this.outcome;
     const dimensions = readImageDimensions(this.capture.bytes);
@@ -209,6 +389,79 @@ export class InspectionSession {
     const rejectionIssues: ValidationIssue[] =
       result?.rejected.flatMap((entry) => entry.issues) ?? [];
 
+    const rawDetections: readonly DetectedElement[] = result?.elements ?? [];
+    const detections: DetectedElementView[] = rawDetections.map((d) => {
+      const pixelBox = toPixelBox(d.boundingBox, dimensions);
+      return {
+        element: d.element,
+        present: d.present,
+        count: d.count,
+        countBasis: d.countBasis,
+        confidence: d.confidence,
+        evidence: d.evidence,
+        boundingBox: d.boundingBox,
+        pixelBox,
+        localized: pixelBox !== null,
+      };
+    });
+
+    const rows = compareExpectedState(this.expected, rawDetections);
+
+    // `synthetic` is true whenever the deterministic offline provider ran, so
+    // a fixture result can never be presented as model inference.
+    const synthetic = this.provider.name === 'demo-fixture';
+    const synthesized = synthesizeFindings({
+      captureId: this.capture.id,
+      expected: this.expected,
+      detections: rawDetections,
+      modelFindings: result?.modelFindings ?? [],
+      rows,
+      synthetic,
+    });
+
+    // Human decisions are the authority, so a re-render must not resurrect a
+    // reviewed finding as UNVERIFIED. Findings are re-synthesised on every
+    // render but keep a content-derived id, so reviews are keyed by that same
+    // stable content key.
+    const stableKey = (f: InspectionFinding): string =>
+      `${f.origin}|${f.comparisonId ?? ''}|${f.title.trim().toLowerCase()}`;
+
+    const inspectionFindings: FindingView[] = synthesized.map((f) => {
+      const review = this.reviewsByKey.get(stableKey(f)) ?? null;
+      const pixelBox = toPixelBox(f.boundingBox, dimensions);
+      const view: FindingView = {
+        ...f,
+        verificationStatus: review === null ? 'UNVERIFIED' : review.status,
+        review,
+        pixelBox,
+        localized: pixelBox !== null,
+        region: f.location,
+      };
+      return view;
+    });
+
+    const priorities = buildPriorities(inspectionFindings);
+    // Remembered so reviewFinding() can resolve the id the browser is holding
+    // without re-entering the synthesis path.
+    this.currentFindings = inspectionFindings;
+    const brief = buildRealityBrief({
+      detections: rawDetections,
+      rows,
+      findings: inspectionFindings,
+      priorities,
+      synthetic,
+    });
+    const counters = buildCounters({
+      detections: rawDetections,
+      findings: inspectionFindings,
+      rows,
+    });
+
+    const comparison: ComparisonView[] = rows.map((row) => ({
+      ...row,
+      pixelBox: toPixelBox(row.boundingBox, dimensions),
+    }));
+
     const eligibility = classifyEligibility({
       provider: this.provider.name,
       model: this.provider.model,
@@ -234,7 +487,8 @@ export class InspectionSession {
       observationsAccepted: result?.observations.length ?? 0,
       observationsRejected: result?.rejected.length ?? 0,
       trustState: 'AI_GENERATED / UNVERIFIED until a human reviews',
-      humanReviewPerformed: observations.some((o) => o.review !== null),
+      humanReviewPerformed:
+        observations.some((o) => o.review !== null) || this.reviewsByKey.size > 0,
       eligibility,
       eligibilityNote: describeEligibility(eligibility, this.provider.model),
       rejectionIssues,
@@ -249,6 +503,17 @@ export class InspectionSession {
         outcome !== null && outcome.status === 'FAILED'
           ? { kind: outcome.kind, message: outcome.message, detail: outcome.detail }
           : null,
+      detections,
+      expected: this.expected,
+      comparison,
+      inspectionFindings,
+      priorities,
+      brief,
+      counters,
+      inferenceOrigin: synthetic ? 'DEMO_FIXTURE' : (result?.inferenceOrigin ?? 'FRESH'),
+      originalInferenceAt: result?.originalInferenceAt ?? null,
+      originalLatencyMs: result?.originalLatencyMs ?? null,
+      isDemoFixture: synthetic,
     };
   }
 
