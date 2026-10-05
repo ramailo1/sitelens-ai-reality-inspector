@@ -12,7 +12,8 @@
  */
 
 import { RealityInspector } from './inspector.ts';
-import type { InspectionOutcome, InspectionResult } from './inspector.ts';
+import type { InspectionOutcome, InspectionResult, InspectionStatus } from './inspector.ts';
+import { classifyUsableOutput } from './inspector.ts';
 import type { AIProvider } from './providers/provider.ts';
 import { ProviderError } from './providers/provider.ts';
 import { classifyEligibility, describeEligibility } from './eligibility.ts';
@@ -42,7 +43,6 @@ import type { AIObservation, ValidationIssue } from './types/observation.ts';
 import type { InferenceOrigin } from './cache.ts';
 import { inspectionCache } from './cache.ts';
 import type { DemoCapture } from './captures.ts';
-import { demoCaptures } from './captures.ts';
 
 /**
  * One element the model reported it can see, with its evidence geometry.
@@ -164,9 +164,6 @@ export interface SessionView {
   readonly isDemoFixture: boolean;
 }
 
-/** Minimal structural view of a provider, so sessions are testable. */
-export type AIProviderLike = AIProvider;
-
 /**
  * A single inspection session over one capture.
  *
@@ -178,7 +175,7 @@ export class InspectionSession {
   private readonly ledger: FindingLedger;
   // Explicit fields rather than constructor parameter properties: Node's
   // type-stripping loader does not support parameter properties.
-  private readonly provider: AIProviderLike;
+  private readonly provider: AIProvider;
   private readonly capture: DemoCapture;
   private readonly projectId: string | null;
   private readonly zoneId: string | null;
@@ -193,7 +190,7 @@ export class InspectionSession {
   private currentFindings: readonly FindingView[] = [];
 
   public constructor(
-    provider: AIProviderLike,
+    provider: AIProvider,
     capture: DemoCapture,
     projectId: string | null,
     zoneId: string | null,
@@ -208,17 +205,17 @@ export class InspectionSession {
     this.ledger = new FindingLedger();
   }
 
-  /** Replace the expected state. Takes effect on the next inspection run. */
-  setExpectedState(expected: ExpectedState): SessionView {
+  /**
+   * Adopt a new comparison reference, discarding the result it invalidates.
+   *
+   * The comparison rows belong to the previous reference, so they are dropped
+   * rather than re-presented under a preset that never produced them. Clearing
+   * the outcome also removes the findings those rows produced.
+   */
+  adoptReference(expected: ExpectedState): void {
     this.expected = expected;
-    // The derived rows were computed against the old reference, so they must
-    // not be shown next to the new one until the capture is re-inspected.
+    this.outcome = null;
     this.reviewsByKey.clear();
-    return this.view();
-  }
-
-  getExpectedState(): ExpectedState {
-    return this.expected;
   }
 
   /** Run the model. Safe to call repeatedly; the last run is what is rendered. */
@@ -240,23 +237,13 @@ export class InspectionSession {
         cache: inspectionCache,
         useCache,
       });
-      // Provider failure, validation failure and a genuinely empty answer stay
-      // three distinct outcomes; collapsing them would let an outage look like a
-      // completed inspection.
-      //
       // "Completed" means the validators accepted something. A response carrying
       // only valid elements or only valid findings is real usable output, so
       // keying this on observations.length alone reported a successful
       // inspection as VALIDATION_EMPTY.
-      const usable = result.observations.length > 0
-        || (result.elements?.length ?? 0) > 0
-        || (result.modelFindings?.length ?? 0) > 0;
+      const status: InspectionStatus = classifyUsableOutput(result);
       this.outcome = {
-        status: usable
-          ? 'COMPLETED'
-          : result.rejected.length > 0
-            ? 'VALIDATION_FAILED'
-            : 'VALIDATION_EMPTY',
+        status,
         result,
         validationFailures: result.rejected,
       };
@@ -405,7 +392,10 @@ export class InspectionSession {
       };
     });
 
-    const rows = compareExpectedState(this.expected, rawDetections);
+    // Rows exist only alongside a real inspection. With no result there is nothing
+    // observed, so producing rows would render every expectation as UNDETERMINED
+    // and read like a finding rather than an un-inspected capture.
+    const rows = result === null ? [] : compareExpectedState(this.expected, rawDetections);
 
     // `synthetic` is true whenever the deterministic offline provider ran, so
     // a fixture result can never be presented as model inference.
@@ -522,34 +512,18 @@ export class InspectionSession {
     return this.view();
   }
 
+  /**
+   * Whether this capture has actually been inspected.
+   *
+   * Distinct from "a session exists": selecting a capture creates its session but
+   * runs no model, so an un-inspected capture must not be reported as inspected.
+   * Used to decide where returning to a project should land.
+   */
+  inspected(): boolean {
+    return this.outcome !== null && this.outcome.status !== 'PENDING';
+  }
+
   getLedger(): FindingLedger {
     return this.ledger;
   }
-}
-
-export interface CaptureSummary {
-  readonly id: string;
-  readonly label: string;
-  readonly content: string;
-  readonly width: number;
-  readonly height: number;
-  readonly byteLength: number;
-  readonly mediaType: string;
-}
-
-/** Capture catalogue for the UI, without shipping the image bytes. */
-export function listCaptures(): CaptureSummary[] {
-  return demoCaptures().map((c) => ({
-    id: c.id,
-    label: c.label,
-    content: c.content,
-    width: c.dimensions.width,
-    height: c.dimensions.height,
-    byteLength: c.bytes.length,
-    mediaType: c.mediaType,
-  }));
-}
-
-export function findCapture(id: string): DemoCapture | null {
-  return demoCaptures().find((c) => c.id === id) ?? null;
 }

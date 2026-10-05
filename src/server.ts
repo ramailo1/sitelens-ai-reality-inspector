@@ -1,30 +1,24 @@
 /**
  * Local inspection server.
  *
- * Serves the Reality Inspector UI and a small JSON API over a single inspection
- * session. It binds to loopback only: this is a local demonstration surface, not
- * a service, and it must not be reachable off the machine.
+ * Serves the Reality Inspector UI and a small JSON API over a project's
+ * captures. It binds to loopback only: this is a local demonstration surface,
+ * not a service, and it must not be reachable off the machine.
  *
  * The API never returns the API key, the base URL or provider internals.
  */
-
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createProvider, ProviderError } from './providers/factory.ts';
-import { InspectionSession, listCaptures, findCapture } from './session.ts';
+import { InspectionSession } from './session.ts';
 import type { SessionView } from './session.ts';
-import { defaultCapture } from './captures.ts';
-import type { DemoCapture } from './captures.ts';
+import { ProjectStore } from './projects.ts';
+import type { ProjectCapture } from './projects.ts';
 import type { AIProvider } from './providers/provider.ts';
 import { acceptCapture, MAX_CAPTURE_BYTES } from './upload.ts';
 import { INDEX_HTML, APP_CSS, APP_JS } from './ui-assets.ts';
-import {
-  DEFAULT_EXPECTED_PRESET_ID,
-  EXPECTED_PRESETS,
-  cloneExpectedState,
-  defaultExpectedState,
-  findExpectedPreset,
-} from './expected-state.ts';
+import { cleanItems, presetToState } from './expected-state.ts';
+import type { Preset } from './expected-state.ts';
 import { inspectionCache } from './cache.ts';
 import type { ExpectedState } from './types/inspection.ts';
 import { ELEMENT_KINDS, EXPECTATIONS } from './types/inspection.ts';
@@ -40,7 +34,6 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   });
   res.end(payload);
 }
-
 /**
  * Read a request body, refusing anything past the cap.
  *
@@ -61,124 +54,111 @@ async function readBody(
   }
   return Buffer.concat(chunks);
 }
-
 /** Read a JSON request body. */
 async function readJsonBody(req: IncomingMessage, limitBytes?: number): Promise<string> {
   return (await readBody(req, limitBytes)).toString('utf8');
 }
+/**
+ * Where uploaded imagery actually is.
+ *
+ * Stated as a value rather than buried in prose so the UI can show it verbatim:
+ * the bytes live in this process, and nothing about the demo survives a restart.
+ */
+const STORAGE_TRUTH = {
+  location: 'process memory',
+  durable: false,
+  detail:
+    'Uploaded images are held in this running process only. Nothing is written to ' +
+    'disk, so uploads, projects and references are lost when the server restarts.',
+} as const;
+
+/** Thrown when a review or state route is called with no capture selected. */
+class NoActiveCapture extends Error {
+  public constructor() {
+    super('No capture is selected in the active project.');
+    this.name = 'NoActiveCapture';
+  }
+}
+
+/** Capture as the UI sees it: identity, provenance and ownership, never raw bytes. */
+function captureSummary(capture: ProjectCapture): Record<string, unknown> {
+  return {
+    id: capture.id,
+    label: capture.label,
+    content: capture.content,
+    width: capture.dimensions.width,
+    height: capture.dimensions.height,
+    byteLength: capture.bytes.length,
+    mediaType: capture.mediaType,
+    source: capture.source,
+    zoneId: capture.zoneId,
+    projectId: capture.projectId,
+    createdAt: capture.createdAt,
+  };
+}
 
 export interface ServerOptions {
   readonly provider: AIProvider;
-  readonly projectId: string | null;
   readonly zoneId: string | null;
   readonly initialCaptureId: string | null;
 }
-
 /**
- * Resolve an expected-state payload from the browser.
+ * Resolve an explicit expected-state payload from the browser.
  *
- * Two shapes are accepted: a preset id (the fast demo path) or an explicit
- * item list (the real path). An explicit list from the browser is ALWAYS marked
- * `source: 'OPERATOR'`, so a preset can never be passed off as the project's own
- * programme and an operator edit can never be passed off as a preset.
+ * An explicit item list from the browser is ALWAYS marked `source: 'OPERATOR'`,
+ * so a preset can never be passed off as the project's own programme and an
+ * operator edit can never be passed off as a preset. Named references are a
+ * separate path (they go through the preset catalogue), so this function has
+ * exactly one job.
  *
- * Every field is re-validated here: the browser is an untrusted client even
- * though it is loopback-only.
+ * Every field is re-validated here by `cleanItems`, the same validator the
+ * reference catalogue uses: the browser is an untrusted client even though it is
+ * loopback-only, and two copies of this validation would eventually disagree.
  */
 export function resolveExpectedState(
   payload: unknown,
 ): { ok: true; state: ExpectedState } | { ok: false; reason: string } {
-  if (typeof payload !== 'object' || payload === null) {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
     return { ok: false, reason: 'expected state must be a JSON object' };
   }
   const record = payload as Record<string, unknown>;
-
-  // Shape 1: pick a named preset.
-  const presetId = record['presetId'];
-  if (typeof presetId === 'string' && presetId.length > 0) {
-    const preset = findExpectedPreset(presetId);
-    if (preset === null) return { ok: false, reason: `unknown preset: ${presetId}` };
-    return { ok: true, state: cloneExpectedState(preset) };
-  }
-
-  // Shape 2: an explicit list.
-  const items = record['items'];
-  if (!Array.isArray(items)) {
-    return { ok: false, reason: 'expected state must supply presetId or an items array' };
-  }
-
   const zoneRaw = record['zone'];
-  const zone = typeof zoneRaw === 'string' && zoneRaw.trim().length > 0 ? zoneRaw.trim() : 'Unspecified zone';
+  const zone =
+    typeof zoneRaw === 'string' && zoneRaw.trim().length > 0 ? zoneRaw.trim() : 'Unspecified zone';
 
-  const parsed: ExpectedState['items'][number][] = [];
-  for (const [index, raw] of items.entries()) {
-    if (typeof raw !== 'object' || raw === null) {
-      return { ok: false, reason: `items[${index}] must be an object` };
-    }
-    const entry = raw as Record<string, unknown>;
-    const element = entry['element'];
-    const expectation = entry['expectation'];
-    if (typeof element !== 'string' || !(ELEMENT_KINDS as readonly string[]).includes(element)) {
-      return { ok: false, reason: `items[${index}].element is not a known element kind` };
-    }
-    if (
-      typeof expectation !== 'string' ||
-      !(EXPECTATIONS as readonly string[]).includes(expectation)
-    ) {
-      return { ok: false, reason: `items[${index}].expectation must be PRESENT, COUNT or ABSENT` };
-    }
-    const countRaw = entry['expectedCount'];
-    let expectedCount: number | null = null;
-    if (expectation === 'COUNT') {
-      if (
-        typeof countRaw !== 'number' ||
-        !Number.isInteger(countRaw) ||
-        countRaw < 0 ||
-        countRaw > 500
-      ) {
-        return { ok: false, reason: `items[${index}] needs an integer expectedCount` };
-      }
-      expectedCount = countRaw;
-    }
-    const note = typeof entry['note'] === 'string' ? entry['note'].slice(0, 200) : '';
-
-    parsed.push({
-      id: typeof entry['id'] === 'string' && entry['id'].length > 0 ? entry['id'] : `exp_${index}`,
-      element: element as ExpectedState['items'][number]['element'],
-      expectation: expectation as ExpectedState['items'][number]['expectation'],
-      expectedCount,
-      note,
-    });
+  // An operator may clear every expectation: "nothing is expected in this zone"
+  // is a real statement and yields zero comparison rows. A named reference may
+  // not be empty, which is exactly the rule cleanItems enforces below.
+  const rawItems = record['items'];
+  if (Array.isArray(rawItems) && rawItems.length === 0) {
+    return { ok: true, state: { zone, items: [], source: 'OPERATOR' } };
   }
 
-  return {
-    ok: true,
-    state: { zone, items: parsed, source: 'OPERATOR' },
-  };
+  const items = cleanItems(rawItems);
+  if (!items.ok) return { ok: false, reason: items.message };
+  return { ok: true, state: { zone, items: items.value, source: 'OPERATOR' } };
 }
-
 export interface InspectionServerHandle {
   readonly server: ReturnType<typeof createServer>;
-  session: InspectionSession;
+  readonly store: ProjectStore;
 }
-
 export function createInspectionServer(options: ServerOptions): InspectionServerHandle {
-  const initialCapture = findCapture(options.initialCaptureId ?? '') ?? defaultCapture();
-
-  let session = new InspectionSession(
-    options.provider,
-    initialCapture,
-    options.projectId,
-    options.zoneId,
-    // The comparison reference outlives any single capture: an inspector sets
-    // it once and expects it to still apply to the next photograph.
-    defaultExpectedState(),
+  const store = new ProjectStore({ provider: options.provider, zoneId: options.zoneId });
+  // The repository has always opened on a populated demo project so the
+  // inspection flow is reachable without setup. These are the generated
+  // synthetic fixtures, labelled as fixtures throughout the UI.
+  const seeded = store.seedDemoProject(
+    process.env['DEMO_PROJECT_NAME'] ?? 'North Core Construction',
+    process.env['DEMO_PROJECT_LOCATION'] ?? 'Dusk Survey, level 02',
   );
-
-  // The most recent accepted upload, so its bytes can still be rendered
-  // after a re-render. Null until an operator supplies one.
-  let uploaded: DemoCapture | null = null;
-
+  if (options.initialCaptureId) {
+    const wanted = options.initialCaptureId;
+    if (store.capturesOf(seeded.id).some((c) => c.id === wanted)) store.selectCapture(wanted);
+  }
+  if (store.selectedCaptureId() === null) {
+    const first = store.capturesOf(seeded.id)[0];
+    if (first) store.selectCapture(first.id);
+  }
   /**
    * Whether an inspection may be served from the local result cache.
    *
@@ -187,56 +167,316 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
    * happened. It is an explicit, visible opt-in for iterating on the UI.
    */
   let cacheEnabled = false;
+  /** Project-scoped view of the active session, or null when nothing is selected. */
+  const activeSession = (): InspectionSession | null => store.activeSession();
 
+  /**
+   * The active session for routes that mutate review state.
+   *
+   * There is nothing to verify against when no capture is selected, and a
+   * request that names an id without an active capture would otherwise read from
+   * a session that does not belong to the current project.
+   */
+  const requireSession = (): InspectionSession => {
+    const session = activeSession();
+    if (session === null) throw new NoActiveCapture();
+    return session;
+  };
+  /**
+   * The one payload every mutating route answers with, so the client always
+   * receives the authoritative project, capture list and session view together
+   * and can never half-apply a mutation.
+   */
+  const workspace = (): Record<string, unknown> => {
+    const project = store.activeProject();
+    const captures = project === null ? [] : store.capturesOf(project.id);
+    const session = activeSession();
+    const reference = project === null ? null : store.referenceFor(project.id);
+    const preset = reference === null ? null : store.presets.get(reference.presetId);
+    return {
+      project,
+      projects: store.list(),
+      activeProjectId: project?.id ?? null,
+      activeCaptureId: store.selectedCaptureId(),
+      captures: captures.map((c) => captureSummary(c)),
+      reference: reference === null ? null : {
+        presetId: reference.presetId,
+        name: preset === null ? reference.presetId : preset.name,
+        zone: reference.state.zone,
+        source: reference.state.source,
+        edited: reference.edited,
+        deletable: preset !== null && preset.source === 'OPERATOR',
+        itemCount: reference.state.items.length,
+      },
+      presets: store.presets.list().map((p) => ({
+        id: p.id, name: p.name, zone: p.zone, source: p.source, itemCount: p.items.length,
+      })),
+      storage: STORAGE_TRUTH,
+      view: session === null ? null : session.view(),
+    };
+  };
   const server = createServer((req, res) => {
-    void handle(req, res).catch(() => {
+    void handle(req, res).catch((error: unknown) => {
+      if (error instanceof NoActiveCapture) {
+        sendJson(res, 400, { error: 'NO_ACTIVE_CAPTURE', message: error.message });
+        return;
+      }
       sendJson(res, 500, { error: 'internal error' });
     });
   });
-
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = new URL(req.url ?? '/', `http://${LOOPBACK}`).pathname;
 
-    if (req.method === 'GET' && path === '/api/captures') {
-      sendJson(res, 200, { captures: listCaptures() });
+    // --- workspace -----------------------------------------------------------
+    if (req.method === 'GET' && path === '/api/workspace') {
+      sendJson(res, 200, workspace());
       return;
     }
 
-        if (req.method === 'GET' && path === '/api/upload-image') {
-      if (uploaded === null) {
-        sendJson(res, 404, { error: 'no uploaded capture' });
+    // --- projects ------------------------------------------------------------
+    if (req.method === 'GET' && path === '/api/projects') {
+      sendJson(res, 200, {
+        projects: store.list(),
+        activeProjectId: store.activeProject()?.id ?? null,
+      });
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/projects') {
+      const body = await readJsonBody(req);
+      let payload: { name?: unknown; location?: unknown } = {};
+      if (body.trim().length > 0) {
+        try {
+          payload = JSON.parse(body) as { name?: unknown; location?: unknown };
+        } catch {
+          sendJson(res, 400, { error: 'invalid JSON body' });
+          return;
+        }
+      }
+      const created = store.create({ name: payload.name, location: payload.location });
+      if (!created.ok) {
+        sendJson(res, 400, { error: created.reason, message: created.message });
         return;
       }
-      res.writeHead(200, {
-        'Content-Type': uploaded.mediaType,
-        'Content-Length': uploaded.bytes.length,
-        'Cache-Control': 'no-store',
-      });
-      res.end(uploaded.bytes);
+      sendJson(res, 201, workspace());
       return;
     }
 
-    if (req.method === 'GET' && path === '/api/session') {
-      sendJson(res, 200, session.view());
+    if (req.method === 'POST' && path === '/api/projects/switch') {
+      const body = await readJsonBody(req);
+      let payload: { projectId?: unknown } = {};
+      try {
+        payload = JSON.parse(body) as { projectId?: unknown };
+      } catch {
+        sendJson(res, 400, { error: 'invalid JSON body' });
+        return;
+      }
+      if (typeof payload.projectId !== 'string' || payload.projectId.length === 0) {
+        sendJson(res, 400, { error: 'projectId is required' });
+        return;
+      }
+      const switched = store.switchTo(payload.projectId);
+      if (!switched.ok) {
+        sendJson(res, 404, { error: switched.reason, message: switched.message });
+        return;
+      }
+      sendJson(res, 200, workspace());
       return;
     }
 
-    // --- expected state (the comparison reference) ---------------------------
-    if (req.method === 'GET' && path === '/api/expected') {
+    if (req.method === 'PATCH' && path.startsWith('/api/projects/')) {
+      const projectId = decodeURIComponent(path.slice('/api/projects/'.length));
+      const body = await readJsonBody(req);
+      let payload: { name?: unknown; location?: unknown } = {};
+      try {
+        payload = JSON.parse(body) as { name?: unknown; location?: unknown };
+      } catch {
+        sendJson(res, 400, { error: 'invalid JSON body' });
+        return;
+      }
+      if (!store.has(projectId)) {
+        sendJson(res, 404, { error: 'UNKNOWN_PROJECT', message: 'That project no longer exists.' });
+        return;
+      }
+      // The two fields are edited through separate actions, so only the one the
+      // client actually sent is applied. Dispatching on which key is present
+      // avoids reporting a name validation failure as a location failure.
+      const result =
+        payload.name !== undefined
+          ? store.rename(projectId, payload.name)
+          : store.setLocation(projectId, payload.location);
+      if (!result.ok) {
+        sendJson(res, 400, { error: result.reason, message: result.message });
+        return;
+      }
+      sendJson(res, 200, workspace());
+      return;
+    }
+
+    if (req.method === 'DELETE' && path.startsWith('/api/projects/')) {
+      const projectId = decodeURIComponent(path.slice('/api/projects/'.length));
+      const removed = store.delete(projectId);
+      if (!removed.ok) {
+        sendJson(res, 404, { error: removed.reason, message: removed.message });
+        return;
+      }
+      sendJson(res, 200, workspace());
+      return;
+    }
+
+    // --- captures ------------------------------------------------------------
+    if (req.method === 'GET' && path === '/api/captures') {
+      const project = store.activeProject();
       sendJson(res, 200, {
-        current: session.getExpectedState(),
-        presets: Object.entries(EXPECTED_PRESETS).map(([id, state]) => ({
-          id,
-          zone: state.zone,
-          itemCount: state.items.length,
+        captures: project === null ? [] : store.capturesOf(project.id).map((c) => captureSummary(c)),
+      });
+      return;
+    }
+
+    /**
+     * Select a capture WITHOUT inspecting it.
+     *
+     * Selection is a view change, not a model call. Routing it through /api/run
+     * (as the client used to) spent a real vision inference on every click,
+     * burned provider quota, and reported a "result" for a capture nobody asked
+     * to inspect. Its own session already exists, so selecting restores whatever
+     * that capture was last inspected to - including its human verifications.
+     */
+    if (req.method === 'POST' && path === '/api/captures/select') {
+      const body = await readJsonBody(req);
+      let payload: { captureId?: unknown } = {};
+      try {
+        payload = JSON.parse(body) as { captureId?: unknown };
+      } catch {
+        sendJson(res, 400, { error: 'invalid JSON body' });
+        return;
+      }
+      if (typeof payload.captureId !== 'string' || payload.captureId.length === 0) {
+        sendJson(res, 400, { error: 'captureId is required' });
+        return;
+      }
+      const selected = store.selectCapture(payload.captureId);
+      if (!selected.ok) {
+        sendJson(res, selected.reason === 'NOT_OWNED' ? 403 : 404, {
+          error: selected.reason,
+          message: selected.message,
+        });
+        return;
+      }
+      sendJson(res, 200, workspace());
+      return;
+    }
+
+    if (req.method === 'DELETE' && path.startsWith('/api/captures/')) {
+      const captureId = decodeURIComponent(path.slice('/api/captures/'.length));
+      const removed = store.deleteCapture(captureId);
+      if (!removed.ok) {
+        sendJson(res, removed.reason === 'NOT_OWNED' ? 403 : 404, {
+          error: removed.reason,
+          message: removed.message,
+        });
+        return;
+      }
+      sendJson(res, 200, workspace());
+      return;
+    }
+
+    // --- session view --------------------------------------------------------
+    if (req.method === 'GET' && path === '/api/session') {
+      const session = activeSession();
+      sendJson(res, 200, session === null ? null : session.view());
+      return;
+    }
+
+    // --- comparison references ----------------------------------------------
+    if (req.method === 'GET' && path === '/api/expected') {
+      const project = store.activeProject();
+      const reference = project === null ? null : store.referenceFor(project.id);
+      sendJson(res, 200, {
+        current: reference === null ? null : reference.state,
+        presetId: reference === null ? null : reference.presetId,
+        edited: reference === null ? false : reference.edited,
+        presets: store.presets.list().map((p) => ({
+          id: p.id,
+          name: p.name,
+          zone: p.zone,
+          source: p.source,
+          itemCount: p.items.length,
+          deletable: p.source === 'OPERATOR',
         })),
-        defaultPreset: DEFAULT_EXPECTED_PRESET_ID,
+        defaultPreset: store.presets.defaultId(),
         elementKinds: ELEMENT_KINDS,
         expectations: EXPECTATIONS,
       });
       return;
     }
+    if (req.method === 'POST' && path === '/api/presets') {
+      const body = await readJsonBody(req);
+      let payload: { name?: unknown; zone?: unknown; items?: unknown } = {};
+      try {
+        payload = JSON.parse(body) as { name?: unknown; zone?: unknown; items?: unknown };
+      } catch {
+        sendJson(res, 400, { error: 'invalid JSON body' });
+        return;
+      }
+      const created = store.presets.create({
+        name: payload.name,
+        zone: payload.zone,
+        items: payload.items,
+      });
+      if (!created.ok) {
+        sendJson(res, 400, { error: created.reason, message: created.message });
+        return;
+      }
+      sendJson(res, 201, workspace());
+      return;
+    }
 
+    if (req.method === 'PATCH' && path.startsWith('/api/presets/')) {
+      const presetId = decodeURIComponent(path.slice('/api/presets/'.length));
+      const body = await readJsonBody(req);
+      let payload: { name?: unknown; items?: unknown } = {};
+      try {
+        payload = JSON.parse(body) as { name?: unknown; items?: unknown };
+      } catch {
+        sendJson(res, 400, { error: 'invalid JSON body' });
+        return;
+      }
+      let result = payload.items !== undefined
+        ? store.presets.replaceItems(presetId, payload.items)
+        : store.presets.rename(presetId, payload.name);
+      if (!result.ok) {
+        sendJson(res, 400, { error: result.reason, message: result.message });
+        return;
+      }
+      // A project using this preset now compares against a definition that moved,
+      // so its own copy and results are refreshed rather than left misleading.
+      const project = store.activeProject();
+      if (project !== null && store.referenceFor(project.id).presetId === presetId) {
+        store.setReferenceState(project.id, presetToState(store.presets.get(presetId) as Preset));
+      }
+      sendJson(res, 200, workspace());
+      return;
+    }
+    if (req.method === 'DELETE' && path.startsWith('/api/presets/')) {
+      const presetId = decodeURIComponent(path.slice('/api/presets/'.length));
+      const removed = store.presets.delete(presetId);
+      if (!removed.ok) {
+        sendJson(res, removed.reason === 'SYSTEM_PRESET' ? 409 : 404, {
+          error: removed.reason,
+          message: removed.message,
+        });
+        return;
+      }
+      // A project still pointing at the deleted reference falls back to the
+      // default, so the comparison always has a valid basis.
+      const project = store.activeProject();
+      if (project !== null && store.referenceFor(project.id).presetId === presetId) {
+        store.usePreset(project.id, store.presets.defaultId());
+      }
+      sendJson(res, 200, workspace());
+      return;
+    }
     if (req.method === 'POST' && path === '/api/expected') {
       const body = await readJsonBody(req);
       let payload: unknown;
@@ -246,67 +486,81 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'invalid JSON body' });
         return;
       }
-
+      const project = store.activeProject();
+      if (project === null) {
+        sendJson(res, 400, { error: 'no active project' });
+        return;
+      }
+      // Selecting a named preset replaces the reference wholesale.
+      const presetId = (payload as { presetId?: unknown }).presetId;
+      if (typeof presetId === 'string' && presetId.length > 0) {
+        const applied = store.usePreset(project.id, presetId);
+        if (!applied.ok) {
+          sendJson(res, 404, { error: applied.reason, message: applied.message });
+          return;
+        }
+        sendJson(res, 200, workspace());
+        return;
+      }
+      // Otherwise an explicit item list is an operator edit of this project's copy.
       const resolved = resolveExpectedState(payload);
       if (!resolved.ok) {
         sendJson(res, 400, { error: resolved.reason });
         return;
       }
-      sendJson(res, 200, session.setExpectedState(resolved.state));
+      store.setReferenceState(project.id, resolved.state);
+      sendJson(res, 200, workspace());
       return;
     }
 
+    // --- capture bytes -------------------------------------------------------
     if (req.method === 'GET' && path.startsWith('/api/capture-image/')) {
       const id = decodeURIComponent(path.slice('/api/capture-image/'.length));
-      const found = findCapture(id);
-      if (!found) {
-        sendJson(res, 404, { error: 'unknown capture' });
+      const owned = store.activeCapture(id);
+      if (!owned.ok) {
+        sendJson(res, owned.reason === 'NOT_OWNED' ? 403 : 404, {
+          error: owned.reason,
+          message: owned.message,
+        });
         return;
       }
       res.writeHead(200, {
-        'Content-Type': found.mediaType,
-        'Content-Length': found.bytes.length,
+        'Content-Type': owned.value.mediaType,
+        'Content-Length': owned.value.bytes.length,
         'Cache-Control': 'no-store',
       });
-      res.end(found.bytes);
+      res.end(owned.value.bytes);
       return;
     }
-
     if (req.method === 'POST' && path === '/api/run') {
       const raw = await readJsonBody(req);
-      let captureId: unknown = null;
       if (raw.trim().length > 0) {
         try {
           const parsed = JSON.parse(raw) as { captureId?: unknown; cache?: unknown };
-          captureId = parsed.captureId;
           // Caching is opt-in per request AND gated by the server switch, so a
           // cached answer can never be served without the UI asking for it.
           if (typeof parsed.cache === 'boolean') cacheEnabled = parsed.cache;
+          if (typeof parsed.captureId === 'string') {
+            // Ownership is validated here, so a capture id from another project
+            // is refused rather than quietly inspected.
+            const selected = store.selectCapture(parsed.captureId);
+            if (!selected.ok) {
+              sendJson(res, selected.reason === 'NOT_OWNED' ? 403 : 404, {
+                error: selected.reason,
+                message: selected.message,
+              });
+              return;
+            }
+          }
         } catch {
           sendJson(res, 400, { error: 'invalid JSON body' });
           return;
         }
-        if (typeof captureId === 'string') {
-          // An operator upload is a real capture too: prefer the in-memory
-          // upload when the id matches, and only then the generated fixtures.
-          const next =
-            uploaded !== null && uploaded.id === captureId ? uploaded : findCapture(captureId);
-          if (!next) {
-            sendJson(res, 404, { error: 'unknown capture' });
-            return;
-          }
-          // Switching capture starts a fresh session so observations from one
-          // image can never be displayed against another. The expected state is
-          // carried over, because the reference belongs to the ZONE, not to the
-          // photograph.
-          session = new InspectionSession(
-            options.provider,
-            next,
-            options.projectId,
-            options.zoneId,
-            session.getExpectedState(),
-          );
-        }
+      }
+      const session = activeSession();
+      if (session === null) {
+        sendJson(res, 400, { error: 'no capture selected' });
+        return;
       }
       sendJson(res, 200, await session.run({ useCache: cacheEnabled }));
       return;
@@ -317,19 +571,20 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       sendJson(res, 200, { enabled: cacheEnabled, ...inspectionCache.getStats() });
       return;
     }
-
     if (req.method === 'POST' && path === '/api/cache/clear') {
       inspectionCache.clear();
       sendJson(res, 200, { cleared: true, ...inspectionCache.getStats() });
       return;
     }
-
     // Capture upload
     if (req.method === 'POST' && path === '/api/upload') {
+      if (store.activeProject() === null) {
+        sendJson(res, 400, { error: 'create a project before uploading a capture' });
+        return;
+      }
       const query = new URL(req.url ?? '/', 'http://' + LOOPBACK).searchParams;
       const filename = (query.get('name') ?? 'capture').slice(0, 200);
       const declared = query.get('type') ?? undefined;
-
       let bytes: Buffer;
       try {
         bytes = await readBody(req, MAX_CAPTURE_BYTES + 1024);
@@ -341,40 +596,22 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         });
         return;
       }
-
       const result = acceptCapture({ bytes, filename, declaredMediaType: declared });
       if (!result.ok) {
         sendJson(res, 400, { error: result.reason, message: result.message });
         return;
       }
-
-      // A new capture always begins a new session, so observations from a
-      // previous image can never be displayed against this one. The expected
-      // state is carried over: the reference belongs to the zone, not the photo.
-      session = new InspectionSession(
-        options.provider,
-        result.capture,
-        options.projectId,
-        options.zoneId,
-        session.getExpectedState(),
-      );
-      uploaded = result.capture;
-
-      sendJson(res, 200, {
-        capture: {
-          id: result.capture.id,
-          label: result.capture.label,
-          content: result.capture.content,
-          width: result.capture.dimensions.width,
-          height: result.capture.dimensions.height,
-          byteLength: result.capture.bytes.length,
-          mediaType: result.capture.mediaType,
-        },
-        view: session.view(),
+      // The upload is owned by the active project and selected immediately, so
+      // the operator can inspect it without a second step. Its session is fresh,
+      // which is what stops one image's observations appearing against another.
+      const stored = store.addCapture({
+        ...result.capture,
+        source: 'UPLOAD',
       });
+      store.selectCapture(stored.id);
+      sendJson(res, 200, { capture: captureSummary(stored), ...workspace() });
       return;
     }
-
     if (req.method === 'POST' && path === '/api/review') {
       const body = await readJsonBody(req);
       let payload: {
@@ -407,7 +644,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       sendJson(
         res,
         200,
-        session.review({
+        requireSession().review({
           observationId,
           decision,
           reviewer: reviewer.trim(),
@@ -448,7 +685,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       sendJson(
         res,
         200,
-        session.reviewFinding({
+        requireSession().reviewFinding({
           findingId,
           decision,
           reviewer: reviewer.trim(),
@@ -457,7 +694,6 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       );
       return;
     }
-
     if (req.method === 'POST' && path === '/api/finding-state') {
       const body = await readJsonBody(req);
       let payload: { findingId?: unknown; state?: unknown };
@@ -476,10 +712,9 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'state must be OPEN, ACKNOWLEDGED or CLOSED' });
         return;
       }
-      sendJson(res, 200, session.setFindingState(findingId, state));
+      sendJson(res, 200, requireSession().setFindingState(findingId, state));
       return;
     }
-
     if (req.method === 'GET' && (path === '/' || path === '/index.html')) {
       res.writeHead(200, {
         'Content-Type': 'text/html; charset=utf-8',
@@ -488,7 +723,6 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       res.end(INDEX_HTML);
       return;
     }
-
     if (req.method === 'GET' && path === '/app.css') {
       res.writeHead(200, {
         'Content-Type': 'text/css; charset=utf-8',
@@ -497,7 +731,6 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       res.end(APP_CSS);
       return;
     }
-
     if (req.method === 'GET' && path === '/app.js') {
       res.writeHead(200, {
         'Content-Type': 'text/javascript; charset=utf-8',
@@ -506,13 +739,10 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       res.end(APP_JS);
       return;
     }
-
     sendJson(res, 404, { error: 'not found' });
   }
-
-  return { server, session };
+  return { server, store };
 }
-
 /** Entry point used by `npm run ui`. */
 export async function startInspectionServer(port = 4317): Promise<void> {
   let provider: AIProvider;
@@ -526,14 +756,11 @@ export async function startInspectionServer(port = 4317): Promise<void> {
     }
     throw error;
   }
-
   const handle = createInspectionServer({
     provider,
-    projectId: process.env['DEMO_PROJECT_ID'] ?? 'proj_demo_site_a',
     zoneId: process.env['DEMO_ZONE_ID'] ?? 'zone_level_02',
     initialCaptureId: process.env['DEMO_CAPTURE'] ?? null,
   });
-
   handle.server.listen(port, LOOPBACK, () => {
     console.log('\n  SiteLens AI Reality Inspector');
     console.log(`  provider  : ${provider.name}`);
@@ -542,5 +769,4 @@ export async function startInspectionServer(port = 4317): Promise<void> {
     console.log('  Loopback only. Press Ctrl+C to stop.\n');
   });
 }
-
 export type { SessionView };

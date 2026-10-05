@@ -32,6 +32,27 @@ export const INDEX_HTML = `<!doctype html>
     <span class="rig-meta-i"><b>CAPTURE</b><span id="meta-capture">-</span></span>
   </div>
 
+  <div class="proj">
+    <button type="button" class="proj-btn" id="proj-btn" aria-haspopup="dialog"
+            aria-expanded="false" aria-controls="proj-menu">
+      <span class="proj-k">Project</span>
+      <span class="proj-name" id="proj-name">No project</span>
+      <span class="proj-caret" aria-hidden="true"></span>
+    </button>
+    <button type="button" class="btn btn-ghost btn-xs" id="proj-new">New project</button>
+    <div class="proj-menu" id="proj-menu" role="dialog" aria-label="Projects" hidden>
+      <p class="proj-menu-h">Projects</p>
+      <ul class="proj-list" id="proj-list"></ul>
+      <p class="proj-empty" id="proj-empty" hidden>
+        No projects yet. Create one before capturing or inspecting.
+      </p>
+      <div class="proj-menu-acts">
+        <button type="button" class="btn btn-ghost btn-xs" id="proj-rename">Rename project</button>
+        <button type="button" class="btn btn-red btn-xs" id="proj-delete">Delete project</button>
+      </div>
+    </div>
+  </div>
+
   <nav class="rig-nav" aria-label="Workflow" role="tablist">
     <button type="button" class="step" id="tab-capture" role="tab"
             data-step="capture" aria-controls="bay-capture" aria-selected="true">
@@ -70,6 +91,60 @@ export const INDEX_HTML = `<!doctype html>
 
 <div class="notice" id="notice" role="status" aria-live="polite"></div>
 
+<dialog class="modal" id="proj-modal" aria-labelledby="proj-modal-h">
+  <form method="dialog" class="modal-card" id="proj-form">
+    <h2 class="modal-h" id="proj-modal-h">New project</h2>
+    <label class="field">
+      <span class="field-t" id="proj-label-name">Project name</span>
+      <input type="text" id="proj-input-name" maxlength="80" required autocomplete="off">
+    </label>
+    <label class="field">
+      <span class="field-t">Location <span class="field-opt">optional</span></span>
+      <input type="text" id="proj-input-location" maxlength="120" autocomplete="off">
+    </label>
+    <p class="modal-note" id="proj-modal-note" hidden></p>
+    <div class="modal-acts">
+      <button type="button" class="btn btn-ghost" id="proj-cancel">Cancel</button>
+      <button type="submit" class="btn" id="proj-save">Create project</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal" id="preset-modal" aria-labelledby="preset-modal-h">
+  <form method="dialog" class="modal-card" id="preset-form">
+    <h2 class="modal-h" id="preset-modal-h">New reference</h2>
+    <label class="field">
+      <span class="field-t">Reference name</span>
+      <input type="text" id="preset-input-name" maxlength="60" required autocomplete="off">
+    </label>
+    <label class="field">
+      <span class="field-t">Zone</span>
+      <input type="text" id="preset-input-zone" maxlength="60" required autocomplete="off">
+    </label>
+    <div class="field">
+      <span class="field-t">Expected elements</span>
+      <div id="preset-items" class="preset-items"></div>
+      <button type="button" class="btn btn-ghost btn-xs" id="preset-add">Add element</button>
+    </div>
+    <p class="modal-note" id="preset-modal-note" hidden></p>
+    <div class="modal-acts">
+      <button type="button" class="btn btn-ghost" id="preset-cancel">Cancel</button>
+      <button type="submit" class="btn" id="preset-save">Create reference</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="modal" id="del-modal" aria-labelledby="del-modal-h">
+  <div class="modal-card">
+    <h2 class="modal-h" id="del-modal-h">Delete project</h2>
+    <p class="modal-body" id="del-body">This cannot be undone.</p>
+    <div class="modal-acts">
+      <button type="button" class="btn btn-ghost" id="del-cancel">Cancel</button>
+      <button type="button" class="btn btn-red" id="del-confirm">Delete</button>
+    </div>
+  </div>
+</dialog>
+
 <main id="stage" class="stage">
 
   <section class="bay bay-capture" id="bay-capture" role="tabpanel"
@@ -105,11 +180,16 @@ export const INDEX_HTML = `<!doctype html>
             <button type="button" class="btn btn-ghost" id="remove">Remove</button>
             <button type="button" class="btn btn-red" id="run">Inspect reality</button>
           </div>
+          <p class="storage-note" id="storage-note">Storage: checking…</p>
         </div>
 
         <div class="fixtures">
-          <p class="fixtures-h">Demo captures</p>
+          <p class="fixtures-h">Captures in this project</p>
           <ul class="fixture-list" id="fixture-list"></ul>
+          <p class="fixtures-empty" id="capture-empty" hidden>
+            No captures in this project yet. Drop a site photograph above, or
+            choose a demo capture.
+          </p>
         </div>
       </div>
 
@@ -126,16 +206,17 @@ export const INDEX_HTML = `<!doctype html>
 
           <label class="field">
             <span class="field-t">Reference</span>
-            <select id="expected-preset">
-              <option value="north-core">North Core (demo preset)</option>
-              <option value="south-wing">South Wing (demo preset)</option>
-            </select>
+            <select id="expected-preset" aria-describedby="expected-active"></select>
           </label>
+          <p class="ref-active" id="expected-active">No reference selected.</p>
 
           <ul class="exp-list" id="expected-list"></ul>
 
           <div class="panel-acts">
             <button type="button" class="btn btn-ghost" id="expected-apply">Apply reference</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="expected-new">New reference</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="expected-rename">Rename</button>
+            <button type="button" class="btn btn-red btn-xs" id="expected-delete" disabled>Delete</button>
           </div>
           <p class="note" id="expected-note">
             Edit a count, then apply and re-inspect. A preset is a demonstration

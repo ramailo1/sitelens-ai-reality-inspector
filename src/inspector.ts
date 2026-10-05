@@ -16,7 +16,13 @@ import {
 } from './types/observation.ts';
 import { validateDetectedElement, validateModelFinding } from './types/inspection.ts';
 import type { DetectedElement, InspectionFinding } from './types/inspection.ts';
-import type { RawModelObservation } from './types/observation.ts';
+import type {
+  AIObservation,
+  ObservationReview,
+  RawModelObservation,
+  ValidationIssue,
+  VerificationStatus,
+} from './types/observation.ts';
 import type { InferenceOrigin, InspectionCache } from './cache.ts';
 import { computeCacheKey } from './cache.ts';
 import type { RawProviderResult } from './providers/provider.ts';
@@ -55,12 +61,6 @@ function toCacheableFinding(f: InspectionFinding): Record<string, unknown> {
 }
 
 export type { InferenceOrigin };
-import type {
-  AIObservation,
-  ObservationReview,
-  ValidationIssue,
-  VerificationStatus,
-} from './types/observation.ts';
 
 /** Result of one inspection run. */
 export interface InspectionResult {
@@ -126,6 +126,22 @@ export type InspectionOutcome =
       readonly message: string;
       readonly detail: string | null;
     };
+
+export type InspectionStatus = 'COMPLETED' | 'VALIDATION_FAILED' | 'VALIDATION_EMPTY';
+
+/**
+ * Whether a validated result counts as a completed run. Anything the model
+ * said that survived validation counts: observations, elements and findings
+ * alike.
+ */
+export function classifyUsableOutput(result: InspectionResult): InspectionStatus {
+  const usable =
+    result.observations.length > 0 ||
+    (result.elements?.length ?? 0) > 0 ||
+    (result.modelFindings?.length ?? 0) > 0;
+  if (usable) return 'COMPLETED';
+  return result.rejected.length > 0 ? 'VALIDATION_FAILED' : 'VALIDATION_EMPTY';
+}
 
 export interface InspectOptions {
   readonly image: InspectRequest['image'];
@@ -387,12 +403,7 @@ export class RealityInspector {
       throw error;
     }
 
-    const status =
-      result.observations.length > 0
-        ? 'COMPLETED'
-        : result.rejected.length > 0
-          ? 'VALIDATION_FAILED'
-          : 'VALIDATION_EMPTY';
+    const status = classifyUsableOutput(result);
 
     return { status, result, validationFailures: result.rejected } as InspectionOutcome;
   }

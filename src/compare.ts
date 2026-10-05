@@ -26,7 +26,6 @@ import type {
 import { elementLabel } from './types/inspection.ts';
 
 export interface CompareOptions {
-  readonly now?: () => Date;
   /** Overridable for tests; defaults to a deterministic id per expected item. */
   readonly idFactory?: (item: ExpectedItem) => string;
 }

@@ -137,7 +137,7 @@ async function main(): Promise<number> {
     throw error;
   }
 
-heading('STEP 3 — Structured construction observations');
+  heading('STEP 3 — Structured construction observations');
   console.log(`    model returned ${result.observations.length} valid observation(s)`);
   if (result.rejected.length > 0) {
     console.log(`    ${result.rejected.length} entry/entries REJECTED by validation (not shown)`);

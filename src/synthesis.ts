@@ -56,7 +56,6 @@ export interface SynthesizeOptions {
   readonly synthetic: boolean;
   /** Overridable for tests; derives a stable id from the finding's content. */
   readonly idFactory?: (key: string) => string;
-  readonly now?: () => Date;
 }
 
 /**

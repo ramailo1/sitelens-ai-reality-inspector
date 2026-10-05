@@ -66,8 +66,11 @@ function resolveMediaType(
   const byExtension = MEDIA_TYPE_BY_EXTENSION[extensionOf(filename)];
   if (byExtension) return byExtension;
   const declaredLower = declared?.trim().toLowerCase();
-  if (declaredLower === 'image/png' || declaredLower === 'image/jpeg') {
-    return declaredLower;
+  if (
+    declaredLower !== undefined &&
+    (ACCEPTED_MEDIA_TYPES as readonly string[]).includes(declaredLower)
+  ) {
+    return declaredLower as AcceptedMediaType;
   }
   return null;
 }

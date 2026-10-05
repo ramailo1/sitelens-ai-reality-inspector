@@ -32,8 +32,6 @@ export interface EvaluationOutcome {
   readonly producedObservations: boolean;
   readonly accepted: number;
   readonly rejected: number;
-  /** Rejections must be visible, never silently discarded. */
-  readonly rejectionReported: boolean;
   /** Every accepted observation must remain AI_GENERATED at creation. */
   readonly allAiGenerated: boolean;
   readonly allUnverified: boolean;
@@ -136,7 +134,6 @@ export async function runEvaluation(
         producedObservations: result.observations.length > 0,
         accepted: result.observations.length,
         rejected: result.rejected.length,
-        rejectionReported: true,
         allAiGenerated,
         allUnverified,
         latencyMs,
@@ -154,7 +151,6 @@ export async function runEvaluation(
         producedObservations: false,
         accepted: 0,
         rejected: 0,
-        rejectionReported: true,
         allAiGenerated: true,
         allUnverified: true,
         latencyMs,

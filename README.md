@@ -15,7 +15,7 @@ Built for the **Nebius × NVIDIA Global AI Hackathon**.
 
 ```bash
 npm install          # zero runtime dependencies
-npm test             # 180 tests
+npm test             # 251 tests
 npm run typecheck    # strict tsc, no emit
 
 # Deterministic offline demo (no network, no key needed):
@@ -32,21 +32,55 @@ Node ≥ 22.6 (uses native type-stripping; there is no build step).
 ## The 60-second demo path
 
 1. `npm run ui`, open `http://127.0.0.1:4317`.
-2. **Capture** — click *Steel frame — open edge* under "Demo captures".
-3. The **Reality vs expected** table appears immediately: six expected items,
-   compared against what the model saw.
-4. Click **Inspect reality**.
-5. The tool moves to **Evidence**: the capture fills the stage, numbered boxes
+2. **Project** — the masthead selector opens the project list. Create, rename or
+   delete projects from here; the current project's captures, reference and
+   findings belong to it alone.
+3. **Capture** — click a capture in *Captures in this project*, or drop a site
+   photograph.
+4. The **Reality vs expected** table appears: the expected items compared against
+   what the model saw.
+5. Click **Inspect reality**.
+6. The tool moves to **Evidence**: the capture fills the stage, numbered boxes
    mark where the AI flagged something, and the right rail reads
    `REALITY / INSPECTION / FINDINGS / CONFIDENCE / OVERALL`.
-6. Click any finding. It expands to **WHAT · WHERE · WHY FLAGGED · EXPECTED ·
+7. Click any finding. It expands to **WHAT · WHERE · WHY FLAGGED · EXPECTED ·
    DIFFERENCE · CONFIDENCE · RECOMMENDED ACTION · EVIDENCE · VERIFICATION**,
    and its region lights up on the image.
-7. Type a name in **Reviewer** and press **CONFIRM**.
-   The card flips from `AI SUSPECTED → UNVERIFIED` to `HUMAN VERIFIED →
-   VERIFIED`, records who and when, and drops out of the priority list.
+8. Type a name in **Reviewer** and press **CONFIRM**. The card flips from
+   `AI SUSPECTED → UNVERIFIED` to `HUMAN VERIFIED → VERIFIED`, records who and
+   when, and drops out of the priority list.
 
-Nothing is verified until step 7. That is the product, not a caveat.
+Nothing is verified until step 8. That is the product, not a caveat.
+
+### Projects, captures and references
+
+A project owns its captures, its inspection results and its comparison reference.
+Switching projects replaces all three, and the server refuses to read, run or
+delete a capture through an id that belongs to another project. Deleting a project
+removes its captures with it; deleting the last project returns to the empty state
+where a new one can be created.
+
+The **expected-state reference** is a named preset. Two are built in and cannot
+be deleted; an operator can add, rename and delete their own. A project records
+which preset it uses, and operator edits are recorded against the project rather
+than mutating the shared catalogue. Changing a reference discards any comparison
+the old reference produced, so a row on screen always belongs to the reference
+named above it.
+
+### Where uploaded images are stored
+
+Uploaded images are held **in the memory of the running server process**. They are
+never written to disk, and there is no database or object store behind them.
+`GET /api/capture-image/:id` serves those same bytes back, and only to the project
+that owns the capture.
+
+**Nothing survives a restart.** Projects, uploads, custom references, inspection
+results and human verifications are all lost when the server stops; the app
+reopens with its synthetic demo project. This is deliberate for a hackathon
+demonstration and is stated in the UI next to the capture, not left implied.
+
+Deleting a capture releases its bytes immediately, and deleting a project
+releases every image it owned.
 
 ---
 
@@ -207,7 +241,8 @@ src/
   types/inspection.ts    the domain contract + strict validation of model output
   compare.ts             REALITY vs EXPECTED — deterministic, in code
   synthesis.ts           findings, priorities, reality brief, counters
-  expected-state.ts      the lightweight comparison reference
+  expected-state.ts      the reference (preset) catalogue + validation
+  projects.ts            project + capture ownership; one session per capture
   inspector.ts           the only place untrusted output becomes product data
   session.ts             one inspection session; derives every view
   server.ts              loopback JSON API + static assets
@@ -225,7 +260,7 @@ are three distinct outcomes.
 
 ## Tests
 
-`npm test` — 180 tests, no network access.
+`npm test` — 251 tests, no network access.
 
 | Area | What is locked in |
 |---|---|
@@ -235,6 +270,9 @@ are three distinct outcomes.
 | Expected state | Presets stay `PRESET`, operator edits are always `OPERATOR` — provenance is never laundered. |
 | Validation | Unknown enums, pixel-space boxes, out-of-range confidence and impossible counts are all rejected. |
 | Trust | Every finding starts `UNVERIFIED`. Confidence never auto-verifies. A provider failure yields nothing. |
+| Projects | A capture, its findings and its reference belong to one project. Another project's capture cannot be read, run or deleted. Deleting a project removes its captures; deleting the last one returns to the empty state. |
+| References | Built-in references cannot be deleted. A custom reference can be created, renamed and deleted. Changing a project's reference discards the comparison the previous one produced. |
+| Storage | Uploaded bytes are held in process memory only. Deleting a capture or project releases them; nothing survives a restart, and the UI says so. |
 | Provider | Bounded completion, bearer auth, image as data URL, every HTTP failure mapped explicitly. |
 | UI | Assets parse; the tablist is real; an inspection only advances when it actually completed. |
 
@@ -258,5 +296,11 @@ submission narrative and full eligibility evidence.
 MIT — see [LICENSE](./LICENSE).
 
 `.env` is git-ignored. `.env.example` contains placeholders only. No customer
-imagery is present; the bundled demo captures are synthetic scenes generated in
-code.
+imagery is present; the demo captures the application ships are synthetic scenes
+generated in code.
+
+A separate, **local-only** reference dataset of genuine CC-licensed construction
+photographs may be present in a `sample/` directory on a working copy. It is not
+tracked by git, is not loaded by the application, and nothing in this repository
+depends on it. Where it exists, `sample/SOURCES.md` carries the per-file
+provenance, licences and checksums.

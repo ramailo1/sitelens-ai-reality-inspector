@@ -18,13 +18,17 @@ const state = {
   view: null,
   captures: [],
   expected: null,
+  projects: [],
+  project: null,
+  presets: [],
+  reference: null,
+  storage: null,
+  presetDraft: [],
   currentCaptureId: null,
-  uploaded: false,
-  uploadLabel: null,
   activeId: null,
   openIds: new Set(),
   running: false,
-  seen: new Set()
+  pendingDelete: null
 };
 
 const TAB_ORDER = ['capture', 'inspect', 'evidence', 'findings'];
@@ -62,6 +66,40 @@ function post(path, payload) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
+}
+
+function patch(path, payload) {
+  return api(path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+}
+
+function del(path) {
+  return api(path, { method: 'DELETE' });
+}
+
+/**
+ * Apply an authoritative workspace payload.
+ *
+ * Every mutation answers with the project, the project's captures and the active
+ * view together, so applying one replaces the whole client state rather than
+ * merging into it. That is what stops a deleted project or a capture from
+ * another project surviving on screen.
+ */
+function applyWorkspace(payload) {
+  if (payload === null || payload === undefined) return;
+  state.project = payload.project;
+  state.projects = payload.projects || [];
+  state.presets = payload.presets || [];
+  state.reference = payload.reference || null;
+  state.storage = payload.storage || null;
+  state.captures = payload.captures || [];
+  state.currentCaptureId = payload.activeCaptureId || null;
+  state.view = payload.view || null;
+  state.activeId = null;
+  state.openIds.clear();
 }
 
 /** Status text is mirrored outside the tab panels, so a message raised on one
@@ -148,16 +186,56 @@ function pretty(kind) {
   return kind.toLowerCase().replace(/_/g, ' ');
 }
 
-/** Render the current expected state as editable rows. */
+/** The active reference, the catalogue and where the bytes actually live. */
+function renderReference() {
+  const select = $('expected-preset');
+  const reference = state.reference;
+  if (select) {
+    clear(select);
+    state.presets.forEach((preset) => {
+      const option = document.createElement('option');
+      option.value = preset.id;
+      option.textContent = preset.name + (preset.source === 'SYSTEM' ? '' : ' (custom)');
+      if (reference && preset.id === reference.presetId) option.selected = true;
+      select.appendChild(option);
+    });
+  }
+
+  const active = $('expected-active');
+  if (active) {
+    if (!reference) {
+      active.textContent = 'No reference selected.';
+    } else {
+      active.textContent =
+        reference.name + ' — ' + reference.zone + ' — ' + reference.itemCount +
+        ' expected element' + (reference.itemCount === 1 ? '' : 's') +
+        (reference.edited ? ' (edited)' : '');
+    }
+  }
+
+  $('expected-delete').disabled = reference === null || !reference.deletable;
+  $('expected-rename').disabled = reference === null;
+  $('expected-new').disabled = reference === null;
+}
+
+function renderStorage() {
+  const node = $('storage-note');
+  if (!node) return;
+  if (!state.storage) {
+    node.textContent = 'Storage: unknown.';
+    return;
+  }
+  node.textContent = 'Storage: ' + state.storage.location + '. ' + state.storage.detail;
+}
+
 function renderExpected() {
+  renderReference();
   const host = $('expected-list');
   clear(host);
   const expected = state.expected;
   if (expected === null) return;
 
   setText('expected-source', expected.source);
-  // The zone is surfaced in the masthead (meta-zone); this panel is about the
-  // items themselves.
 
   expected.items.forEach((item, index) => {
     const row = el('li', 'exp-row');
@@ -227,6 +305,46 @@ function collectExpected() {
 }
 
 /**
+ * Where the photograph is ACTUALLY painted inside its element.
+ *
+ * The stage letterboxes every capture (object-fit: contain), so the painted
+ * photo is normally narrower AND shorter than the element that holds it. Scaling
+ * evidence boxes by clientWidth/naturalWidth therefore used the ELEMENT width
+ * rather than the painted one: on a 320x240 fixture in a 1332x620 stage the
+ * horizontal scale came out 1.6x too large, and every box landed partly outside
+ * the photograph it was supposed to point at. A box pointing at nothing is worse
+ * than no box, so the overlay is scaled and offset against the painted rectangle.
+ *
+ * Returns null while the image has no intrinsic size yet, so the caller draws
+ * nothing rather than guessing.
+ */
+function paintedArea(image) {
+  const naturalWidth = image.naturalWidth;
+  const naturalHeight = image.naturalHeight;
+  const elementWidth = image.clientWidth;
+  const elementHeight = image.clientHeight;
+  if (naturalWidth === 0 || naturalHeight === 0) return null;
+  if (elementWidth === 0 || elementHeight === 0) return null;
+
+  const fit = window.getComputedStyle(image).objectFit;
+  // 'fill' stretches across the whole element, so the element IS the painted area.
+  if (fit === 'fill' || fit === undefined || fit === '') {
+    return { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 };
+  }
+
+  // 'contain', 'scale-down' and 'cover' all scale by the same factor and centre
+  // the result; only the visible extent differs, which the overlay's clipping
+  // already handles.
+  const scale = Math.min(elementWidth / naturalWidth, elementHeight / naturalHeight);
+  return {
+    scaleX: scale,
+    scaleY: scale,
+    offsetX: (elementWidth - naturalWidth * scale) / 2,
+    offsetY: (elementHeight - naturalHeight * scale) / 2,
+  };
+}
+
+/**
  * Draw evidence boxes over the reality image.
  *
  * A box is only ever drawn when the server sent REAL pixel geometry for that
@@ -240,10 +358,10 @@ function renderOverlay() {
 
   const view = state.view;
   const image = $('evidence-image');
-  if (view === null || image === null || image.naturalWidth === 0) return;
+  if (view === null || image === null) return;
+  const area = paintedArea(image);
+  if (area === null) return;
 
-  const scaleX = image.clientWidth / image.naturalWidth;
-  const scaleY = image.clientHeight / image.naturalHeight;
   const findings = view.inspectionFindings || [];
 
   findings.forEach((finding, index) => {
@@ -251,10 +369,10 @@ function renderOverlay() {
 
     const box = finding.pixelBox;
     const node = el('div', 'ev');
-    node.style.left = (box.left * scaleX) + 'px';
-    node.style.top = (box.top * scaleY) + 'px';
-    node.style.width = (box.width * scaleX) + 'px';
-    node.style.height = (box.height * scaleY) + 'px';
+    node.style.left = (area.offsetX + box.left * area.scaleX) + 'px';
+    node.style.top = (area.offsetY + box.top * area.scaleY) + 'px';
+    node.style.width = (box.width * area.scaleX) + 'px';
+    node.style.height = (box.height * area.scaleY) + 'px';
     node.dataset.origin = finding.origin;
     node.dataset.findingId = finding.id;
     node.dataset.status = finding.verificationStatus;
@@ -280,7 +398,10 @@ function renderHeader() {
   if (view === null) return;
   const p = view.provenance;
 
-  setText('meta-project', p.projectId === null ? 'local demo' : p.projectId);
+  // The masthead names the project the operator can recognise. The session's
+  // own projectId is an internal identifier and is shown in Provenance, where it
+  // belongs - writing it here replaced the name with "proj_1a2b3c4d".
+  setText('meta-project', state.project ? state.project.name : '-');
   setText('meta-zone', view.expected ? view.expected.zone : '-');
   setText('meta-capture', p.captureLabel);
   setText('hdr-model', p.model);
@@ -410,7 +531,6 @@ function statusTag(status) {
   return el('span', cls, status.replace(/_/g, ' '));
 }
 
-/** A definition row inside the finding detail. */
 /**
  * A definition row inside the finding detail.
  *
@@ -726,7 +846,7 @@ function renderStage() {
   const view = state.view;
   if (view === null) return;
   const p = view.provenance;
-  const src = state.uploaded ? '/api/upload-image' : '/api/capture-image/' + encodeURIComponent(p.captureId);
+  const src = '/api/capture-image/' + encodeURIComponent(p.captureId);
   const image = $('evidence-image');
   if (image.dataset.src !== src) {
     image.dataset.src = src;
@@ -774,38 +894,79 @@ function renderAll() {
 function renderFixtures() {
   const host = $('fixture-list');
   clear(host);
+  $('capture-empty').hidden = state.captures.length > 0 || state.project === null;
+
   state.captures.forEach((capture) => {
-    const item = el('li');
-    const button = el('button', 'fixture', capture.label);
+    const row = el('li', 'capture-row');
+    if (state.currentCaptureId === capture.id) row.setAttribute('aria-current', 'true');
+
+    const button = el('button', 'capture-main');
     button.type = 'button';
-    button.appendChild(el('small', null, capture.width + 'x' + capture.height + ' - ' + capture.content));
-    if (state.currentCaptureId === capture.id) button.setAttribute('aria-current', 'true');
+    button.appendChild(el('span', null, capture.label));
+
+    const meta = el('div', 'capture-meta');
+    const source = el('span', 'capture-tag', capture.source === 'UPLOAD' ? 'UPLOAD' : 'DEMO FIXTURE');
+    source.setAttribute('data-source', capture.source);
+    meta.appendChild(source);
+    meta.appendChild(el('span', null, capture.width + 'x' + capture.height));
+    meta.appendChild(el('span', null, bytes(capture.byteLength)));
+    meta.appendChild(el('span', null, capture.zoneId || 'no zone'));
+    meta.appendChild(el('span', null, String(capture.createdAt).replace('T', ' ').slice(0, 16)));
+    button.appendChild(meta);
+
     button.addEventListener('click', () => loadCapture(capture.id));
-    item.appendChild(button);
-    host.appendChild(item);
+    row.appendChild(button);
+
+    const del = el('button', 'capture-del', '×');
+    del.type = 'button';
+    del.setAttribute('aria-label', 'Delete capture ' + capture.label);
+    del.addEventListener('click', () => confirmDeleteCapture(capture));
+    row.appendChild(del);
+
+    host.appendChild(row);
   });
 }
 
 function showLoaded(label) {
+  if (state.currentCaptureId === null) {
+    $('loaded').hidden = true;
+    return;
+  }
   $('loaded').hidden = false;
   const image = $('capture-image');
-  image.src = state.uploaded ? '/api/upload-image' : '/api/capture-image/' + encodeURIComponent(state.currentCaptureId);
+  image.src = '/api/capture-image/' + encodeURIComponent(state.currentCaptureId);
   image.alt = label;
 }
 
+/**
+ * Select a capture WITHOUT running the model.
+ *
+ * Selecting is a view change. It used to post to /api/run, which spent a real
+ * vision inference on every click, burned provider quota, and reported a fresh
+ * "result" for a capture nobody asked to inspect - while the documented flow is
+ * select, then inspect. The selection endpoint returns the whole workspace, so
+ * a capture that was already inspected comes back with its result and its human
+ * verifications intact.
+ */
 async function loadCapture(captureId) {
-  state.uploaded = false;
-  state.currentCaptureId = captureId;
   state.activeId = null;
   state.openIds.clear();
-  renderFixtures();
+  setLamp('working', 'Selecting capture');
   notify('');
   try {
-    state.view = await post('/api/run', { captureId: captureId });
-    showLoaded(state.view.provenance.captureLabel);
-    setLamp('done', 'Capture loaded - inspect when ready');
-    renderAll();
+    applyWorkspace(await post('/api/captures/select', { captureId: captureId }));
+    renderWorkspace();
+    const inspected = state.view !== null && state.view.outcome !== 'PENDING';
+    setLamp('ready', 'Capture selected - inspect when ready');
+    setStatus(
+      inspected
+        ? 'Restored the last inspection of this capture. Inspect again for a fresh reading.'
+        : 'Capture selected. Press Inspect reality to analyse it.',
+      null
+    );
+    notify(inspected ? 'Capture selected; showing its last inspection.' : 'Capture selected.', 'good');
   } catch (error) {
+    setLamp('problem', 'Capture could not be selected');
     notify(error.message, 'bad');
   }
 }
@@ -829,14 +990,10 @@ async function uploadFile(file) {
       return;
     }
 
-    state.uploaded = true;
-    state.currentCaptureId = payload.capture.id;
-    state.view = payload.view;
-    state.activeId = null;
-    state.openIds.clear();
+    applyWorkspace(payload);
     showLoaded(payload.capture.label);
     renderFixtures();
-    notify('Capture loaded: ' + payload.capture.label + '. Inspect it when ready.', 'good');
+    notify('Capture added to ' + (state.project ? state.project.name : 'this project') + '. Inspect it when ready.', 'good');
     setLamp('ready', 'Capture loaded - inspect when ready');
     renderAll();
   } catch (uploadError) {
@@ -964,12 +1121,12 @@ function describeFailure(kind, message) {
 async function applyExpected(presetId) {
   const preset = presetId === undefined ? $('expected-preset').value : presetId;
   try {
-    const view = await post('/api/expected', { presetId: preset });
-    state.view = view;
-    state.expected = view.expected;
+    const payload = await post('/api/expected', { presetId: preset });
+    applyWorkspace(payload);
+    if (state.view) state.expected = state.view.expected;
     renderExpected();
     notify(
-      'Reference applied: ' + view.expected.zone + '. Re-run the inspection to compare against it.',
+      'Reference applied. Re-run the inspection to compare against it.',
       'good'
     );
     renderAll();
@@ -982,14 +1139,294 @@ async function applyExpectedEdits() {
   const payload = collectExpected();
   if (payload === null) return;
   try {
-    const view = await post('/api/expected', payload);
-    state.view = view;
-    state.expected = view.expected;
+    const result = await post('/api/expected', payload);
+    applyWorkspace(result);
+    if (state.view) state.expected = state.view.expected;
     renderExpected();
     notify('Reference updated. Re-run the inspection to recompute the comparison.', 'good');
     renderAll();
   } catch (error) {
     notify(error.message, 'bad');
+  }
+}
+
+/** Project selector: which project is active, and what can be done to it. */
+function renderProjects() {
+  setText('proj-name', state.project ? state.project.name : 'No project');
+  setText('meta-project', state.project ? state.project.name : '-');
+  $('proj-delete').disabled = state.project === null;
+  $('proj-rename').disabled = state.project === null;
+
+  const host = $('proj-list');
+  clear(host);
+  $('proj-empty').hidden = state.projects.length > 0;
+
+  state.projects.forEach((project) => {
+    const item = el('li');
+    const button = el('button', 'proj-item');
+    button.type = 'button';
+    button.setAttribute('aria-label', 'Switch to project ' + project.name);
+    if (state.project && project.id === state.project.id) {
+      button.setAttribute('aria-current', 'true');
+    }
+    const left = el('span');
+    const name = el('span', 'proj-item-n', project.name);
+    if (project.demo) {
+      const badge = el('span', 'proj-badge', 'DEMO');
+      badge.title = 'Synthetic demo project, recreated on every start.';
+      name.appendChild(document.createTextNode(' '));
+      name.appendChild(badge);
+    }
+    left.appendChild(name);
+    if (project.location) left.appendChild(el('span', 'proj-item-c', '  ' + project.location));
+    button.appendChild(left);
+    button.appendChild(el('span', 'proj-item-c', project.captureCount + ' cap'));
+    button.addEventListener('click', () => switchProject(project.id));
+    item.appendChild(button);
+    host.appendChild(item);
+  });
+}
+
+function setMenu(open) {
+  $('proj-menu').hidden = !open;
+  $('proj-btn').setAttribute('aria-expanded', String(open));
+}
+
+/** Re-render everything that depends on which project and capture are active. */
+function renderWorkspace() {
+  renderProjects();
+  renderFixtures();
+  renderExpected();
+  renderStorage();
+  renderAll();
+  if (state.view && state.view.provenance) {
+    showLoaded(state.view.provenance.captureLabel);
+  } else {
+    $('loaded').hidden = true;
+  }
+}
+
+async function switchProject(projectId) {
+  setMenu(false);
+  try {
+    applyWorkspace(await post('/api/projects/switch', { projectId: projectId }));
+    notify('Switched to ' + (state.project ? state.project.name : 'project') + '.', 'good');
+    renderWorkspace();
+    setStatus(
+      state.captures.length > 0
+        ? 'Capture loaded from ' + state.project.name + '. Inspect when ready.'
+        : 'No captures in this project yet. Drop a site photograph or choose a demo capture.',
+      null
+    );
+  } catch (error) {
+    notify(error.message, 'bad');
+  }
+}
+
+function openProjectModal(mode) {
+  const modal = $('proj-modal');
+  const isRename = mode === 'rename';
+  $('proj-modal-h').textContent = isRename ? 'Rename project' : 'New project';
+  $('proj-save').textContent = isRename ? 'Save name' : 'Create project';
+  $('proj-input-name').value = isRename && state.project ? state.project.name : '';
+  $('proj-input-location').value = isRename && state.project ? state.project.location : '';
+  $('proj-input-location').disabled = isRename;
+  $('proj-modal-note').hidden = true;
+  modal.showModal();
+  $('proj-input-name').focus();
+}
+
+async function submitProjectModal(event) {
+  event.preventDefault();
+  const name = $('proj-input-name').value;
+  const isRename = $('proj-save').textContent === 'Save name';
+  try {
+    if (isRename && state.project) {
+      applyWorkspace(await patch('/api/projects/' + encodeURIComponent(state.project.id), { name: name }));
+    } else {
+      applyWorkspace(await post('/api/projects', { name: name, location: $('proj-input-location').value }));
+    }
+    $('proj-modal').close();
+    notify('Project ' + (isRename ? 'renamed' : 'created') + ': ' + (state.project ? state.project.name : '') + '.', 'good');
+    renderWorkspace();
+    if (state.captures.length === 0) {
+      setStatus('No captures in this project yet. Drop a site photograph or choose a demo capture.', null);
+    }
+  } catch (error) {
+    const note = $('proj-modal-note');
+    note.textContent = error.message;
+    note.hidden = false;
+  }
+}
+
+/**
+ * Deletion is confirmed before anything is removed.
+ *
+ * The dialog names exactly what goes, because "delete project" is destructive and
+ * an operator should never have to guess whether their captures survive.
+ */
+function openDeleteModal(kind, subject) {
+  state.pendingDelete = { kind: kind, subject: subject };
+  const titles = { project: 'Delete project', capture: 'Delete capture', preset: 'Delete reference' };
+  $('del-modal-h').textContent = titles[kind];
+  const bodies = {
+    project:
+      'Delete "' + subject.name + '"? Its ' + subject.captureCount +
+      ' capture(s), their inspection results, findings and human verifications are removed. This cannot be undone.',
+    capture:
+      'Delete the capture "' + subject.label +
+      '"? Its inspection results, findings and human verifications are removed. This cannot be undone.',
+    preset:
+      'Delete the reference "' + subject.label + '"? The project falls back to the default reference and any comparison against it is discarded.',
+  };
+  $('del-body').textContent = bodies[kind];
+  $('del-modal').showModal();
+}
+
+function confirmDeleteCapture(capture) {
+  openDeleteModal('capture', capture);
+}
+
+async function commitDelete() {
+  const pending = state.pendingDelete;
+  $('del-modal').close();
+  if (!pending) return;
+  state.pendingDelete = null;
+  try {
+    if (pending.kind === 'project') {
+      applyWorkspace(await del('/api/projects/' + encodeURIComponent(pending.subject.id)));
+      notify('Project deleted.', 'good');
+    } else if (pending.kind === 'preset') {
+      applyWorkspace(await del('/api/presets/' + encodeURIComponent(pending.subject.id)));
+      notify('Reference deleted. The project now uses the default reference.', 'good');
+    } else {
+      applyWorkspace(await del('/api/captures/' + encodeURIComponent(pending.subject.id)));
+      notify('Capture deleted.', 'good');
+    }
+    renderWorkspace();
+    if (state.projects.length === 0) {
+      setStatus('No projects yet. Create a project to capture and inspect a site.', null);
+      setLamp('idle', 'No project');
+    } else if (state.captures.length === 0) {
+      setStatus('No captures in this project yet. Drop a site photograph or choose a demo capture.', null);
+      setLamp('idle', 'Capture ready');
+    }
+  } catch (error) {
+    notify(error.message, 'bad');
+  }
+}
+
+/** One editable expected-element row inside the reference dialog. */
+function presetRow(item) {
+  const row = el('div', 'preset-item');
+
+  const kind = document.createElement('select');
+  ELEMENT_KINDS.forEach((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = pretty(value);
+    if (value === (item && item.element)) option.selected = true;
+    kind.appendChild(option);
+  });
+  kind.setAttribute('aria-label', 'Element kind');
+  row.appendChild(kind);
+
+  const mode = document.createElement('select');
+  ['PRESENT', 'COUNT', 'ABSENT'].forEach((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    if (value === (item && item.expectation)) option.selected = true;
+    mode.appendChild(option);
+  });
+  mode.setAttribute('aria-label', 'Expectation');
+  row.appendChild(mode);
+
+  const count = document.createElement('input');
+  count.type = 'text';
+  count.inputMode = 'numeric';
+  count.value = item && item.expectedCount !== null && item.expectedCount !== undefined
+    ? String(item.expectedCount)
+    : '';
+  count.placeholder = 'count';
+  count.setAttribute('aria-label', 'Expected count');
+  row.appendChild(count);
+
+  const drop = el('button', 'btn btn-ghost', 'x');
+  drop.type = 'button';
+  drop.setAttribute('aria-label', 'Remove expected element');
+  drop.addEventListener('click', () => {
+    state.presetDraft = state.presetDraft.filter((entry) => entry !== item);
+    renderPresetDraft();
+  });
+  row.appendChild(drop);
+
+  return row;
+}
+
+function renderPresetDraft() {
+  const host = $('preset-items');
+  clear(host);
+  if (state.presetDraft.length === 0) {
+    state.presetDraft.push({ element: 'COLUMN', expectation: 'PRESENT', expectedCount: null });
+  }
+  state.presetDraft.forEach((item) => host.appendChild(presetRow(item)));
+}
+
+function openPresetModal(mode) {
+  const isRename = mode === 'rename';
+  $('preset-modal-h').textContent = isRename ? 'Rename reference' : 'New reference';
+  $('preset-save').textContent = isRename ? 'Save name' : 'Create reference';
+  $('preset-input-name').value = isRename && state.reference ? state.reference.name : '';
+  $('preset-input-zone').disabled = isRename;
+  $('preset-input-zone').value = isRename && state.reference ? state.reference.zone : '';
+  $('preset-add').hidden = isRename;
+  $('preset-modal-note').hidden = true;
+  if (isRename) {
+    state.presetDraft = [];
+    clear($('preset-items'));
+  } else {
+    state.presetDraft = [];
+    renderPresetDraft();
+  }
+  $('preset-modal').showModal();
+  $('preset-input-name').focus();
+}
+
+function collectPresetDraft() {
+  return [...$('preset-items').children].map((row) => {
+    const [kind, mode, count] = [row.children[0], row.children[1], row.children[2]];
+    const expectation = mode.value;
+    const raw = count.value.trim();
+    return {
+      element: kind.value,
+      expectation: expectation,
+      expectedCount: expectation === 'COUNT' && raw.length > 0 ? Number(raw) : null,
+    };
+  });
+}
+
+async function submitPresetModal(event) {
+  event.preventDefault();
+  const name = $('preset-input-name').value;
+  const isRename = $('preset-save').textContent === 'Save name';
+  try {
+    if (isRename && state.reference) {
+      applyWorkspace(await patch('/api/presets/' + encodeURIComponent(state.reference.presetId), { name: name }));
+    } else {
+      applyWorkspace(await post('/api/presets', {
+        name: name,
+        zone: $('preset-input-zone').value,
+        items: collectPresetDraft(),
+      }));
+    }
+    $('preset-modal').close();
+    notify('Reference ' + (isRename ? 'renamed' : 'created') + '.', 'good');
+    renderWorkspace();
+  } catch (error) {
+    const note = $('preset-modal-note');
+    note.textContent = error.message;
+    note.hidden = false;
   }
 }
 
@@ -1011,6 +1448,38 @@ function reportBootFailure(error) {
 }
 
 function wire() {
+  $('proj-btn').addEventListener('click', () => setMenu($('proj-menu').hidden));
+  $('proj-new').addEventListener('click', () => { setMenu(false); openProjectModal('create'); });
+  $('proj-rename').addEventListener('click', () => { setMenu(false); openProjectModal('rename'); });
+  $('proj-delete').addEventListener('click', () => {
+    setMenu(false);
+    if (state.project) openDeleteModal('project', state.project);
+  });
+  $('preset-form').addEventListener('submit', submitPresetModal);
+  $('preset-cancel').addEventListener('click', () => $('preset-modal').close());
+  $('preset-add').addEventListener('click', () => {
+    state.presetDraft.push({ element: 'COLUMN', expectation: 'PRESENT', expectedCount: null });
+    renderPresetDraft();
+  });
+  $('expected-new').addEventListener('click', () => openPresetModal('create'));
+  $('expected-rename').addEventListener('click', () => openPresetModal('rename'));
+  $('expected-delete').addEventListener('click', () => {
+    if (!state.reference) return;
+    openDeleteModal('preset', {
+      id: state.reference.presetId,
+      label: state.reference.name,
+      captureCount: state.reference.itemCount,
+    });
+  });
+
+  $('proj-form').addEventListener('submit', submitProjectModal);
+  $('proj-cancel').addEventListener('click', () => $('proj-modal').close());
+  $('del-cancel').addEventListener('click', () => { state.pendingDelete = null; $('del-modal').close(); });
+  $('del-confirm').addEventListener('click', commitDelete);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') setMenu(false);
+  });
+
   document.querySelectorAll('.step').forEach((button) => {
     button.addEventListener('click', () => selectStep(button.dataset.step));
     button.addEventListener('keydown', stepFromKey);
@@ -1024,10 +1493,8 @@ function wire() {
   $('file').addEventListener('change', (event) => uploadFile(event.target.files[0]));
   $('replace').addEventListener('click', () => $('file').click());
   $('remove').addEventListener('click', () => {
-    $('loaded').hidden = true;
-    $('drop-error').hidden = true;
-    notify('Capture removed. Choose another capture to inspect.');
-    setLamp('idle', 'Capture ready');
+    const capture = state.captures.filter((c) => c.id === state.currentCaptureId)[0];
+    if (capture) confirmDeleteCapture(capture);
   });
 
   const drop = $('drop');
@@ -1080,18 +1547,20 @@ async function boot() {
   selectStep('capture', { quiet: true });
 
   try {
-    const captures = await api('/api/captures');
-    state.captures = captures.captures;
+    applyWorkspace(await api('/api/workspace'));
 
     const expected = await api('/api/expected');
     state.expected = expected.current;
     renderExpected();
 
-    state.view = await api('/api/session');
-    renderFixtures();
-    renderAll();
+    renderWorkspace();
     setLamp('ready', 'Capture ready');
-    setStatus('Choose a capture or drop a site photograph, then inspect.', null);
+    setStatus(
+      state.captures.length > 0
+        ? 'Choose a capture or drop a site photograph, then inspect.'
+        : 'No captures in this project yet. Drop a site photograph or choose a demo capture.',
+      null
+    );
   } catch (error) {
     // A render fault and a transport fault must not both claim the server is
     // unreachable. The earlier version said "Could not reach the inspector" for

@@ -8,7 +8,6 @@
   "engines": {
     "node": ">=22.6.0"
   },
-  "main": "src/index.ts",
   "scripts": {
     "demo": "node --env-file-if-exists=.env --experimental-strip-types demo/run-demo.ts",
     "ui": "node --env-file-if-exists=.env --experimental-strip-types demo/run-ui.ts",

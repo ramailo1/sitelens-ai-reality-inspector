@@ -76,3 +76,19 @@ test('a broken evidence image is reported instead of silently ignored', () => {
 test('the stage keeps a minimum height so a failed image cannot collapse the layout', () => {
   assert.match(APP_CSS, /\.sheet-lg img\s*\{[^}]*min-height/);
 });
+
+test('evidence boxes are scaled against the PAINTED photograph, not the element box', () => {
+  // The stage letterboxes the capture with object-fit: contain, so
+  // clientWidth/naturalWidth is the width of the ELEMENT, not of the photo. On a
+  // 320x240 fixture in a 1332x620 stage that made the horizontal scale 1.6x too
+  // large and every box landed partly outside the image it pointed at.
+  assert.match(APP_CSS, /\.sheet-lg img\s*\{[^}]*object-fit:\s*contain/);
+  assert.match(APP_JS, /function paintedArea\(/);
+  assert.match(APP_JS, /Math\.min\(elementWidth \/ naturalWidth, elementHeight \/ naturalHeight\)/);
+  assert.match(APP_JS, /area\.offsetX \+ box\.left \* area\.scaleX/);
+  assert.doesNotMatch(
+    APP_JS,
+    /image\.clientWidth \/ image\.naturalWidth/,
+    'the overlay must not scale against the element width',
+  );
+});

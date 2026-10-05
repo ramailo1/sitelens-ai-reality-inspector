@@ -11,26 +11,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveExpectedState } from '../src/server.ts';
+import { PresetStore, presetToState } from '../src/expected-state.ts';
+import type { Preset } from '../src/expected-state.ts';
 import { ELEMENT_KINDS } from '../src/types/inspection.ts';
 
 test('a preset id resolves to a cloned PRESET state', () => {
-  const result = resolveExpectedState({ presetId: 'north-core' });
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.equal(result.state.zone, 'North Core');
-  assert.equal(result.state.source, 'PRESET');
-  assert.ok(result.state.items.length > 0);
+  const presets = new PresetStore();
+  const preset = presets.get('north-core');
+  assert.ok(preset);
+  const state = presetToState(preset);
+  assert.equal(state.zone, 'North Core');
+  assert.equal(state.source, 'PRESET');
+  assert.ok(state.items.length > 0);
 
   // It must be a clone: mutating the result cannot corrupt the shared preset.
-  const mutated = result.state.items.map((i) => ({ ...i }));
+  const mutated = state.items.map((i) => ({ ...i }));
   mutated[0]!.note = 'MUTATED';
-  const again = resolveExpectedState({ presetId: 'north-core' });
-  assert.ok(again.ok && again.state.items[0]?.note !== 'MUTATED');
+  const again = presetToState(presets.get('north-core') as Preset);
+  assert.ok(again.items[0]?.note !== 'MUTATED');
 });
 
 test('an unknown preset is refused rather than silently defaulted', () => {
-  const result = resolveExpectedState({ presetId: 'does-not-exist' });
-  assert.equal(result.ok, false);
+  const presets = new PresetStore();
+  assert.equal(presets.get('does-not-exist'), null);
 });
 
 test('an explicit item list is always marked OPERATOR', () => {

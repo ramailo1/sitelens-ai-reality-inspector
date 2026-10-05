@@ -18,10 +18,11 @@ try {
   providerName = provider.name;
   modelName = provider.model;
 } catch (error: unknown) {
+  // A misconfiguration is a hard stop: there is no honest way to report a
+  // reliability run when no provider was ever reached. The ProviderError branch
+  // explains why in the operator's terms before the error is rethrown.
   if (error instanceof ProviderError) {
     console.error(`  CONFIGURATION ERROR (${error.kind}): ${error.message}`);
-    process.exitCode = 1;
-    throw error;
   }
   throw error;
 }
