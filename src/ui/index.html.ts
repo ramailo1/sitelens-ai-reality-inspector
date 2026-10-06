@@ -27,9 +27,9 @@ export const INDEX_HTML = `<!doctype html>
   </div>
 
   <div class="rig-meta" id="rig-meta">
-    <span class="rig-meta-i"><b>PROJECT</b><span id="meta-project">-</span></span>
     <span class="rig-meta-i"><b>ZONE</b><span id="meta-zone">-</span></span>
     <span class="rig-meta-i"><b>CAPTURE</b><span id="meta-capture">-</span></span>
+    <span class="rig-meta-i"><b>REVIEWER</b><button type="button" class="hdr-rev-btn" id="hdr-reviewer-btn"><span id="meta-reviewer">Not set</span></button></span>
   </div>
 
   <div class="proj">
@@ -181,6 +181,28 @@ export const INDEX_HTML = `<!doctype html>
   </div>
 </dialog>
 
+<dialog class="modal" id="reviewer-modal" aria-labelledby="reviewer-modal-h">
+  <form method="dialog" class="modal-card" id="reviewer-form">
+    <h2 class="modal-h" id="reviewer-modal-h">SET UP INSPECTION REVIEWER</h2>
+    <p class="modal-sub" style="margin-bottom: 12px; color: var(--ink-3); font-size: 11.5px;">
+      Human verification is part of the SiteLens inspection workflow. Set the reviewer identity once for this inspection workspace.
+    </p>
+    <label class="field">
+      <span class="field-t">Reviewer name</span>
+      <input type="text" id="reviewer-input-name" maxlength="80" required autocomplete="off" placeholder="e.g. Takou Rah">
+    </label>
+    <label class="field">
+      <span class="field-t">Role <span class="field-opt">optional</span></span>
+      <input type="text" id="reviewer-input-role" maxlength="80" autocomplete="off" placeholder="e.g. Site Engineer">
+    </label>
+    <p class="modal-note note-bad" id="reviewer-modal-note" hidden></p>
+    <div class="modal-acts">
+      <button type="button" class="btn btn-ghost" id="reviewer-cancel">Cancel</button>
+      <button type="submit" class="btn" id="reviewer-save">CONTINUE</button>
+    </div>
+  </form>
+</dialog>
+
 <main id="stage" class="stage">
 
   <section class="bay bay-capture" id="bay-capture" role="tabpanel"
@@ -215,7 +237,10 @@ export const INDEX_HTML = `<!doctype html>
             <button type="button" class="btn btn-ghost" id="remove">Remove</button>
             <button type="button" class="btn btn-red" id="run">Inspect reality</button>
           </div>
-          <p class="storage-note" id="storage-note">Storage: checking…</p>
+          <details class="storage">
+            <summary>Storage &amp; persistence</summary>
+            <p class="storage-note" id="storage-note">Storage: checking…</p>
+          </details>
         </div>
 
         <div class="fixtures">
@@ -382,13 +407,16 @@ export const INDEX_HTML = `<!doctype html>
     </div>
 
     <div class="review-bar">
+      <div class="reviewer-status-box" id="reviewer-status-box">
+        <div class="reviewer-status-info">
+          <span class="reviewer-lbl">INSPECTION REVIEWER</span>
+          <span class="reviewer-val" id="reviewer-current-val">Not configured</span>
+        </div>
+        <button type="button" class="btn btn-ghost btn-xs" id="reviewer-change-btn">Set reviewer</button>
+      </div>
       <label class="field">
-        <span class="field-t">Reviewer</span>
-        <input type="text" id="reviewer" placeholder="name or badge" autocomplete="off">
-      </label>
-      <label class="field">
-        <span class="field-t">Note</span>
-        <input type="text" id="note" placeholder="optional" autocomplete="off">
+        <span class="field-t">Verification note</span>
+        <input type="text" id="note" placeholder="optional review note" autocomplete="off">
       </label>
     </div>
 

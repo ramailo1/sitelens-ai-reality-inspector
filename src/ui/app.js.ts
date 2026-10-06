@@ -32,7 +32,8 @@ const state = {
   openIds: new Set(),
   running: false,
   importing: null,
-  pendingDelete: null
+  pendingDelete: null,
+  pendingReviewIntent: null
 };
 
 const TAB_ORDER = ['capture', 'inspect', 'evidence', 'findings'];
@@ -284,8 +285,13 @@ function renderDataset() {
     return;
   }
 
+  // The workspace summary carries a precomputed count; the full /api/dataset
+  // index carries the entries array instead. Both are truthful — read either.
+  const imageCount = summary.count !== undefined && summary.count !== null
+    ? summary.count
+    : (summary.entries ? summary.entries.length : 0);
   $('dataset-count').textContent = summary.present
-    ? summary.count + ' IMAGES'
+    ? imageCount + ' IMAGES'
     : 'NOT PRESENT';
   note.textContent = summary.note;
 
@@ -567,15 +573,79 @@ function openFinding(id) {
   renderOverlay();
 }
 
+function formatReviewerObj(rev) {
+  if (!rev || !rev.name || !rev.name.trim()) return null;
+  const name = rev.name.trim();
+  const role = rev.role && rev.role.trim() ? rev.role.trim() : null;
+  return role ? name + ' · ' + role : name;
+}
+
+function renderReviewer() {
+  const rev = state.project ? state.project.reviewer : null;
+  const formatted = formatReviewerObj(rev);
+  const displayVal = formatted ? formatted : 'Not configured';
+
+  const metaNode = $('meta-reviewer');
+  if (metaNode) metaNode.textContent = displayVal;
+
+  const currentValNode = $('reviewer-current-val');
+  if (currentValNode) currentValNode.textContent = displayVal;
+
+  const boxNode = $('reviewer-status-box');
+  if (boxNode) boxNode.dataset.configured = formatted ? 'true' : 'false';
+
+  const changeBtn = $('reviewer-change-btn');
+  if (changeBtn) changeBtn.textContent = formatted ? 'Change reviewer' : 'Set reviewer';
+}
+
+function openReviewerModal(pendingReviewIntent) {
+  state.pendingReviewIntent = pendingReviewIntent || null;
+  const modal = $('reviewer-modal');
+  const rev = state.project ? state.project.reviewer : null;
+  $('reviewer-input-name').value = rev && rev.name ? rev.name : '';
+  $('reviewer-input-role').value = rev && rev.role ? rev.role : '';
+  $('reviewer-modal-note').hidden = true;
+  modal.showModal();
+  $('reviewer-input-name').focus();
+}
+
+async function submitReviewerModal(event) {
+  event.preventDefault();
+  const name = $('reviewer-input-name').value.trim();
+  const role = $('reviewer-input-role').value.trim() || null;
+  if (!name) {
+    const note = $('reviewer-modal-note');
+    note.textContent = 'Reviewer name is required.';
+    note.hidden = false;
+    return;
+  }
+  try {
+    const payload = await post('/api/reviewer', { name: name, role: role });
+    applyWorkspace(payload);
+    $('reviewer-modal').close();
+    notify('Reviewer identity configured: ' + (formatReviewerObj(state.project ? state.project.reviewer : null) || name) + '.', 'good');
+    renderWorkspace();
+
+    if (state.pendingReviewIntent) {
+      const intent = state.pendingReviewIntent;
+      state.pendingReviewIntent = null;
+      await submitReview(intent.findingId, intent.decision);
+    }
+  } catch (error) {
+    const note = $('reviewer-modal-note');
+    note.textContent = error.message;
+    note.hidden = false;
+  }
+}
+
 function renderHeader() {
+  renderReviewer();
   const view = state.view;
   if (view === null) return;
   const p = view.provenance;
 
-  // The masthead names the project the operator can recognise. The session's
-  // own projectId is an internal identifier and is shown in Provenance, where it
-  // belongs - writing it here replaced the name with "proj_1a2b3c4d".
-  setText('meta-project', state.project ? state.project.name : '-');
+  // The masthead names the project once, in the project selector; repeating it
+  // in the meta strip doubled the same words ten centimetres apart.
   setText('meta-zone', view.expected ? view.expected.zone : '-');
   setText('meta-capture', p.captureLabel);
   if (state.pipeline === null || state.pipeline === undefined) {
@@ -601,6 +671,27 @@ function renderHeader() {
   }
   if (origin === 'FRESH' && view.provenance.inferenceExecuted) {
     setText('hdr-provenance', view.provenance.provider + ' - live inference');
+  }
+}
+
+/**
+ * The Inspect bay's intro line must describe the CURRENT run state, not the
+ * never-inspected default. A restored result that says "the model has not been
+ * asked anything yet" directly above a full result set is exactly the kind of
+ * contradiction that destroys trust in an instrument.
+ */
+function updateInspectIntro() {
+  const sub = $('run-sub');
+  if (!sub) return;
+  const view = state.view;
+  if (view === null || view.outcome === 'PENDING') {
+    sub.textContent = 'The model has not been asked anything yet.';
+  } else if (view.outcome === 'FAILED') {
+    sub.textContent = 'The last inspection did not complete — see the failure note below.';
+  } else if (view.inferenceOrigin === 'CACHED') {
+    sub.textContent = 'Showing the restored inspection of this capture. Inspect again for a fresh reading.';
+  } else {
+    sub.textContent = 'Fresh inference complete — findings await a named human decision.';
   }
 }
 
@@ -646,7 +737,7 @@ function renderPriorities() {
   if (view === null) return;
 
   if (view.priorities.length === 0) {
-    host.appendChild(el('p', 'empty', 'No open attention areas. Either nothing was flagged, or everything has been settled.'));
+    host.appendChild(el('p', 'empty', 'No open attention areas. Nothing was flagged, or every flag has already been reviewed.'));
     return;
   }
 
@@ -786,7 +877,10 @@ function renderReasoning() {
     foot.hidden = false;
     foot.textContent =
       'Reasoned over ' + p.detectionsConsidered + ' detected element(s) and ' + p.rowsConsidered
-      + ' comparison row(s) in ' + p.latencyMs + ' ms'
+      + ' comparison row(s)'
+      + (state.view !== null && state.view.inferenceOrigin === 'CACHED'
+        ? ', restored with the original inspection'
+        : ' in ' + p.latencyMs + ' ms')
       + (p.degenerate
         ? '. WARNING: this answer closely restates the visual observation and adds little reasoning.'
         : '. The reasoning above is additional to the visual observation, not a restatement of it.');
@@ -850,9 +944,12 @@ function renderPipeline() {
     step3.dataset.state = 'idle';
     step4.dataset.state = 'idle';
     set('pipe-vision-note', 'not run yet');
-    set('pipe-compare-note', 'no expected state loaded');
+    // A reference can be loaded without a run having happened; claiming "no
+    // expected state" here would contradict the panel beside the grid.
+    set('pipe-compare-note', 'awaiting first inspection');
     set('pipe-reason-note', 'not run yet');
     set('pipe-verify-note', 'nothing verified');
+    updateInspectIntro();
     return;
   }
 
@@ -904,6 +1001,8 @@ function renderPipeline() {
     counters.verified === 0 && counters.rejected === 0
       ? 'nothing verified — ' + counters.pending + ' awaiting a named human'
       : counters.verified + ' verified · ' + counters.rejected + ' rejected');
+
+  updateInspectIntro();
 }
 
 /**
@@ -1089,21 +1188,21 @@ function buildVerification(finding) {
 }
 
 async function submitReview(findingId, decision) {
-  const reviewer = $('reviewer').value.trim();
-  if (reviewer.length === 0) {
-    notify('Enter a reviewer name first. An anonymous verification is refused.', 'bad');
-    $('reviewer').focus();
+  const currentReviewer = formatReviewerObj(state.project ? state.project.reviewer : null);
+  if (!currentReviewer) {
+    notify('REVIEWER NOT CONFIGURED — Set your reviewer identity before recording a human finding decision.', 'bad');
+    openReviewerModal({ findingId: findingId, decision: decision });
     return;
   }
   try {
     state.view = await post('/api/review-finding', {
       findingId: findingId,
       decision: decision,
-      reviewer: reviewer,
+      reviewer: currentReviewer,
       note: $('note').value.trim() || null
     });
     const label = decision === 'VERIFIED' ? 'confirmed' : decision === 'REJECTED' ? 'rejected' : 'deferred for review';
-    notify('Finding ' + label + ' by ' + reviewer + '.', decision === 'REJECTED' ? 'bad' : 'good');
+    notify('Finding ' + label + ' by ' + currentReviewer + '.', decision === 'REJECTED' ? 'bad' : 'good');
     setLamp('done', 'Human review recorded');
     renderAll();
   } catch (error) {
@@ -1121,14 +1220,17 @@ function renderProvenance() {
   if (view === null) return;
 
   const p = view.provenance;
+  // A restored result is real but was NOT re-run, so "inference executed: yes"
+  // plus "0 ms" would read as a broken live call. State the restoration.
+  const restored = view.inferenceOrigin === 'CACHED';
   const rows = [
     ['Provider', p.provider],
     ['Model', p.model],
-    ['Inference executed', p.inferenceExecuted ? 'yes' : 'no'],
+    ['Inference executed', restored ? 'no — result restored from disk' : (p.inferenceExecuted ? 'yes' : 'no')],
     ['Elements detected', view.detections.length],
     ['Observations accepted', p.observationsAccepted],
     ['Observations rejected', p.observationsRejected],
-    ['Latency', p.latencyMs + ' ms'],
+    ['Latency', restored ? 'not re-run' : p.latencyMs + ' ms'],
     ['Captured at', p.inspectedAt.replace('T', ' ').slice(0, 19)],
     ['Human review performed', p.humanReviewPerformed ? 'yes' : 'no']
   ];
@@ -1223,7 +1325,10 @@ function renderObservations() {
     fill.dataset.band = observation.confidenceBand;
     track.appendChild(fill);
     conf.appendChild(track);
-    conf.appendChild(el('span', null, observation.confidence.toFixed(2) + ' ' + observation.confidenceBand));
+    // The band is a qualitative reading of model confidence, not a severity.
+    // Saying so in the label stops "HIGH" being read as an alert level.
+    conf.appendChild(el('span', null,
+      observation.confidence.toFixed(2) + ' · ' + observation.confidenceBand + ' band'));
     row.appendChild(conf);
 
     row.appendChild(el('p', 'obs-text', observation.observation));
@@ -1250,19 +1355,20 @@ function renderObservations() {
       button.type = 'button';
       button.dataset.decision = decision;
       button.addEventListener('click', async () => {
-        const reviewer = $('reviewer').value.trim();
-        if (reviewer.length === 0) {
-          notify('Enter a reviewer name first.', 'bad');
+        const currentReviewer = formatReviewerObj(state.project ? state.project.reviewer : null);
+        if (!currentReviewer) {
+          notify('REVIEWER NOT CONFIGURED — Set your reviewer identity before recording a decision.', 'bad');
+          openReviewerModal();
           return;
         }
         try {
           state.view = await post('/api/review', {
             observationId: observation.id,
             decision: decision,
-            reviewer: reviewer,
+            reviewer: currentReviewer,
             note: $('note').value.trim() || null
           });
-          notify('Observation ' + decision.replace(/_/g, ' ') + '.', 'good');
+          notify('Observation ' + decision.replace(/_/g, ' ') + ' by ' + currentReviewer + '.', 'good');
           renderAll();
         } catch (error) {
           notify(error.message, 'bad');
@@ -1373,9 +1479,14 @@ function renderFixtures() {
 function showLoaded(label) {
   if (state.currentCaptureId === null) {
     $('loaded').hidden = true;
+    $('drop').hidden = false;
     return;
   }
   $('loaded').hidden = false;
+  // A loaded capture makes the large drop target redundant vertical space; the
+  // Replace action opens the same file picker. The drop zone returns when the
+  // capture is removed.
+  $('drop').hidden = true;
   const image = $('capture-image');
   image.src = '/api/capture-image/' + encodeURIComponent(state.currentCaptureId);
   image.alt = label;
@@ -1657,7 +1768,6 @@ async function applyExpectedEdits() {
 /** Project selector: which project is active, and what can be done to it. */
 function renderProjects() {
   setText('proj-name', state.project ? state.project.name : 'No project');
-  setText('meta-project', state.project ? state.project.name : '-');
   $('proj-delete').disabled = state.project === null;
   $('proj-rename').disabled = state.project === null;
 
@@ -1708,6 +1818,7 @@ function renderWorkspace() {
     showLoaded(state.view.provenance.captureLabel);
   } else {
     $('loaded').hidden = true;
+    $('drop').hidden = false;
   }
 }
 
@@ -1979,6 +2090,11 @@ function wire() {
 
   $('proj-form').addEventListener('submit', submitProjectModal);
   $('proj-cancel').addEventListener('click', () => $('proj-modal').close());
+  $('reviewer-form').addEventListener('submit', submitReviewerModal);
+  $('reviewer-cancel').addEventListener('click', () => $('reviewer-modal').close());
+  $('reviewer-change-btn').addEventListener('click', () => openReviewerModal());
+  const hdrRevBtn = $('hdr-reviewer-btn');
+  if (hdrRevBtn) hdrRevBtn.addEventListener('click', () => openReviewerModal());
   $('del-cancel').addEventListener('click', () => { state.pendingDelete = null; $('del-modal').close(); });
   $('del-confirm').addEventListener('click', commitDelete);
   document.addEventListener('keydown', (event) => {
@@ -2064,14 +2180,31 @@ async function boot() {
     // on a directory scan.
     await loadDataset();
 
-    setLamp('ready', 'Capture ready');
+    // The lamp must describe the restored state, not a generic idle: a capture
+    // with open findings is not "capture ready", it is awaiting review.
+    const view = state.view;
+    const pending = view !== null && view.counters ? view.counters.pending : 0;
+    if (view !== null && view.outcome !== 'PENDING' && view.outcome !== 'FAILED') {
+      setLamp(pending > 0 ? 'done' : 'ready',
+        pending > 0
+          ? 'FINDINGS READY - ' + pending + ' awaiting human review'
+          : 'Inspection settled - all findings reviewed');
+    } else {
+      setLamp('ready', 'Capture ready');
+    }
     const hasDataset = state.dataset !== null && state.dataset.present;
+    // The status line must describe what is actually on screen: a restored
+    // inspection is not an empty "choose a capture" state.
+    const restored = state.view !== null && state.view.outcome !== 'PENDING'
+      && state.view.outcome !== 'FAILED';
     setStatus(
-      state.captures.length > 0
-        ? (hasDataset
-            ? 'Choose a capture, import a real dataset photograph below, or drop your own — then inspect.'
-            : 'Choose a capture or drop a site photograph, then inspect.')
-        : 'No captures in this project yet. Import a local dataset image or drop a photograph.',
+      restored
+        ? 'Restored the last inspection of this capture. Inspect again for a fresh reading.'
+        : state.captures.length > 0
+          ? (hasDataset
+              ? 'Choose a capture, import a real dataset photograph below, or drop your own — then inspect.'
+              : 'Choose a capture or drop a site photograph, then inspect.')
+          : 'No captures in this project yet. Import a local dataset image or drop a photograph.',
       null
     );
   } catch (error) {

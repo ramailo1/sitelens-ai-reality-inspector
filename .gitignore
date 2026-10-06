@@ -20,6 +20,8 @@ dist/
 
 # Local scratch
 tmp/
+sample/
+data/
 
 # Runtime state written by the local inspection server (SITELENS_DATA_DIR).
 # Holds the workspace file, uploaded bytes and per-capture inspection records

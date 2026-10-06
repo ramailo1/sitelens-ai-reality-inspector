@@ -118,6 +118,7 @@ export interface PersistedWorkspace {
     readonly location: string;
     readonly createdAt: string;
     readonly demo: boolean;
+    readonly reviewer?: { readonly name: string; readonly role: string | null } | null;
   }[];
   readonly captures: readonly PersistedCapture[];
   readonly references: readonly {
@@ -242,7 +243,22 @@ export class WorkspacePersistence {
       savedAt: typeof record['savedAt'] === 'string' ? record['savedAt'] : new Date().toISOString(),
       activeProjectId: readStringOrNull(record['activeProjectId']),
       activeCaptureId: readStringOrNull(record['activeCaptureId']),
-      projects: record['projects'] as PersistedWorkspace['projects'],
+      projects: (record['projects'] as any[]).map((p) => ({
+        id: String(p.id),
+        name: String(p.name),
+        location: typeof p.location === 'string' ? p.location : '',
+        createdAt: typeof p.createdAt === 'string' ? p.createdAt : new Date().toISOString(),
+        demo: p.demo === true,
+        reviewer:
+          typeof p.reviewer === 'object' && p.reviewer !== null && typeof p.reviewer.name === 'string'
+            ? {
+                name: String(p.reviewer.name).trim(),
+                role: typeof p.reviewer.role === 'string' && p.reviewer.role.trim().length > 0
+                  ? String(p.reviewer.role).trim()
+                  : null,
+              }
+            : null,
+      })),
       captures: record['captures'] as PersistedCapture[],
       references: Array.isArray(record['references'])
         ? (record['references'] as PersistedWorkspace['references'])

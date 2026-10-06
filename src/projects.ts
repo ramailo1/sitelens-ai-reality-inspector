@@ -31,6 +31,23 @@ import type { ExpectedState } from './types/inspection.ts';
 export const MAX_PROJECT_NAME = 80;
 export const MAX_PROJECT_LOCATION = 120;
 
+export interface ReviewerIdentity {
+  readonly name: string;
+  readonly role: string | null;
+}
+
+export function formatReviewer(reviewer: ReviewerIdentity | string | null | undefined): string | null {
+  if (reviewer === null || reviewer === undefined) return null;
+  if (typeof reviewer === 'string') {
+    const trimmed = reviewer.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  const name = typeof reviewer.name === 'string' ? reviewer.name.trim() : '';
+  const role = typeof reviewer.role === 'string' ? reviewer.role.trim() : '';
+  if (name.length === 0) return null;
+  return role.length > 0 ? `${name} · ${role}` : name;
+}
+
 export interface Project {
   readonly id: string;
   readonly name: string;
@@ -41,6 +58,7 @@ export interface Project {
    * content, labelled so it can never be mistaken for the operator's own work.
    */
   readonly demo: boolean;
+  readonly reviewer: ReviewerIdentity | null;
 }
 
 export type ProjectSummary = Project & { readonly captureCount: number };
@@ -237,6 +255,7 @@ export class ProjectStore {
       location: location.value,
       createdAt: new Date().toISOString(),
       demo: false,
+      reviewer: null,
     };
     this.projects.set(project.id, project);
     this.referenceFor(project.id);
@@ -246,6 +265,29 @@ export class ProjectStore {
     this.activeCaptureId = null;
     this.persist();
     return { ok: true, value: project };
+  }
+
+  public setReviewer(projectId: string, input: { name: unknown; role?: unknown }): ProjectResult<Project> {
+    const project = this.projects.get(projectId);
+    if (!project) return fail('UNKNOWN_PROJECT', 'That project no longer exists.');
+    if (typeof input.name !== 'string' || input.name.trim().length === 0) {
+      return fail('NAME_REQUIRED', 'Reviewer name is required.');
+    }
+    const name = input.name.trim();
+    if (name.length > MAX_PROJECT_NAME) {
+      return fail('NAME_TOO_LONG', `Reviewer name must not exceed ${MAX_PROJECT_NAME} characters.`);
+    }
+    let role: string | null = null;
+    if (typeof input.role === 'string' && input.role.trim().length > 0) {
+      role = input.role.trim();
+      if (role.length > MAX_PROJECT_LOCATION) {
+        return fail('LOCATION_TOO_LONG', `Reviewer role must not exceed ${MAX_PROJECT_LOCATION} characters.`);
+      }
+    }
+    const updated: Project = { ...project, reviewer: { name, role } };
+    this.projects.set(projectId, updated);
+    this.persist();
+    return { ok: true, value: updated };
   }
 
   public rename(projectId: string, rawName: unknown): ProjectResult<Project> {
@@ -798,12 +840,21 @@ public ensureSelection(): Project {
 
     for (const project of state.projects) {
       if (demoIds.has(project.id)) continue;
+      const reviewer = typeof (project as any).reviewer === 'object' && (project as any).reviewer !== null && typeof (project as any).reviewer.name === 'string'
+        ? {
+            name: String((project as any).reviewer.name).trim(),
+            role: typeof (project as any).reviewer.role === 'string' && (project as any).reviewer.role.trim().length > 0
+              ? String((project as any).reviewer.role).trim()
+              : null,
+          }
+        : null;
       this.projects.set(project.id, {
         id: project.id,
         name: project.name,
         location: project.location,
         createdAt: project.createdAt,
         demo: false,
+        reviewer,
       });
       this.referenceFor(project.id);
       restoredProjects += 1;

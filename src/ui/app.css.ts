@@ -63,6 +63,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Prose blocks and titles break lines gracefully instead of leaving orphans. */
+.bay-sub, .panel-sub, .reason-lede, .modal-body, .dataset-note,
+.fc-title, .prio-t, .cmp-pair dd, .obs-text {
+  text-wrap: pretty;
+}
+
 /* Paper tooth: fixed, so it reads as the sheet rather than as content. */
 body::before {
   content: "";
@@ -444,6 +450,7 @@ body::before {
   transition: background var(--fast) var(--ease), color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 .btn:hover:not(:disabled) { background: var(--concrete); color: var(--ink); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn-ghost { background: transparent; }
 .btn-red { border-color: var(--red); color: var(--red); background: var(--red-wash); font-weight: 600; }
@@ -461,7 +468,7 @@ body::before {
   line-height: 0;
 }
 .sheet img { width: 100%; height: auto; display: block; }
-.sheet-sm img { max-height: 300px; object-fit: contain; }
+.sheet-sm img { max-height: 360px; object-fit: contain; }
 /* A minimum height keeps the stage readable if an image ever fails to load,
    instead of collapsing the whole inspection surface into a one-line strip. */
 .sheet-lg img { max-height: 620px; min-height: 300px; object-fit: contain; }
@@ -561,7 +568,33 @@ body::before {
 .trust-arrow { color: var(--ink-4); }
 .trust-note { margin-left: auto; color: var(--ink-4); letter-spacing: .04em; }
 
-.review-bar { display: grid; grid-template-columns: repeat(2, minmax(0, 220px)); gap: 10px; margin: 12px 0 0; }
+.hdr-rev-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.hdr-rev-btn:hover { color: var(--ink); }
+
+.review-bar { display: grid; grid-template-columns: minmax(0, 280px) minmax(0, 1fr); gap: 12px; margin: 12px 0 0; align-items: end; }
+
+.reviewer-status-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--rule);
+  background: var(--paper-2);
+}
+.reviewer-status-info { display: flex; flex-direction: column; gap: 2px; }
+.reviewer-lbl { font-family: var(--mono); font-size: 9px; letter-spacing: .08em; color: var(--ink-4); }
+.reviewer-val { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.reviewer-status-box[data-configured="false"] .reviewer-val { color: var(--red); font-style: italic; font-weight: 500; }
 
 .finding-card {
   border: 1px solid var(--rule);
@@ -672,7 +705,10 @@ body::before {
   padding: 9px 10px;
   background: var(--paper);
   align-items: start;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
 }
+.prio:hover { background: var(--paper-3); }
 .prio-n { font-family: var(--mono); font-size: 11px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
 .prio-t { font-size: 12.5px; font-weight: 500; }
 .prio-b { font-family: var(--mono); font-size: 10px; color: var(--ink-4); margin-top: 2px; }
@@ -737,12 +773,22 @@ body::before {
 .fail ul { margin: 0; padding-left: 16px; font-family: var(--mono); font-size: 10.5px; color: var(--reject); }
 
 .empty {
-  padding: 18px;
+  padding: 16px 18px;
   border: 1px dashed var(--rule-2);
   text-align: center;
-  color: var(--ink-4);
-  font-size: 12.5px;
+  color: var(--ink-3);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 62ch;
 }
+
+/* An empty message inside a hairline list must not inherit the list's rule
+   background, or the message renders as a heavy gray slab. */
+.prio-list:has(> .empty),
+.cmp-list:has(> .empty) { background: none; border: 0; }
+.prio-list:has(> .empty) .empty,
+.cmp-list:has(> .empty) .empty { margin: 0 auto; }
 
 .obs {
   border: 1px solid var(--rule);
@@ -873,6 +919,22 @@ body::before {
   border: 1px dashed var(--rule-2); background: var(--paper);
   font-family: var(--mono); font-size: 10px; color: var(--ink-3); line-height: 1.6;
 }
+/* Persistence provenance is true and occasionally needed, but it is not part
+   of the capture workflow — so it waits behind a disclosure. */
+.storage { margin: 10px 0 0; }
+.storage summary {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px dashed var(--rule-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+  color: var(--ink-3);
+  cursor: pointer;
+  user-select: none;
+}
+.storage summary:hover { color: var(--ink-2); border-color: var(--ink-3); }
+.storage[open] summary { border-color: var(--rule); }
 .preset-items { display: grid; gap: 6px; margin-bottom: 8px; }
 .preset-item {
   display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 6px; align-items: center;
@@ -963,8 +1025,8 @@ body::before {
 .pipe-note {
   grid-area: note;
   font-family: var(--mono);
-  font-size: 9.5px;
-  color: var(--ink-4);
+  font-size: 10px;
+  color: var(--ink-3);
   line-height: 1.4;
   margin-top: 1px;
 }
@@ -974,7 +1036,10 @@ body::before {
 .pipe-step[data-state="fail"] .pipe-n { color: var(--review); }
 .pipe-step[data-state="wait"] { background: rgba(28, 27, 25, .04); }
 .pipe-step[data-state="wait"] .pipe-n { color: var(--ink-2); }
-.pipe-step[data-state="idle"] { opacity: .62; }
+/* A step that has not run is dimmed, but never to the point of illegibility:
+   "not run yet" is information, not decoration. */
+.pipe-step[data-state="idle"] { opacity: .8; }
+.pipe-step[data-state="idle"] .pipe-note { color: var(--ink-3); }
 
 @media (max-width: 900px) {
   .pipe-steps { grid-template-columns: repeat(2, 1fr); }
@@ -1079,7 +1144,6 @@ body::before {
   font-size: 11.5px;
   line-height: 1.35;
   color: var(--ink-2);
-  text-transform: capitalize;
 }
 .tile-meta, .tile-rot {
   font-family: var(--mono);

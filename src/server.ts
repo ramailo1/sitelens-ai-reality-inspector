@@ -12,7 +12,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createProvider, createReasoner, ProviderError } from './providers/factory.ts';
 import { InspectionSession } from './session.ts';
 import type { SessionView } from './session.ts';
-import { ProjectStore } from './projects.ts';
+import { ProjectStore, formatReviewer } from './projects.ts';
 import type { ProjectCapture } from './projects.ts';
 import type { AIProvider } from './providers/provider.ts';
 import { acceptCapture, MAX_CAPTURE_BYTES } from './upload.ts';
@@ -359,6 +359,31 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         payload.name !== undefined
           ? store.rename(projectId, payload.name)
           : store.setLocation(projectId, payload.location);
+      if (!result.ok) {
+        sendJson(res, 400, { error: result.reason, message: result.message });
+        return;
+      }
+      sendJson(res, 200, workspace());
+      return;
+    }
+
+    if (req.method === 'POST' && path === '/api/reviewer') {
+      const project = store.activeProject();
+      if (project === null) {
+        sendJson(res, 400, { error: 'NO_ACTIVE_PROJECT', message: 'No project selected.' });
+        return;
+      }
+      const body = await readJsonBody(req);
+      let payload: { name?: unknown; role?: unknown } = {};
+      if (body.trim().length > 0) {
+        try {
+          payload = JSON.parse(body) as { name?: unknown; role?: unknown };
+        } catch {
+          sendJson(res, 400, { error: 'invalid JSON body' });
+          return;
+        }
+      }
+      const result = store.setReviewer(project.id, { name: payload.name, role: payload.role });
       if (!result.ok) {
         sendJson(res, 400, { error: result.reason, message: result.message });
         return;
@@ -737,7 +762,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'invalid JSON body' });
         return;
       }
-      const { observationId, decision, reviewer, note } = payload;
+      const { observationId, decision, note } = payload;
       if (typeof observationId !== 'string' || observationId.length === 0) {
         sendJson(res, 400, { error: 'observationId is required' });
         return;
@@ -746,16 +771,23 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'decision must be VERIFIED, REJECTED or NEEDS_REVIEW' });
         return;
       }
-      if (typeof reviewer !== 'string' || reviewer.trim().length === 0) {
-        // Anonymous review is refused rather than stored unattributed, which
-        // would make the verification trail meaningless.
-        sendJson(res, 400, { error: 'a named reviewer is required' });
+      let reviewerName: string | null = null;
+      if (typeof payload.reviewer === 'string' && payload.reviewer.trim().length > 0) {
+        reviewerName = payload.reviewer.trim();
+      } else {
+        reviewerName = formatReviewer(store.activeProject()?.reviewer);
+      }
+      if (reviewerName === null) {
+        sendJson(res, 400, {
+          error: 'REVIEWER_NOT_CONFIGURED',
+          message: 'Set your reviewer identity before recording a human finding decision.',
+        });
         return;
       }
       const reviewed = requireSession().review({
           observationId,
           decision,
-          reviewer: reviewer.trim(),
+          reviewer: reviewerName,
           note: typeof note === 'string' ? note : null,
         });
       // A human decision is the most valuable thing in the product, so it is
@@ -778,7 +810,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'invalid JSON body' });
         return;
       }
-      const { findingId, decision, reviewer, note } = payload;
+      const { findingId, decision, note } = payload;
       if (typeof findingId !== 'string' || findingId.length === 0) {
         sendJson(res, 400, { error: 'findingId is required' });
         return;
@@ -787,16 +819,23 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'decision must be VERIFIED, REJECTED or NEEDS_REVIEW' });
         return;
       }
-      if (typeof reviewer !== 'string' || reviewer.trim().length === 0) {
-        // Anonymous verification is refused rather than stored unattributed,
-        // which would make the verification trail meaningless.
-        sendJson(res, 400, { error: 'a named reviewer is required' });
+      let reviewerName: string | null = null;
+      if (typeof payload.reviewer === 'string' && payload.reviewer.trim().length > 0) {
+        reviewerName = payload.reviewer.trim();
+      } else {
+        reviewerName = formatReviewer(store.activeProject()?.reviewer);
+      }
+      if (reviewerName === null) {
+        sendJson(res, 400, {
+          error: 'REVIEWER_NOT_CONFIGURED',
+          message: 'Set your reviewer identity before recording a human finding decision.',
+        });
         return;
       }
       const settled = requireSession().reviewFinding({
           findingId,
           decision,
-          reviewer: reviewer.trim(),
+          reviewer: reviewerName,
           note: typeof note === 'string' ? note : null,
         });
       if (settled.provenance.captureId !== null) store.persistInspection(settled.provenance.captureId);
