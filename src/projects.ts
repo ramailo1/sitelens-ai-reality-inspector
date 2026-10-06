@@ -16,9 +16,14 @@
 
 import { randomUUID } from 'node:crypto';
 import type { AIProvider } from './providers/provider.ts';
+import type { Reasoner } from './providers/nemotron-reasoner.ts';
+import { UnavailableReasoner } from './providers/nemotron-reasoner.ts';
+import type { WorkspacePersistence, PersistedCapture } from './persistence.ts';
 import type { DemoCapture } from './captures.ts';
 import { demoCaptures } from './captures.ts';
 import { InspectionSession } from './session.ts';
+import { validateReasoning } from './reasoning.ts';
+import type { ReasoningFailureKind } from './reasoning.ts';
 import { PresetStore, cloneExpectedState, presetToState } from './expected-state.ts';
 import { DEFAULT_EXPECTED_PRESET_ID } from './expected-state.ts';
 import type { ExpectedState } from './types/inspection.ts';
@@ -45,13 +50,26 @@ export type ProjectSummary = Project & { readonly captureCount: number };
  *
  * Structurally a DemoCapture so it flows through the existing inspection path
  * unchanged; `source` records where the bytes came from so the UI never implies
- * an uploaded photograph is a generated fixture.
+ * an uploaded photograph is a generated fixture, and never implies a local
+ * dataset image was captured on this project's site.
  */
 export interface ProjectCapture extends DemoCapture {
   readonly projectId: string;
-  readonly source: 'UPLOAD' | 'DEMO_FIXTURE';
+  readonly source: 'UPLOAD' | 'DEMO_FIXTURE' | 'LOCAL_DATASET';
   readonly zoneId: string | null;
   readonly createdAt: string;
+  /**
+   * EXIF orientation recorded in the ORIGINAL file, before normalization.
+   * 1 means no rotation. Retained so a re-oriented photograph is visible on
+   * screen instead of being silently corrected.
+   */
+  readonly exifOrientation: number;
+  /** True when the stored pixels were normalized away from the source rotation. */
+  readonly geometryNormalized: boolean;
+  /** Where the bytes live on disk when persistence is attached; null otherwise. */
+  readonly bytesPath: string | null;
+  /** True when bytesPath is relative to the local dataset directory. */
+  readonly bytesRelativeToDataset: boolean;
 }
 
 /**
@@ -110,6 +128,7 @@ function cleanLocation(raw: unknown): ProjectResult<string> {
 
 export class ProjectStore {
   private readonly provider: AIProvider;
+  private readonly reasoner: Reasoner;
   private readonly zoneId: string | null;
   private readonly projects = new Map<string, Project>();
   private readonly captures = new Map<string, ProjectCapture>();
@@ -117,13 +136,58 @@ export class ProjectStore {
   private readonly references = new Map<string, ProjectReference>();
   /** The reference catalogue. Shared by every project; never mutated per project. */
   public readonly presets: PresetStore;
+  /**
+   * Optional durable state. Null means in-memory, and the API then reports
+   * process memory. The two are never confused with each other.
+   */
+  private readonly persistence: WorkspacePersistence | null;
+  /** Captures whose persisted inspection has already been applied to a session. */
+  private readonly hydrated = new Set<string>();
   private activeProjectId: string | null = null;
   private activeCaptureId: string | null = null;
 
-  public constructor(options: { readonly provider: AIProvider; readonly zoneId: string | null; readonly presets?: PresetStore }) {
+  public constructor(options: {
+    readonly provider: AIProvider;
+    readonly zoneId: string | null;
+    readonly presets?: PresetStore;
+    /** The stage-2 reasoning model. Absent means reasoning is explicitly off. */
+    readonly reasoner?: Reasoner;
+    /** Durable state. Omit for the in-memory demonstration surface. */
+    readonly persistence?: WorkspacePersistence | null;
+  }) {
     this.provider = options.provider;
     this.zoneId = options.zoneId;
     this.presets = options.presets ?? new PresetStore();
+    this.persistence = options.persistence ?? null;
+    this.reasoner = options.reasoner ?? new UnavailableReasoner({
+      kind: 'DISABLED',
+      message:
+        'No construction-reasoning model is attached to this store, so stage 2 of the pipeline '
+        + 'is switched off. The visual observation and the deterministic comparison are unaffected.',
+    });
+  }
+
+  /** The reasoner in force, exposed so the server can report it truthfully. */
+  public getReasoner(): Reasoner {
+    return this.reasoner;
+  }
+
+  public hasPersistence(): boolean {
+    return this.persistence !== null;
+  }
+
+  /** The storage truth for THIS instance. Never a hard-coded claim. */
+  public describeStorage(): { location: string; durable: boolean; detail: string } {
+    if (this.persistence === null) {
+      return {
+        location: 'process memory',
+        durable: false,
+        detail:
+          'Uploaded images are held in this running process only. Nothing is written to disk, so '
+          + 'uploads, projects and references are lost when the server restarts.',
+      };
+    }
+    return this.persistence.describe();
   }
 
   public activeProject(): Project | null {
@@ -180,6 +244,7 @@ export class ProjectStore {
     // inherits no captures and no reference from any other project.
     this.activeProjectId = project.id;
     this.activeCaptureId = null;
+    this.persist();
     return { ok: true, value: project };
   }
 
@@ -190,6 +255,7 @@ export class ProjectStore {
     if (!name.ok) return name;
     const updated: Project = { ...project, name: name.value };
     this.projects.set(projectId, updated);
+    this.persist();
     return { ok: true, value: updated };
   }
 
@@ -200,6 +266,7 @@ export class ProjectStore {
     if (!location.ok) return location;
     const updated: Project = { ...project, location: location.value };
     this.projects.set(projectId, updated);
+    this.persist();
     return { ok: true, value: updated };
   }
 
@@ -209,6 +276,7 @@ export class ProjectStore {
     if (!project) return fail('UNKNOWN_PROJECT', 'That project no longer exists.');
     this.activeProjectId = projectId;
     this.selectDefaultCapture(projectId);
+    this.persist();
     return { ok: true, value: project };
   }
 
@@ -231,6 +299,13 @@ export class ProjectStore {
     const pool = inspected.length > 0 ? inspected : captures;
     const last = pool.length > 0 ? pool[pool.length - 1] : undefined;
     this.activeCaptureId = last === undefined ? null : last.id;
+    // The capture is now on screen, so its last inspection must be too. Without
+    // this, a restart left the default capture showing an empty evidence stage
+    // even though a real inspection and real verifications were on disk.
+    if (last !== undefined) {
+      const session = this.sessionFor(last);
+      this.hydrateFromPersistence(last, session);
+    }
     return this.activeCaptureId;
   }
 
@@ -249,6 +324,7 @@ export class ProjectStore {
     if (!project) return fail('UNKNOWN_PROJECT', 'That project no longer exists.');
 
     for (const capture of this.capturesOf(projectId)) {
+      this.releaseCaptureState(capture);
       this.captures.delete(capture.id);
       this.sessions.delete(capture.id);
     }
@@ -260,7 +336,26 @@ export class ProjectStore {
       if (this.activeProjectId !== null) this.selectDefaultCapture(this.activeProjectId);
       else this.activeCaptureId = null;
     }
+    this.persist();
     return { ok: true, value: { deleted: project, activeProjectId: this.activeProjectId } };
+  }
+
+  /**
+   * Drop everything durable that belongs to ONE capture.
+   *
+   * Uploaded bytes and the persisted inspection record both go, so deleting a
+   * capture actually deletes its image and its human verifications rather than
+   * leaving them on disk where a restart would resurrect them.
+   */
+  private releaseCaptureState(capture: ProjectCapture): void {
+    const store = this.persistence;
+    if (store === null) return;
+    store.deleteInspection(capture.id);
+    // A dataset image belongs to the dataset, not to this project, so its file
+    // is never removed: only the reference to it.
+    if (capture.source === 'UPLOAD' && capture.bytesPath !== null) {
+      store.deleteUpload(capture.bytesPath);
+    }
   }
 
   public addCapture(input: {
@@ -272,6 +367,10 @@ export class ProjectStore {
     readonly content: string;
     readonly source: ProjectCapture['source'];
     readonly zoneId?: string | null;
+    readonly exifOrientation?: number;
+    readonly geometryNormalized?: boolean;
+    readonly bytesPath?: string | null;
+    readonly bytesRelativeToDataset?: boolean;
   }): ProjectCapture {
     if (this.activeProjectId === null) {
       throw new Error('a capture cannot be stored before a project is active');
@@ -287,9 +386,20 @@ export class ProjectStore {
       source: input.source,
       zoneId: input.zoneId ?? this.zoneId,
       createdAt: new Date().toISOString(),
+      // Default 1 = no rotation, which is the true answer for a PNG upload and
+      // for any JPEG the importer already normalized.
+      exifOrientation: input.exifOrientation ?? 1,
+      geometryNormalized: input.geometryNormalized ?? false,
+      bytesPath: input.bytesPath ?? null,
+      bytesRelativeToDataset: input.bytesRelativeToDataset ?? false,
     };
     this.captures.set(stored.id, stored);
-    return stored;
+    this.persist();
+    // Read back rather than returning `stored`: persisting writes an upload to
+    // disk and records its path on the STORED record, so the local object is
+    // stale by one field. Handing that back would tell the caller an upload has
+    // no file behind it when it does.
+    return this.captures.get(stored.id) ?? stored;
   }
 
   /**
@@ -306,6 +416,7 @@ export class ProjectStore {
 
     this.captures.delete(captureId);
     this.sessions.delete(captureId);
+    this.releaseCaptureState(owned.value);
 
     if (this.activeCaptureId === captureId) {
       // The deleted capture's result went with it, so the fallback follows the
@@ -316,6 +427,7 @@ export class ProjectStore {
       const last = pool.length > 0 ? pool[pool.length - 1] : undefined;
       this.activeCaptureId = last === undefined ? null : last.id;
     }
+    this.persist();
     return { ok: true, value: { deleted: owned.value, activeCaptureId: this.activeCaptureId } };
   }
 
@@ -331,6 +443,7 @@ export class ProjectStore {
       edited: false,
     };
     this.references.set(projectId, seeded);
+    this.persist();
     return { ...seeded, state: cloneExpectedState(seeded.state) };
   }
 
@@ -355,6 +468,7 @@ export class ProjectStore {
     };
     this.references.set(projectId, reference);
     this.markStale(projectId);
+    this.persist();
     return { ok: true, value: { ...reference, state: cloneExpectedState(reference.state) } };
   }
 
@@ -364,6 +478,7 @@ export class ProjectStore {
     const reference: ProjectReference = { ...current, state, edited: true };
     this.references.set(projectId, reference);
     this.markStale(projectId);
+    this.persist();
     return { ...reference, state: cloneExpectedState(state) };
   }
 
@@ -385,6 +500,12 @@ export class ProjectStore {
       capture.projectId,
       capture.zoneId,
       this.expectedFor(capture.projectId),
+      {
+        reasoner: this.reasoner,
+        // The project NAME is context for the reasoning stage, and the name is
+        // operator-entered rather than observed, so the prompt says so explicitly.
+        projectName: this.projects.get(capture.projectId)?.name ?? null,
+      },
     );
     this.sessions.set(capture.id, created);
     return created;
@@ -394,7 +515,61 @@ export class ProjectStore {
     const owned = this.activeCapture(captureId);
     if (!owned.ok) return owned;
     this.activeCaptureId = captureId;
-    return { ok: true, value: this.sessionFor(owned.value) };
+    const session = this.sessionFor(owned.value);
+    // Reopen whatever this capture was last inspected to, so returning to a
+    // project lands on its findings and its human verifications rather than on
+    // an empty evidence stage. No model is called to do this.
+    this.hydrateFromPersistence(owned.value, session);
+    this.persist();
+    return { ok: true, value: session };
+  }
+
+  /**
+   * Restore a capture's last inspection into its session, once.
+   *
+   * Guarded by a visited set so re-selecting a capture does not repeatedly
+   * re-apply stored reviews over live ones. A live review always wins: it was
+   * recorded later and against the current process's own result.
+   */
+  private hydrateFromPersistence(
+    capture: ProjectCapture,
+    session: InspectionSession,
+  ): void {
+    const store = this.persistence;
+    if (store === null) return;
+    if (this.hydrated.has(capture.id)) return;
+    this.hydrated.add(capture.id);
+    if (session.inspected()) return;
+
+    const record = store.loadInspection(capture.id);
+    if (record === null) return;
+    if (!session.restoreInspection(record)) return;
+
+    // Reasoning is restored alongside the result so a reopened capture still
+    // shows the reasoning that produced it, attributed to the model that
+    // actually produced it.
+    const reasoning = record.reasoning;
+    if (reasoning !== null) {
+      if (reasoning.status === 'AVAILABLE') {
+        const validated = validateReasoning(reasoning.reasoning);
+        if (validated.ok) {
+          session.restoreReasoning(validated.value, {
+            model: reasoning.model ?? record.model,
+            provider: 'nebius-nemotron-reasoner',
+            reasonedAt: record.savedAt,
+            latencyMs: 0,
+            rowsConsidered: 0,
+            detectionsConsidered: 0,
+            degenerate: false,
+          });
+        }
+      } else if (reasoning.kind !== null) {
+        session.restoreReasoningFailure(
+          reasoning.kind as ReasoningFailureKind,
+          reasoning.message ?? 'Construction reasoning was unavailable for this inspection.',
+        );
+      }
+    }
   }
 
   public activeSession(): InspectionSession | null {
@@ -408,6 +583,31 @@ export class ProjectStore {
   }
 
   /**
+ * The project the workspace opens on, creating nothing.
+ *
+ * Used when `restore()` brought real projects back: the operator's own work
+ * should be in front of them, not the synthetic demo shell. Falls back to the
+ * demo project if a state file somehow yielded nothing usable.
+ */
+public ensureSelection(): Project {
+  const active = this.activeProject();
+  if (active !== null) {
+    if (this.activeCaptureId === null) this.selectDefaultCapture(active.id);
+    return active;
+  }
+  const demo = [...this.projects.values()].find((p) => p.demo);
+  if (demo !== undefined) {
+    this.activeProjectId = demo.id;
+    this.selectDefaultCapture(demo.id);
+    return demo;
+  }
+  return this.seedDemoProject(
+    process.env['DEMO_PROJECT_NAME'] ?? 'North Core Construction',
+    process.env['DEMO_PROJECT_LOCATION'] ?? 'Dusk Survey, level 02',
+  );
+}
+
+/**
    * Seed the store with one demo project holding the generated fixtures.
    *
    * These are the repository's existing synthetic scenes, labelled as fixtures
@@ -429,5 +629,253 @@ export class ProjectStore {
       });
     }
     return created.value;
+  }
+
+  // --- durable state --------------------------------------------------------
+
+  /**
+   * Write the workspace to disk.
+   *
+   * The generated synthetic demo project is deliberately NOT persisted: it is
+   * regenerated deterministically on every start, so persisting it would only
+   * create a second copy that could drift from the code that builds it.
+   *
+   * Image bytes are never written into the JSON. A dataset capture records the
+   * path it came from; an upload records the file it was written to.
+   */
+  public persist(): void {
+    const store = this.persistence;
+    if (store === null) return;
+
+    const captures: PersistedCapture[] = [];
+    for (const capture of this.captures.values()) {
+      if (capture.source === 'DEMO_FIXTURE') continue;
+      let bytesPath = capture.bytesPath;
+      if (bytesPath === null && capture.source === 'UPLOAD') {
+        const written = store.saveUpload(
+          capture.id,
+          capture.mediaType === 'image/png' ? '.png' : '.jpg',
+          capture.bytes,
+        );
+        bytesPath = written;
+        if (written !== null) {
+          this.captures.set(capture.id, { ...capture, bytesPath: written });
+        }
+      }
+      // A dataset capture with no recorded path is referenced by its filename,
+      // which is resolved against the dataset directory on restore.
+      captures.push({
+        id: capture.id,
+        projectId: capture.projectId,
+        label: capture.label,
+        content: capture.content,
+        mediaType: capture.mediaType,
+        width: capture.dimensions.width,
+        height: capture.dimensions.height,
+        byteLength: capture.bytes.length,
+        source: capture.source,
+        zoneId: capture.zoneId,
+        createdAt: capture.createdAt,
+        bytesPath: bytesPath ?? '',
+        relativeToDataset: capture.source === 'LOCAL_DATASET',
+        exifOrientation: capture.exifOrientation,
+        geometryNormalized: capture.geometryNormalized,
+      });
+    }
+
+    const references = [...this.references.entries()].map(([projectId, reference]) => ({
+      projectId,
+      presetId: reference.presetId,
+      edited: reference.edited,
+      items: reference.state.items,
+      zone: reference.state.zone,
+    }));
+
+    store.saveWorkspace({
+      schemaVersion: 1,
+      savedAt: new Date().toISOString(),
+      activeProjectId: this.activeProjectId,
+      activeCaptureId: this.activeCaptureId,
+      projects: [...this.projects.values()].filter((p) => p.demo === false),
+      captures,
+      references,
+      // Operator presets only. System presets are code and are always rebuilt.
+      presets: this.presets
+        .list()
+        .filter((p) => p.source === 'OPERATOR')
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          zone: p.zone,
+          items: p.items,
+          createdAt: new Date().toISOString(),
+        })),
+    });
+  }
+
+  /** Persist one capture's inspection result and human decisions. */
+  public persistInspection(captureId: string): void {
+    const store = this.persistence;
+    const session = this.sessions.get(captureId);
+    if (store === null || session === undefined) return;
+    const payload = session.getPersistedPayload();
+    if (payload === null) return;
+
+    const view = session.view();
+    const reasoning = session.getReasoningOutcome();
+    store.saveInspection({
+      captureId,
+      savedAt: new Date().toISOString(),
+      inspectedAt: view.provenance.inspectedAt,
+      provider: view.provenance.provider,
+      model: view.provenance.model,
+      inferenceOrigin: view.inferenceOrigin,
+      originalInferenceAt: view.originalInferenceAt,
+      originalLatencyMs: view.originalLatencyMs,
+      payload,
+      reviews: session.getReviewRecords(),
+      reasoning:
+        reasoning === null
+          ? null
+          : reasoning.status === 'AVAILABLE'
+            ? {
+                status: reasoning.status,
+                kind: null,
+                message: null,
+                model: reasoning.provenance.model,
+                reasoning: reasoning.reasoning,
+              }
+            : {
+                status: reasoning.status,
+                kind: reasoning.kind,
+                message: reasoning.message,
+                // No model: an unavailable stage produced no output to attribute.
+                model: null,
+                reasoning: null,
+              },
+    });
+  }
+
+  /**
+   * Restore projects, captures and references from disk.
+   *
+   * Returns a short report of what was actually recovered, because "restored"
+   * and "restored everything" are different claims. A capture whose bytes can no
+   * longer be resolved is reported as skipped rather than being registered with
+   * no image behind it.
+   *
+   * The synthetic demo project is seeded FIRST and then skipped during restore,
+   * so the repository always opens on a populated surface.
+   */
+  public restore(): {
+    readonly projects: number;
+    readonly captures: number;
+    readonly skippedCaptures: number;
+  } {
+    const store = this.persistence;
+    if (store === null) return { projects: 0, captures: 0, skippedCaptures: 0 };
+
+    const state = store.loadWorkspace();
+    if (state === null) return { projects: 0, captures: 0, skippedCaptures: 0 };
+
+    for (const preset of state.presets) {
+      const created = this.presets.create({
+        name: preset.name,
+        zone: preset.zone,
+        items: preset.items,
+      });
+      // Ids are regenerated rather than trusted, so a tampered state file cannot
+      // collide with a system preset id or redirect a project's reference.
+      if (created.ok) void created;
+    }
+
+    const demoIds = new Set(
+      [...this.projects.values()].filter((p) => p.demo).map((p) => p.id),
+    );
+    let restoredProjects = 0;
+    let restoredCaptures = 0;
+    let skippedCaptures = 0;
+
+    for (const project of state.projects) {
+      if (demoIds.has(project.id)) continue;
+      this.projects.set(project.id, {
+        id: project.id,
+        name: project.name,
+        location: project.location,
+        createdAt: project.createdAt,
+        demo: false,
+      });
+      this.referenceFor(project.id);
+      restoredProjects += 1;
+    }
+
+    for (const record of state.references) {
+      if (!this.projects.has(record.projectId)) continue;
+      const preset = this.presets.get(record.presetId);
+      // An EDITED reference must be restored from the record's own items. Reading
+      // it back from the preset would silently discard every operator edit and
+      // re-present the pristine system reference as if it were still in force,
+      // which is the exact provenance-laundering this product refuses.
+      const restored: ExpectedState = record.edited
+        ? { zone: record.zone, source: 'OPERATOR', items: record.items as ExpectedState['items'] }
+        : preset !== null
+          ? presetToState(preset)
+          : { zone: record.zone, source: 'OPERATOR', items: record.items as ExpectedState['items'] };
+      this.references.set(record.projectId, {
+        presetId: record.presetId,
+        state: restored,
+        edited: record.edited,
+      });
+    }
+
+    // Active project first, so restored captures attach to a live project.
+    if (state.activeProjectId !== null && this.projects.has(state.activeProjectId)) {
+      this.activeProjectId = state.activeProjectId;
+    }
+
+    for (const record of state.captures) {
+      if (!this.projects.has(record.projectId)) {
+        skippedCaptures += 1;
+        continue;
+      }
+      const bytes = store.resolveCaptureBytes(record);
+      if (bytes === null || bytes.length === 0) {
+        skippedCaptures += 1;
+        continue;
+      }
+      // Dimensions are re-read from the restored bytes rather than trusted from
+      // the file, so a truncated upload cannot reappear with a claimed size.
+      const capture: ProjectCapture = {
+        id: record.id,
+        label: record.label,
+        bytes,
+        mediaType: record.mediaType,
+        dimensions: { width: record.width, height: record.height },
+        content: record.content,
+        projectId: record.projectId,
+        source: record.source,
+        zoneId: record.zoneId,
+        createdAt: record.createdAt,
+        exifOrientation: record.exifOrientation ?? 1,
+        geometryNormalized: record.geometryNormalized ?? false,
+        bytesPath: record.bytesPath,
+        bytesRelativeToDataset: record.relativeToDataset,
+      };
+      this.captures.set(capture.id, capture);
+      restoredCaptures += 1;
+    }
+
+    // Reopen on the capture the operator last had open, when it survived.
+    if (
+      state.activeCaptureId !== null &&
+      this.captures.has(state.activeCaptureId) &&
+      this.captures.get(state.activeCaptureId)?.projectId === this.activeProjectId
+    ) {
+      this.selectCapture(state.activeCaptureId);
+    } else if (this.activeProjectId !== null) {
+      this.selectDefaultCapture(this.activeProjectId);
+    }
+
+    return { projects: restoredProjects, captures: restoredCaptures, skippedCaptures };
   }
 }

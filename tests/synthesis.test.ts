@@ -111,6 +111,50 @@ test('a count shortfall becomes an evidence-backed, UNVERIFIED finding', () => {
   assert.equal(finding.comparisonId, rows[0]?.id);
 });
 
+test('comparison findings state which evidence the image actually provides', () => {
+  // Three rows, three evidence states, and the wording must not blur them:
+  // a localized region, a real reading with no region, and no reading at all.
+  const exp = state([
+    expected({ id: 'e_localized', element: 'COLUMN', expectation: 'COUNT', expectedCount: 12 }),
+    expected({ id: 'e_fullframe', element: 'WALL', expectation: 'COUNT', expectedCount: 6 }),
+    expected({ id: 'e_none', element: 'OPENING', expectation: 'PRESENT', expectedCount: null }),
+  ]);
+  const detections = [
+    detection({ element: 'COLUMN', count: 4, boundingBox: { x: 0.1, y: 0.2, width: 0.7, height: 0.5 } }),
+    detection({
+      element: 'WALL',
+      count: 2,
+      confidence: 0.7,
+      evidence: 'Two masonry walls visible at the frame edge.',
+      boundingBox: null,
+    }),
+  ];
+  const rows = compareExpectedState(exp, detections);
+  const findings = synthesizeFindings({
+    captureId: 'cap_1',
+    expected: exp,
+    detections,
+    modelFindings: [],
+    rows,
+    synthetic: false,
+  });
+
+  const localized = findings.find((f) => f.element === 'COLUMN');
+  assert.match(localized?.evidence ?? '', /localised this element .* highlighted region/);
+
+  const fullFrame = findings.find((f) => f.element === 'WALL');
+  assert.match(
+    fullFrame?.evidence ?? '',
+    /Full-frame evidence: the finding is supported by the inspected image, but the model did not return a localised region/,
+  );
+
+  const none = findings.find((f) => f.element === 'OPENING');
+  assert.match(
+    none?.evidence ?? '',
+    /No visual reading of this element in this capture; the finding rests on the expected-state comparison/,
+  );
+});
+
 test('an UNDETERMINED item becomes an UNDETERMINED finding, not a claimed problem', () => {
   const exp = state([expected()]);
   const rows = compareExpectedState(exp, [detection({ count: null })]);

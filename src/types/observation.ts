@@ -290,9 +290,31 @@ export function validateModelObservation(
 
   const boundingBox = validateBoundingBox(raw['bounding_box'], issues);
 
+  // A model that reports zero confidence in its own observation has asserted
+  // nothing. Measured behaviour, not theory: the vision model this product runs
+  // against echoes its schema back with every field zeroed, and those entries
+  // used to pass validation and appear on screen as "0% confidence".
+  if (confidence !== null) {
+    if (confidence <= 0) {
+      issues.push({
+        field: 'confidence',
+        message:
+          'confidence is 0, so the model asserted no reading; the entry is a template placeholder '
+          + 'and is discarded rather than shown',
+      });
+    }
+  }
+
   if (issues.length > 0) {
     return { ok: false, issues };
   }
+
+  // A box enclosing no area is not a localisation. Reported as absent rather
+  // than drawn, so the card can say "the model did not localise this".
+  const usableBox =
+    boundingBox !== null && boundingBox.width > 0 && boundingBox.height > 0
+      ? boundingBox
+      : null;
 
   return {
     ok: true,
@@ -303,7 +325,7 @@ export function validateModelObservation(
       confidence: confidence as number,
       severity: severity as ObservationSeverity,
       suggestedAction: suggestedAction as SuggestedAction,
-      boundingBox,
+      boundingBox: usableBox,
     },
   };
 }

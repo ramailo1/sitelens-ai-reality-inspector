@@ -22,6 +22,24 @@ import type { RawModelObservation } from '../types/observation.ts';
 export const NEBIUS_PROVIDER_NAME = 'nebius-nvidia' as const;
 
 /**
+ * Largest encoded image the endpoint will accept, measured not guessed.
+ *
+ * The image travels as a base64 data URL inside the request body, so the wire
+ * size is roughly 4/3 of the file. Probed against the live endpoint with real
+ * construction photographs:
+ *
+ *   5.0 MB  (022)  HTTP 200
+ *   7.9 MB  (030)  HTTP 200
+ *   9.2 MB  (031)  HTTP 200
+ *  15.9 MB  (023)  HTTP 400, schema rejection of the truncated body
+ *
+ * The boundary sits between the last two. A conservative 10 MB is enforced so
+ * the failure is a clear product message naming the file rather than an opaque
+ * provider schema error at inference time.
+ */
+export const MAX_PROVIDER_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/**
  * Instruction sent to the model. It constrains the model to OBSERVABLE site
  * reality and explicitly forbids autonomous engineering/compliance conclusions
  * — the same trust boundary SiteLens enforces on every AI path.
@@ -48,6 +66,8 @@ export function buildInspectionPrompt(options: { expectedSummary?: string | null
   return [
     'You are a construction reality inspector analysing ONE site photograph.',
     '',
+    'Write every string value in ENGLISH, whatever language the image text uses.',
+    '',
     'Describe ONLY what is visibly present. You are an assistant, not an engineer of record:',
     '- Do NOT declare compliance, structural safety, or code violations.',
     '- Do NOT assert measurements, quantities, or dimensions that cannot be read from the image.',
@@ -56,77 +76,89 @@ export function buildInspectionPrompt(options: { expectedSummary?: string | null
     '  inference as a verified fact.',
     '- If the evidence is insufficient, say so. An honest "not determinable" is',
     '  far more useful to a site engineer than a confident guess.',
-    ...expectedBlock,
+...expectedBlock,
     '',
-    'Return STRICT JSON only, no markdown fences, no commentary, shaped exactly as:',
+    'Return STRICT JSON only, no markdown fences, no commentary. Exactly three keys at the top',
+    'level, each an array:',
+    '{ "elements": [], "observations": [], "findings": [] }',
+    '',
+    'The examples below show ONLY the closed-vocabulary string fields, because a model copies',
+    'whatever a template contains verbatim. Every number is deliberately absent so there is no',
+    'number here for you to echo by mistake:',
     '{',
-    '  "elements": [',
-    '    {',
-    // Enum values are shown as single concrete examples, NEVER as a
-    // pipe-separated option list. A pipe-separated list inside the JSON
-    // string is a template placeholder, and models copy such placeholders
-    // verbatim (observed live: "category": "OBSERVED_ELEMENT | PROGRESS_OBSERVATION"),
-    // which strict validation then correctly rejects. Listing one legal value
-    // and naming the legal set in prose keeps the contract exact without
-    // giving the model a string to echo.
-    '      "element": "COLUMN",',
-    '      "present": true,',
-    '      "count": 4,',
-    '      "confidence": 0.0,',
-    '      "evidence": "what in the image supports this",',
-    '      "bounding_box": { "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0 }',
-    '    }',
-    '  ],',
     '  "observations": [',
     '    {',
     '      "category": "OBSERVED_ELEMENT",',
-    '      "observation": "one factual sentence about what is visible",',
-    '      "evidence": { "description": "what in the image supports this" },',
-    '      "confidence": 0.0,',
     '      "severity": "INFO",',
-    '      "suggested_action": "NO_ACTION",',
-    '      "bounding_box": { "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0 }',
-    '    }',
-    '  ],',
-    '  "findings": [',
-    '    {',
-    '      "title": "short label for the card",',
-    '      "category": "DEVIATION",',
-    '      "severity": "MEDIUM",',
-    '      "element": "SLAB",',
-    '      "location": "where in the frame",',
-    '      "observation": "WHAT is visible",',
-    '      "reason": "WHY it is flagged",',
-    '      "evidence": "the image detail that supports it",',
-    '      "confidence": 0.0,',
-    '      "recommendation": "the physical check a human should make",',
-    '      "bounding_box": { "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0 }',
+    '      "suggested_action": "NO_ACTION"',
     '    }',
     '  ]',
     '}',
     '',
+    '=== ELEMENTS — what you can SEE ===',
+    'Each element object carries these keys:',
+    '  "element"       string. Exactly one of: COLUMN, SLAB, WALL, OPENING, MEP_ROUGH_IN,',
+    '                   FORMWORK, SCAFFOLD, EQUIPMENT, WORKER, REBAR, FINISH, EXCAVATION.',
+    '  "present"       boolean. True only if the element is actually in the photograph.',
+    '  "count"         OPTIONAL integer. Include ONLY when you can genuinely count the items in',
+    '                   the image. OMIT the key entirely otherwise. Never estimate one.',
+    '  "confidence"    number strictly between 0 and 1, and NEVER zero. This is your certainty',
+    '                   in your own visual reading and nothing more.',
+    '  "evidence"      string. What in the image supports this. Describe what is there.',
+    '  "bounding_box"  OPTIONAL object with keys "x", "y", "width", "height", each a number',
+    '                   between 0 and 1. "width" and "height" must both be greater than zero.',
+    '                   OMIT the key unless you can point at the element.',
+    '                   IMPORTANT: an inspector cannot see WHERE you looked without it. For every',
+    '                   element you are sure of, give the real region of the frame it occupies.',
+    '',
+    '=== OBSERVATIONS — one factual statement about visible reality ===',
+    'Each observation object carries these keys:',
+    '  "category"          string. Exactly one of: OBSERVED_ELEMENT, PROGRESS_OBSERVATION,',
+    '                      POTENTIAL_DEVIATION, POTENTIAL_RISK, SUGGESTED_FOLLOW_UP.',
+    '  "observation"       string. One factual sentence about what is visible.',
+    '  "evidence"          object with a "description" string: what in the image supports this.',
+    '  "confidence"        number strictly between 0 and 1, and never zero.',
+    '  "severity"          string. Exactly one of: INFO, LOW, MEDIUM, HIGH.',
+    '  "suggested_action"  string. Exactly one of: NO_ACTION, HUMAN_REVIEW, INSPECT_CLOSER,',
+    '                      CAPTURE_REFERENCE_PLAN, SCHEDULE_FOLLOW_UP.',
+    '  "bounding_box"      OPTIONAL, same rules as above.',
+    '',
+    '=== FINDINGS — candidate attention areas, NOT verdicts ===',
+    'Each finding object carries these keys:',
+    '  "title"          string. Short label for the card.',
+    '  "category"       string. Exactly one of: DEVIATION, MISSING_ELEMENT, INCOMPLETE_WORK,',
+    '                    UNEXPECTED_CONDITION, QUALITY, COORDINATION, SAFETY_ATTENTION,',
+    '                    UNDETERMINED.',
+    '  "severity"       string. Exactly one of: INFO, LOW, MEDIUM, HIGH.',
+    '  "element"        OPTIONAL string, same vocabulary as elements.',
+    '  "location"       OPTIONAL string. Where in the frame.',
+    '  "observation"    string. WHAT is visible.',
+    '  "reason"         string. WHY it is flagged.',
+    '  "evidence"       string. The image detail that supports it.',
+    '  "confidence"     number strictly between 0 and 1, and never zero.',
+    '  "recommendation" string. The physical check a human should make.',
+    '  "bounding_box"   OPTIONAL, same rules as above.',
+    '',
+    '=== THE RULE THAT MATTERS MOST ===',
+    'Report an element ONLY if you can actually see it in this photograph.',
+    '- If something from the expected state is NOT visible, LEAVE IT OUT. Do not include it',
+    '  with zero confidence. Do not write "no visible X" as the evidence for a present element.',
+    '- NEVER echo the expected-state list back as your "elements". That list is a comparison',
+    '  reference, not a description of this photograph. If you return an element from that list,',
+    '  it must be because YOU can see it.',
+    '- Never emit confidence 0, and never emit a bounding_box whose width or height is 0. Those',
+    '  values mean "I did not look", and this product discards them rather than guessing.',
+    '- An empty "elements" array with one honest observation is a BETTER answer than a full list',
+    '  of placeholders. Returning nothing you cannot see is correct, not a failure.',
+    '',
     'Rules:',
-    '- "elements" is what you can SEE. Include "count" ONLY when you can genuinely',
-    '  count the items in the image; otherwise OMIT the count key entirely. Never',
-    '  estimate a count you did not make.',
     '- "element" must be EXACTLY one of: COLUMN, SLAB, WALL, OPENING, MEP_ROUGH_IN,',
     '  FORMWORK, SCAFFOLD, EQUIPMENT, WORKER, REBAR, FINISH, EXCAVATION.',
-    '- "observations" describe visible reality. Pick EXACTLY ONE category per entry,',
-    '  from this set: OBSERVED_ELEMENT, PROGRESS_OBSERVATION, POTENTIAL_DEVIATION,',
-    '  POTENTIAL_RISK, SUGGESTED_FOLLOW_UP. "category" must be one of those five words',
-    '  on its own - never a combination, never a choice list, never the words',
-    '  "or"/"/"/"|" inside the value.',
-    '- "findings" are candidate ATTENTION AREAS for a human inspector to look at.',
-    '  They are not verdicts. Use this vocabulary exactly: DEVIATION,',
-    '  MISSING_ELEMENT, INCOMPLETE_WORK, UNEXPECTED_CONDITION, QUALITY,',
-    '  COORDINATION, SAFETY_ATTENTION, UNDETERMINED.',
-    '- "severity" must be EXACTLY one of: INFO, LOW, MEDIUM, HIGH.',
-    '- "suggested_action" must be EXACTLY one of: NO_ACTION, HUMAN_REVIEW,',
-    '  INSPECT_CLOSER, CAPTURE_REFERENCE_PLAN, SCHEDULE_FOLLOW_UP.',
+    '- Pick EXACTLY ONE category per observation entry. Never a combination, never a choice',
+    // eslint-disable-next-line no-template-curly-in-string
+    '  list, never the words "or"/"/"/"|" inside the value.',
     '- "recommendation" must be a PHYSICAL check a person can carry out. Never state',
     '  or imply that the work is approved, rejected or certified.',
-    '- confidence is a number between 0 and 1 and reflects your certainty in the VISUAL reading only.',
-    '- bounding_box values are normalized to [0,1]; omit the bounding_box key if you cannot localise it.',
     '- Prefer fewer, well-evidenced entries over many speculative ones.',
     '- If nothing meaningful is visible, return an empty observations array and',
     '  empty elements and findings arrays rather than inventing content.',
@@ -182,6 +214,16 @@ export class NebiusNvidiaProvider implements AIProvider {
     }
     if (!image.mediaType.startsWith('image/')) {
       throw new ProviderError('ERROR', `Unsupported media type: ${image.mediaType}`);
+    }
+    if (image.bytes.length > MAX_PROVIDER_IMAGE_BYTES) {
+      const mb = (MAX_PROVIDER_IMAGE_BYTES / (1024 * 1024)).toFixed(0);
+      // Refused here, with the real limit named, instead of producing an opaque
+      // schema rejection from the endpoint part-way through a large upload.
+      throw new ProviderError(
+        'ERROR',
+        `This capture is ${(image.bytes.length / (1024 * 1024)).toFixed(1)} MB and the model `
+        + `endpoint accepts up to ${mb} MB. Reduce or recompress it before inspecting.`,
+      );
     }
 
     if (!this.credentials) {

@@ -26,39 +26,7 @@ import type {
 import type { InferenceOrigin, InspectionCache } from './cache.ts';
 import { computeCacheKey } from './cache.ts';
 import type { RawProviderResult } from './providers/provider.ts';
-
-/** Re-serialise a validated observation back to the raw provider shape, so the
- *  cache holds provider output rather than product data. Re-validating it on a
- *  hit is what makes a cached entry safe to serve. */
-function toCacheableObservation(o: AIObservation): Record<string, unknown> {
-  return {
-    category: o.category,
-    observation: o.observation,
-    evidence: { description: o.evidence.description },
-    confidence: o.confidence,
-    severity: o.severity,
-    suggested_action: o.suggestedAction,
-    ...(o.evidence.boundingBox === null ? {} : { bounding_box: o.evidence.boundingBox }),
-  };
-}
-
-function toCacheableFinding(f: InspectionFinding): Record<string, unknown> {
-  return {
-    title: f.title,
-    category: f.category,
-    severity: f.severity,
-    observation: f.observation,
-    reason: f.reason,
-    evidence: f.evidence,
-    confidence: f.confidence,
-    recommendation: f.recommendation,
-    ...(f.element === null ? {} : { element: f.element }),
-    ...(f.location === null ? {} : { location: f.location }),
-    ...(f.expected === null ? {} : { expected: f.expected }),
-    ...(f.difference === null ? {} : { difference: f.difference }),
-    ...(f.boundingBox === null ? {} : { bounding_box: f.boundingBox }),
-  };
-}
+import { toCacheableFinding, toCacheableObservation } from './inspector-payload.ts';
 
 export type { InferenceOrigin };
 
@@ -377,6 +345,23 @@ export class RealityInspector {
       );
     }
     return fresh;
+  }
+
+  /**
+   * Rebuild a validated result from a raw provider payload WITHOUT calling the
+   * provider.
+   *
+   * The same `buildFromPayload` path a cache hit uses, exposed for restoring a
+   * persisted inspection after a restart. Re-validating here rather than
+   * trusting the file is deliberate: a state file on disk is exactly as
+   * untrusted as a model response, and a run restored from one must be held to
+   * identical rules or a restart would quietly relax the trust boundary.
+   */
+  rebuildFromPayload(
+    raw: RawProviderResult,
+    options: InspectOptions,
+  ): InspectionResult {
+    return { ...this.buildFromPayload(raw, options), inferenceOrigin: 'CACHED' };
   }
 
   /**

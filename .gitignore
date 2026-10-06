@@ -20,3 +20,9 @@ dist/
 
 # Local scratch
 tmp/
+
+# Runtime state written by the local inspection server (SITELENS_DATA_DIR).
+# Holds the workspace file, uploaded bytes and per-capture inspection records
+# produced by actually running the app. Never source: it is regenerated on every
+# run and would otherwise be swept into a commit by `git add -A`.
+data/

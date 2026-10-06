@@ -104,6 +104,24 @@ function findingFromRow(
       'A single photograph cannot settle this; it stays open pending a walk or a second view.'
     : `Expected ${row.expectedText}. Observed ${row.observedText}.`;
 
+  // EVIDENCE states exactly what the image supports, and no more. Three cases,
+  // because collapsing them manufactures certainty the pipeline does not have:
+  //
+  //   LOCALIZED   the model returned a usable region; the overlay may draw it.
+  //   FULL_FRAME  the model made a real visual reading of THIS image but did
+  //               not localise it. The image supports the finding; no rectangle
+  //               does. Never upgraded to a box, never downgraded to no evidence.
+  //   NONE        the model reported nothing for this element, so the finding
+  //               rests on the expected-state comparison alone. Saying the image
+  //               supports it would be exactly the invention this product refuses.
+  const evidence: string = row.boundingBox !== null
+    ? 'The model localised this element in the capture; see the highlighted region.'
+    : row.detectionReported
+      ? 'Full-frame evidence: the finding is supported by the inspected image, but the ' +
+        'model did not return a localised region for it.'
+      : 'No visual reading of this element in this capture; the finding rests on the ' +
+        'expected-state comparison rather than image evidence.';
+
   const recommendation = undetermined
     ? `Confirm by physical inspection: walk the zone and record whether ${label} is present. ` +
       'Do not treat this as a shortfall until it is verified.'
@@ -129,10 +147,7 @@ function findingFromRow(
       ? `Expected ${row.expectedText}; ${NOT_DETERMINABLE_TEXT}.`
       : row.difference,
     reason,
-    evidence:
-      row.boundingBox !== null
-        ? 'The model localised this element in the capture; see the highlighted region.'
-        : 'The model reported this element without localising it in the frame.',
+    evidence,
     // A comparison finding carries NO model confidence of its own: it is
     // arithmetic. Borrowing an element confidence here would dress a
     // deterministic result up as a measurement.

@@ -92,3 +92,38 @@ test('evidence boxes are scaled against the PAINTED photograph, not the element 
     'the overlay must not scale against the element width',
   );
 });
+test('orientation-3/4 captures are display-flipped and their boxes flip with them', () => {
+  // The stored bytes are orientation-normalized (tag rewritten to 1, pixels
+  // untouched). Measured against the real dataset: the orientation-6 images
+  // carry pixels that are ALREADY upright, so no display rotation applies to
+  // them, while 004 and 027 (orientation 3) really are stored upside down and
+  // need a display-only 180-degree correction.
+  const context: {
+    result_displayNeedsFlip: boolean[] | null;
+    result_flipBox180: { left: number; top: number; width: number; height: number } | null;
+  } = { result_displayNeedsFlip: null, result_flipBox180: null };
+  const start = APP_JS.indexOf('function displayNeedsFlip(');
+  const end = APP_JS.indexOf('/**', start);
+  assert.ok(start > -1, 'displayNeedsFlip must exist');
+  const flipStart = APP_JS.indexOf('function flipBox180(');
+  const flipEnd = APP_JS.indexOf('\n}', flipStart) + 2;
+  assert.ok(flipStart > -1, 'flipBox180 must exist');
+  new vm.Script(
+    APP_JS.slice(start, end) + '\n' + APP_JS.slice(flipStart, flipEnd)
+    + '\nresult_displayNeedsFlip = [displayNeedsFlip(1), displayNeedsFlip(3), displayNeedsFlip(4), displayNeedsFlip(6), displayNeedsFlip(8)];'
+    + '\nresult_flipBox180 = flipBox180({ left: 100, top: 50, width: 200, height: 50 }, 800, 600);',
+  ).runInNewContext(context);
+  assert.ok(Array.isArray(context.result_displayNeedsFlip), 'displayNeedsFlip results must return');
+  assert.ok(context.result_flipBox180 !== null, 'flipBox180 must return a box');
+  assert.deepEqual([...context.result_displayNeedsFlip], [false, true, true, false, false]);
+  // Point reflection: a box at top-left of an 800x600 frame lands at the
+  // mirrored position with unchanged size, so it stays glued to the same
+  // physical region of the scene the viewer now sees.
+  assert.deepEqual({ ...context.result_flipBox180 }, { left: 500, top: 500, width: 200, height: 50 });
+
+  // The display path must actually wire the flip in: the stage image gets the
+  // class, and the overlay maps boxes through the same flip when it is set.
+  assert.match(APP_JS, /classList\.toggle\('img-flip180', /);
+  assert.match(APP_JS, /flipBox180\(box, frameWidth, frameHeight\)/);
+  assert.match(APP_CSS, /\.img-flip180\s*\{[^}]*rotate\(180deg\)/);
+});

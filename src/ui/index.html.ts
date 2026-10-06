@@ -79,7 +79,8 @@ export const INDEX_HTML = `<!doctype html>
 </header>
 
 <div class="ident">
-  <span class="ident-k">Engine</span><span class="ident-v" id="hdr-model">-</span>
+  <span class="ident-k">Vision</span><span class="ident-v" id="hdr-model">-</span>
+  <span class="ident-k">Reasoning</span><span class="ident-v" id="hdr-reasoner">-</span>
   <span class="ident-k">Source</span><span class="ident-v" id="hdr-provenance">-</span>
   <span class="ident-synth" id="hdr-synth" hidden>DEMO FIXTURE - NOT AI INFERENCE</span>
   <span class="ident-cache" id="hdr-cache" hidden>CACHED AI RESULT</span>
@@ -87,6 +88,41 @@ export const INDEX_HTML = `<!doctype html>
     <input type="checkbox" id="cache-toggle">
     <span>reuse cached AI</span>
   </label>
+</div>
+
+<!--
+  The pipeline, always visible.
+  Two models do different jobs and the UI must never blur them into one
+  "AI" claim. Each stage names the model that actually ran it, and the
+  reasoning stage says so explicitly when it contributed nothing.
+-->
+<div class="pipe" id="pipe" aria-label="Model pipeline">
+  <ol class="pipe-steps">
+    <li class="pipe-step" id="pipe-1">
+      <span class="pipe-n">01</span>
+      <span class="pipe-k">SEE</span>
+      <span class="pipe-model" id="pipe-vision-model">-</span>
+      <span class="pipe-note" id="pipe-vision-note">not run yet</span>
+    </li>
+    <li class="pipe-step" id="pipe-2">
+      <span class="pipe-n">02</span>
+      <span class="pipe-k">COMPARE</span>
+      <span class="pipe-model" id="pipe-compare-model">SiteLens deterministic engine</span>
+      <span class="pipe-note" id="pipe-compare-note">no expected state loaded</span>
+    </li>
+    <li class="pipe-step" id="pipe-3">
+      <span class="pipe-n">03</span>
+      <span class="pipe-k">UNDERSTAND</span>
+      <span class="pipe-model" id="pipe-reason-model">-</span>
+      <span class="pipe-note" id="pipe-reason-note">not run yet</span>
+    </li>
+    <li class="pipe-step" id="pipe-4">
+      <span class="pipe-n">04</span>
+      <span class="pipe-k">VERIFY</span>
+      <span class="pipe-model" id="pipe-verify-model">Named human</span>
+      <span class="pipe-note" id="pipe-verify-note">nothing verified</span>
+    </li>
+  </ol>
 </div>
 
 <div class="notice" id="notice" role="status" aria-live="polite"></div>
@@ -153,7 +189,6 @@ export const INDEX_HTML = `<!doctype html>
       <h2 class="bay-h">Capture reality</h2>
       <p class="bay-sub">This is what exists on site. Everything downstream is measured against it.</p>
     </div>
-
     <div class="split">
       <div class="split-l">
         <div class="drop" id="drop" tabindex="0" role="button"
@@ -187,10 +222,30 @@ export const INDEX_HTML = `<!doctype html>
           <p class="fixtures-h">Captures in this project</p>
           <ul class="fixture-list" id="fixture-list"></ul>
           <p class="fixtures-empty" id="capture-empty" hidden>
-            No captures in this project yet. Drop a site photograph above, or
-            choose a demo capture.
+            No captures in this project yet. Drop a site photograph above, import a
+            local dataset image below, or choose a demo capture.
           </p>
         </div>
+
+        <!--
+          The local validation dataset.
+
+          This is the path that makes the demo run on REAL construction reality
+          rather than a synthetic scene. The labelling is the point: these are
+          genuine photographs held on this machine, and importing one makes it a
+          real input to a real inspection. It does NOT make it project evidence,
+          and nothing in this panel claims it was captured on this site.
+        -->
+        <section class="dataset" id="dataset" aria-labelledby="dataset-h">
+          <div class="dataset-head">
+            <h3 class="dataset-h" id="dataset-h">Local dataset</h3>
+            <span class="tag" id="dataset-count">-</span>
+          </div>
+          <p class="dataset-note" id="dataset-note">Checking for a local dataset…</p>
+          <div class="dataset-grid" id="dataset-grid"></div>
+          <p class="dataset-empty" id="dataset-empty" hidden></p>
+          <p class="note note-bad" id="dataset-error" role="alert" hidden></p>
+        </section>
       </div>
 
       <div class="split-r">
@@ -274,6 +329,8 @@ export const INDEX_HTML = `<!doctype html>
       <div class="panel-head"><h3 class="panel-h">Provenance</h3></div>
       <dl class="tape tape-wide" id="provenance"></dl>
       <p class="elig" id="eligibility"></p>
+      <p class="elig" id="pipeline-eligibility"></p>
+      <p class="geom" id="geometry-note" hidden></p>
       <div id="failures"></div>
     </div>
   </section>
@@ -341,6 +398,29 @@ export const INDEX_HTML = `<!doctype html>
       <span class="trust-tag" id="trust-state">UNVERIFIED</span>
       <span class="trust-note">Confidence never verifies itself.</span>
     </div>
+
+    <!--
+      Stage 2, and the reason this product is more than an object detector.
+
+      WHAT IT MEANS comes from Nemotron and is shown as its own stage with its own
+      provenance, never merged into the comparison. When the stage could not run,
+      that is stated here in as many words: a missing reasoning stage must never
+      read as an absence of problems.
+    -->
+    <section class="reason" id="reason" aria-labelledby="reason-h" data-status="UNAVAILABLE">
+      <div class="reason-head">
+        <h3 class="reason-h" id="reason-h">Construction reasoning</h3>
+        <span class="tag" id="reason-stage">NOT RUN</span>
+        <span class="reason-model" id="reason-model">-</span>
+      </div>
+      <p class="reason-lede" id="reason-lede">
+        Run the inspection to have Nemotron reason about what the evidence does
+        and does not establish.
+      </p>
+      <dl class="reason-grid" id="reason-grid"></dl>
+      <div class="reason-fail" id="reason-fail" hidden></div>
+      <p class="reason-foot" id="reason-foot" hidden></p>
+    </section>
 
     <div id="findings-cards"></div>
   </section>

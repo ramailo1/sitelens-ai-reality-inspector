@@ -85,6 +85,10 @@ export function compareItem(
   const observedCount = detection !== null && detection.present ? detection.count : null;
   const confidence = detection !== null ? detection.confidence : null;
   const boundingBox = detection !== null ? detection.boundingBox : null;
+  // Reported = the model said anything about this kind, including "it is not
+  // there". Null means the model said nothing, which is an evidence statement
+  // of its own: there is no visual reading to point at, full-frame or otherwise.
+  const detectionReported = detection !== null;
 
   let status: ComparisonStatus;
   let difference = '';
@@ -153,6 +157,7 @@ export function compareItem(
     observedCount,
     confidence,
     boundingBox,
+    detectionReported,
     difference,
   };
 }

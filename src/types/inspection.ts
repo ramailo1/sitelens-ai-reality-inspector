@@ -148,6 +148,14 @@ export interface ComparisonRow {
   /** Model confidence, or null when nothing was detected. */
   readonly confidence: number | null;
   readonly boundingBox: BoundingBox | null;
+  /**
+   * True when the model reported ANYTHING for this element kind — a sighting,
+   * a count it refused to give, or an explicit absence. False when it reported
+   * nothing at all. This is the line between a finding supported by the
+   * inspected image (full-frame evidence) and one that rests on the expected
+   * state alone (no visual evidence), and the UI must not blur it.
+   */
+  readonly detectionReported: boolean;
   /** The DIFFERENCE sentence. Empty when there is no difference. */
   readonly difference: string;
 }
@@ -298,6 +306,74 @@ function validateConfidence(
 const SEVERITIES: readonly string[] = ['INFO', 'LOW', 'MEDIUM', 'HIGH'];
 
 /**
+ * The lowest confidence that counts as an actual assertion.
+ *
+ * Measured, not theoretical. The vision model this product runs against echoes
+ * the expected-state list back as a template and fills every field with
+ * placeholders: `present: true, confidence: 0.0, evidence: "no visible slab",
+ * bounding_box: {0,0,0,0}`. Every one of those entries is structurally valid,
+ * so before this check they sailed through validation and the deterministic
+ * comparison then reported five fabricated MATCHes and one fabricated ATTENTION
+ * on a photograph of a worker tying rebar.
+ *
+ * A model that reports zero confidence in its own reading has not asserted
+ * anything. Accepting it would let a template echo decide a comparison, which is
+ * precisely the fabricated precision this product refuses to produce.
+ */
+export const MIN_ASSERTED_CONFIDENCE = 0;
+
+/**
+ * Evidence that begins by denying what the entry claims to have found.
+ *
+ * Anchored at the start of the string on purpose. "no visible slab" contradicts
+ * `present: true`; "rebar is visible, but no workers are visible" does not, and
+ * must not be thrown away because a negation appears later in the sentence.
+ */
+const LEADING_NEGATION =
+  /^\s*(no|not|none|absent|zero|nothing)\b/i;
+
+function contradictsPresence(evidence: string): boolean {
+  return LEADING_NEGATION.test(evidence);
+}
+
+/**
+ * Reject an entry that asserts nothing.
+ *
+ * Applied to every model-authored entry — detected elements, observations and
+ * findings — because the failure mode is not specific to one of them. The
+ * message is written for the operator reading the rejection list, because
+ * knowing WHAT was thrown away and WHY is the difference between a trustworthy
+ * pipeline and a silent one.
+ */
+function assertIsAnAssertion(
+  rawConfidence: unknown,
+  confidence: number,
+  evidence: string,
+  present: boolean,
+  issues: ValidationIssue[],
+): boolean {
+  if (confidence <= MIN_ASSERTED_CONFIDENCE) {
+    issues.push({
+      field: 'confidence',
+      message:
+        `confidence is ${confidence}, so the model asserted no reading; the entry is a template `
+        + 'placeholder and is discarded rather than compared',
+    });
+    return false;
+  }
+  if (present && contradictsPresence(evidence)) {
+    issues.push({
+      field: 'evidence',
+      message:
+        `the entry claims presence while its own evidence begins by denying it ("${evidence.slice(0, 80)}"); `
+        + 'a self-contradictory entry cannot be compared',
+    });
+    return false;
+  }
+  return true;
+}
+
+/**
  * Validate ONE untrusted detected element.
  *
  * `count` is the honesty-critical field: it is accepted only as a real
@@ -342,6 +418,16 @@ export function validateDetectedElement(raw: unknown): ValidationResult<Detected
   const evidence = validateString(raw['evidence'], 'evidence', MAX_EVIDENCE, issues);
   const boundingBox = validateBoundingBox(raw['bounding_box'], issues);
 
+  // The element may still be real; a box that encloses no area is simply not a
+  // localisation, which is an honest outcome rather than an error.
+  const usableBox = boundingBox !== null && boundingBox.width > 0 && boundingBox.height > 0
+    ? boundingBox
+    : null;
+
+  if (confidence !== null && evidence !== null) {
+    assertIsAnAssertion(raw['confidence'], confidence, evidence, present === true, issues);
+  }
+
   if (issues.length > 0) return { ok: false, issues };
 
   return {
@@ -354,7 +440,7 @@ export function validateDetectedElement(raw: unknown): ValidationResult<Detected
       countBasis: count === null ? 'NOT_DETERMINABLE' : 'VISUAL_COUNT',
       confidence: confidence as number,
       evidence: evidence as string,
-      boundingBox,
+      boundingBox: usableBox,
     },
   };
 }
@@ -417,6 +503,12 @@ export function validateModelFinding(raw: unknown): ValidationResult<InspectionF
   const difference = optionalText('difference', MAX_TEXT);
   const boundingBox = validateBoundingBox(raw['bounding_box'], issues);
 
+  // A finding is a candidate attention area. One that asserts no confidence, or
+  // whose own evidence denies what the title claims, is not a candidate.
+  if (confidence !== null && evidence !== null) {
+    assertIsAnAssertion(raw['confidence'], confidence, evidence, true, issues);
+  }
+
   if (issues.length > 0) return { ok: false, issues };
 
   return {
@@ -436,7 +528,12 @@ export function validateModelFinding(raw: unknown): ValidationResult<InspectionF
       evidence: evidence as string,
       confidence: confidence as number,
       recommendation: recommendation as string,
-      boundingBox,
+      // A box enclosing no area points at nothing, so it is recorded as "not
+      // localised" rather than drawn.
+      boundingBox:
+        boundingBox !== null && boundingBox.width > 0 && boundingBox.height > 0
+          ? boundingBox
+          : null,
       origin: 'AI',
       verificationStatus: 'UNVERIFIED',
       review: null,

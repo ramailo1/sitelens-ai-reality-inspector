@@ -23,11 +23,15 @@ const state = {
   presets: [],
   reference: null,
   storage: null,
+  pipeline: null,
+  dataset: null,
+  datasetEntries: [],
   presetDraft: [],
   currentCaptureId: null,
   activeId: null,
   openIds: new Set(),
   running: false,
+  importing: null,
   pendingDelete: null
 };
 
@@ -95,11 +99,33 @@ function applyWorkspace(payload) {
   state.presets = payload.presets || [];
   state.reference = payload.reference || null;
   state.storage = payload.storage || null;
+  state.pipeline = payload.pipeline || null;
+  // The dataset summary arrives with every workspace payload. The full index is
+  // fetched once separately because it lists 38 entries.
+  if (payload.dataset !== undefined && payload.dataset !== null) {
+    state.dataset = payload.dataset;
+  }
   state.captures = payload.captures || [];
   state.currentCaptureId = payload.activeCaptureId || null;
   state.view = payload.view || null;
   state.activeId = null;
   state.openIds.clear();
+}
+
+/** Human label for a capture source. Three cases, never collapsed into two. */
+function sourceLabel(source) {
+  if (source === 'LOCAL_DATASET') return 'LOCAL DATASET';
+  if (source === 'UPLOAD') return 'UPLOAD';
+  return 'DEMO FIXTURE';
+}
+
+function sourceTitle(source) {
+  if (source === 'LOCAL_DATASET') {
+    return 'A genuine photograph from the local validation dataset, held on this machine only. '
+      + 'It is not tracked by git, and it was not captured on the site of this project.';
+  }
+  if (source === 'UPLOAD') return 'A photograph supplied by the operator.';
+  return 'A synthetic scene generated in code. Not a photograph, and not evidence of accuracy.';
 }
 
 /** Status text is mirrored outside the tab panels, so a message raised on one
@@ -228,6 +254,129 @@ function renderStorage() {
   node.textContent = 'Storage: ' + state.storage.location + '. ' + state.storage.detail;
 }
 
+/**
+ * The local validation dataset browser.
+ *
+ * Two jobs. First, let a judge put a GENUINE construction photograph into the
+ * pipeline in one click instead of hunting for a file. Second, and more
+ * important, keep the provenance unmistakable: the note above the grid and the
+ * badge on every tile say LOCAL DATASET, because a photograph from a Wikimedia
+ * archive sitting next to a synthetic fixture must never be mistakable for
+ * either a project capture or a generated scene.
+ *
+ * Images the model endpoint demonstrably cannot accept are shown as unavailable
+ * with the reason, rather than failing after the operator has chosen one.
+ */
+function renderDataset() {
+  const grid = $('dataset-grid');
+  if (!grid) return;
+  clear(grid);
+
+  const summary = state.dataset;
+  const note = $('dataset-note');
+  const empty = $('dataset-empty');
+
+  if (summary === null || summary === undefined) {
+    note.textContent = 'Checking for a local dataset…';
+    $('dataset-count').textContent = '-';
+    empty.hidden = false;
+    empty.textContent = '';
+    return;
+  }
+
+  $('dataset-count').textContent = summary.present
+    ? summary.count + ' IMAGES'
+    : 'NOT PRESENT';
+  note.textContent = summary.note;
+
+  if (!summary.present) {
+    empty.hidden = false;
+    empty.textContent = 'The application works without it: drop a photograph above instead.';
+    return;
+  }
+  empty.hidden = true;
+  empty.textContent = '';
+
+  if (summary.unreadable > 0) {
+    const warn = el('p', 'dataset-warn',
+      summary.unreadable + ' file(s) in this folder could not be read and are skipped.');
+    grid.appendChild(warn);
+  }
+
+  state.datasetEntries.forEach((entry) => {
+    const tile = el('button', 'tile');
+    tile.type = 'button';
+    tile.dataset.id = entry.id;
+    tile.dataset.hero = entry.hero ? 'true' : 'false';
+    tile.disabled = !entry.inspectable || state.importing === entry.id;
+    tile.title = entry.inspectable
+      ? 'Import ' + entry.filename + ' as a real capture of this project'
+      : entry.filename + ' is larger than the model endpoint accepts, so it cannot be inspected';
+
+    const top = el('span', 'tile-top');
+    top.appendChild(el('span', 'tile-id', entry.id));
+    if (entry.hero) top.appendChild(el('span', 'tile-hero', 'HERO'));
+    if (!entry.inspectable) top.appendChild(el('span', 'tile-big', 'TOO LARGE'));
+    tile.appendChild(top);
+
+    tile.appendChild(el('span', 'tile-title', entry.title));
+    tile.appendChild(el('span', 'tile-meta', entry.width + '×' + entry.height + ' · ' + bytes(entry.byteLength)));
+    if (entry.geometryNormalized) {
+      tile.appendChild(el('span', 'tile-rot', 'EXIF ' + entry.exifOrientation + ' normalized'));
+    }
+
+    tile.addEventListener('click', () => importDatasetImage(entry.id));
+    grid.appendChild(tile);
+  });
+}
+
+/** Fetch the dataset index once; the workspace payload only carries a summary. */
+async function loadDataset() {
+  try {
+    const index = await api('/api/dataset');
+    state.dataset = index;
+    state.datasetEntries = index.entries || [];
+    renderDataset();
+  } catch (error) {
+    const node = $('dataset-note');
+    if (node) node.textContent = 'The local dataset could not be listed: ' + error.message;
+  }
+}
+
+async function importDatasetImage(id) {
+  if (state.importing !== null) return;
+  if (state.project === null) {
+    notify('Create a project before importing a dataset image.', 'bad');
+    return;
+  }
+  state.importing = id;
+  renderDataset();
+  setLamp('working', 'Importing dataset image ' + id);
+  notify('Importing dataset image ' + id + '…');
+  const errorNode = $('dataset-error');
+  errorNode.hidden = true;
+
+  try {
+    applyWorkspace(await post('/api/dataset/import', { id: id }));
+    renderWorkspace();
+    setLamp('ready', 'Real capture loaded — inspect when ready');
+    setStatus(
+      'Dataset image ' + id + ' is now a capture of ' + (state.project ? state.project.name : 'this project')
+      + '. It is a genuine photograph, labelled LOCAL DATASET. Inspect it when ready.',
+      null
+    );
+    notify('Dataset image ' + id + ' imported. This is real construction imagery, not a fixture.', 'good');
+  } catch (error) {
+    errorNode.textContent = error.message;
+    errorNode.hidden = false;
+    setLamp('problem', 'Dataset image could not be imported');
+    notify(error.message, 'bad');
+  } finally {
+    state.importing = null;
+    renderDataset();
+  }
+}
+
 function renderExpected() {
   renderReference();
   const host = $('expected-list');
@@ -345,6 +494,20 @@ function paintedArea(image) {
 }
 
 /**
+ * Point-reflect a pixel box through the frame: the exact mapping a 180-degree
+ * display rotation demands. Extracted so the axis mapping is executable and
+ * testable rather than folklore — the same reason transformBox exists upstream.
+ */
+function flipBox180(box, frameWidth, frameHeight) {
+  return {
+    left: frameWidth - box.left - box.width,
+    top: frameHeight - box.top - box.height,
+    width: box.width,
+    height: box.height,
+  };
+}
+
+/**
  * Draw evidence boxes over the reality image.
  *
  * A box is only ever drawn when the server sent REAL pixel geometry for that
@@ -364,10 +527,21 @@ function renderOverlay() {
 
   const findings = view.inspectionFindings || [];
 
+  // A display flipped 180 degrees must carry its boxes with it. Boxes arrive in
+  // the normalized (stored-pixel) space the model read; the flip is a display
+  // rotation of that same space, so the mapping is an exact point reflection,
+  // not a guess. Without this, a flipped capture would show every box mirrored.
+  const flipped = image.classList.contains('img-flip180');
+  const frameWidth = image.naturalWidth;
+  const frameHeight = image.naturalHeight;
+
   findings.forEach((finding, index) => {
     if (finding.pixelBox === null || finding.pixelBox === undefined) return;
 
-    const box = finding.pixelBox;
+    let box = finding.pixelBox;
+    if (flipped && frameWidth > 0 && frameHeight > 0) {
+      box = flipBox180(box, frameWidth, frameHeight);
+    }
     const node = el('div', 'ev');
     node.style.left = (area.offsetX + box.left * area.scaleX) + 'px';
     node.style.top = (area.offsetY + box.top * area.scaleY) + 'px';
@@ -404,7 +578,14 @@ function renderHeader() {
   setText('meta-project', state.project ? state.project.name : '-');
   setText('meta-zone', view.expected ? view.expected.zone : '-');
   setText('meta-capture', p.captureLabel);
-  setText('hdr-model', p.model);
+  if (state.pipeline === null || state.pipeline === undefined) {
+    setText('hdr-model', p.model);
+    setText('hdr-reasoner', '-');
+  }
+  // The pipeline payload names the models but not the provider, so the provider
+  // still comes from the session's own provenance. Set here unconditionally:
+  // leaving it to a conditional left the field blank whenever a pipeline was
+  // present, which read as "unknown origin" on every load.
   setText('hdr-provenance', p.provider);
 
   // The offline fixture is labelled loudly and permanently. A deterministic
@@ -532,6 +713,200 @@ function statusTag(status) {
 }
 
 /**
+ * STAGE 2: Nemotron's construction reasoning.
+ *
+ * Rendered as its own panel with its own provenance, never folded into the
+ * comparison table, because a judge must be able to see what the second model
+ * actually contributed. Three states are visually distinct and none of them is
+ * allowed to read as "nothing to report":
+ *
+ *   not run yet        neutral
+ *   unavailable        amber, with the reason
+ *   available          the reasoning itself, plus its certainty
+ *
+ * The reasoning certainty is deliberately NOT shown as a percentage bar. It is
+ * a qualitative reading of evidence, and a bar would invite exactly the
+ * confidence-equals-truth mistake this product exists to prevent.
+ */
+function renderReasoning() {
+  const host = $('reason-grid');
+  if (!host) return;
+  clear(host);
+  const view = state.view;
+  const stage = $('reason');
+
+  if (view === null) {
+    stage.dataset.status = 'UNAVAILABLE';
+    $('reason-stage').textContent = 'NOT RUN';
+    $('reason-model').textContent = '-';
+    $('reason-lede').textContent =
+      'Run the inspection to have Nemotron reason about what the evidence does and does not establish.';
+    $('reason-fail').hidden = true;
+    $('reason-foot').hidden = true;
+    return;
+  }
+
+  const r = view.reasoning;
+  if (r === undefined || r === null) return;
+
+  if (r.status === 'AVAILABLE') {
+    const reasoning = r.reasoning;
+    stage.dataset.status = 'AVAILABLE';
+    $('reason-stage').textContent = 'STAGE 2 · NEMOTRON';
+    $('reason-model').textContent = r.model;
+    $('reason-lede').textContent = reasoning.summary;
+
+    const rows = [
+      ['WHAT IT MEANS', reasoning.whatMatters],
+      ['WHY IT MATTERS', reasoning.rationale],
+      ['RECOMMENDATION', reasoning.recommendation],
+      ['VERIFICATION', reasoning.verification],
+    ];
+    for (const [label, value] of rows) appendDetail(host, label, label, value);
+
+    const certainty = el('div', 'reason-certainty');
+    certainty.appendChild(el('span', 'reason-certainty-k', 'CERTAINTY'));
+    const chip = el('span', 'chip');
+    chip.dataset.certainty = reasoning.certainty;
+    chip.textContent = reasoning.certainty.replace(/_/g, ' ');
+    certainty.appendChild(chip);
+    if (reasoning.confidence !== null && reasoning.confidence !== undefined) {
+      certainty.appendChild(el('span', 'reason-certainty-n',
+        'model-stated ' + reasoning.confidence.toFixed(2) + ' — not a measurement, not a verification'));
+    } else {
+      certainty.appendChild(el('span', 'reason-certainty-n', 'no confidence stated'));
+    }
+    host.appendChild(certainty);
+
+    $('reason-fail').hidden = true;
+
+    // Provenance foot: what was actually read, and whether it merely paraphrased.
+    const p = r.provenance;
+    const foot = $('reason-foot');
+    foot.hidden = false;
+    foot.textContent =
+      'Reasoned over ' + p.detectionsConsidered + ' detected element(s) and ' + p.rowsConsidered
+      + ' comparison row(s) in ' + p.latencyMs + ' ms'
+      + (p.degenerate
+        ? '. WARNING: this answer closely restates the visual observation and adds little reasoning.'
+        : '. The reasoning above is additional to the visual observation, not a restatement of it.');
+    return;
+  }
+
+  // Unavailable. Say why, and say that the stages below are unaffected.
+  stage.dataset.status = 'UNAVAILABLE';
+  $('reason-stage').textContent = r.failureKind === null ? 'NOT RUN' : 'UNAVAILABLE';
+  $('reason-model').textContent = r.model === 'none' ? '-' : r.model;
+  $('reason-lede').textContent = r.message === null
+    ? 'Construction reasoning has not been produced for this capture.'
+    : r.message;
+
+  const fail = $('reason-fail');
+  fail.hidden = false;
+  clear(fail);
+  fail.appendChild(el('p', 'reason-fail-h', 'CONSTRUCTION REASONING UNAVAILABLE'));
+  if (r.failureKind !== null) {
+    fail.appendChild(el('p', 'reason-fail-kind', r.failureKind.replace(/_/g, ' ')));
+  }
+  if (r.validationIssues.length > 0) {
+    const list = el('ul');
+    for (const issue of r.validationIssues.slice(0, 6)) {
+      list.appendChild(el('li', null, issue.field + ': ' + issue.message));
+    }
+    fail.appendChild(list);
+  }
+  fail.appendChild(el('p', 'reason-fail-foot',
+    'Nothing has been invented in its place. The comparison above is computed in code and stands on its own.'));
+
+  $('reason-foot').hidden = true;
+}
+
+/**
+ * The pipeline strip: which model did what, on this run.
+ *
+ * Four steps, because the product thesis has four verbs. Each step reports its
+ * OWN state, so "Nemotron did not run" can never be read as "there was nothing
+ * to reason about", and "nothing is verified" is always stated outright.
+ */
+function renderPipeline() {
+  const view = state.view;
+  const set = (id, text) => setText(id, text);
+
+  if (state.pipeline !== null && state.pipeline !== undefined) {
+    set('pipe-vision-model', state.pipeline.vision ? state.pipeline.vision.model : '-');
+    set('pipe-reason-model', state.pipeline.reasoning ? state.pipeline.reasoning.model : '-');
+    $('hdr-model').textContent = state.pipeline.vision ? state.pipeline.vision.model : '-';
+    $('hdr-reasoner').textContent = state.pipeline.reasoning ? state.pipeline.reasoning.model : '-';
+  }
+
+  const step1 = $('pipe-1');
+  const step2 = $('pipe-2');
+  const step3 = $('pipe-3');
+  const step4 = $('pipe-4');
+
+  if (view === null) {
+    step1.dataset.state = 'idle';
+    step2.dataset.state = 'idle';
+    step3.dataset.state = 'idle';
+    step4.dataset.state = 'idle';
+    set('pipe-vision-note', 'not run yet');
+    set('pipe-compare-note', 'no expected state loaded');
+    set('pipe-reason-note', 'not run yet');
+    set('pipe-verify-note', 'nothing verified');
+    return;
+  }
+
+  const p = view.provenance;
+  const r = view.reasoning;
+
+  // 01 SEE
+  step1.dataset.state = view.outcome === 'FAILED' ? 'fail' : 'done';
+  set('pipe-vision-model', p.model);
+  set('pipe-vision-note',
+    view.outcome === 'FAILED'
+      ? 'did not complete — ' + (view.failure !== null ? view.failure.kind.toLowerCase().replace(/_/g, ' ') : 'failed')
+      : view.isDemoFixture
+        ? 'synthetic fixture, not AI inference'
+        : view.inferenceOrigin === 'CACHED'
+          ? 'restored result, not a fresh call'
+          : view.detections.length + ' element(s), ' + view.observations.length + ' observation(s) in ' + p.latencyMs + ' ms');
+
+  // 02 COMPARE — ours, in code. Never attributed to a model.
+  const matched = view.comparison.filter((r2) => r2.status === 'MATCH').length;
+  const attention = view.comparison.filter((r2) => r2.status === 'ATTENTION').length;
+  const undetermined = view.comparison.filter((r2) => r2.status === 'UNDETERMINED').length;
+  step2.dataset.state = view.comparison.length > 0 ? 'done' : 'idle';
+  set('pipe-compare-model', 'SiteLens deterministic engine (src/compare.ts)');
+  set('pipe-compare-note', view.comparison.length === 0
+    ? 'no expected state loaded'
+    : matched + ' match · ' + attention + ' attention · ' + undetermined + ' undetermined');
+
+  // 03 UNDERSTAND
+  if (r === undefined || r === null) {
+    step3.dataset.state = 'idle';
+    set('pipe-reason-note', 'not run yet');
+  } else if (r.status === 'AVAILABLE') {
+    step3.dataset.state = 'done';
+    set('pipe-reason-model', r.model);
+    set('pipe-reason-note',
+      r.reasoning.certainty.replace(/_/g, ' ').toLowerCase()
+      + (r.provenance && r.provenance.degenerate ? ' — adds little to the visual reading' : ''));
+  } else {
+    step3.dataset.state = 'fail';
+    set('pipe-reason-model', r.model === 'none' ? '-' : r.model);
+    set('pipe-reason-note', r.failureKind === null ? 'not run yet' : r.failureKind.replace(/_/g, ' ').toLowerCase());
+  }
+
+  // 04 VERIFY
+  const counters = view.counters;
+  step4.dataset.state = counters.verified > 0 ? 'done' : (counters.pending > 0 ? 'wait' : 'idle');
+  set('pipe-verify-note',
+    counters.verified === 0 && counters.rejected === 0
+      ? 'nothing verified — ' + counters.pending + ' awaiting a named human'
+      : counters.verified + ' verified · ' + counters.rejected + ' rejected');
+}
+
+/**
  * A definition row inside the finding detail.
  *
  * Returns null when there is no honest value to show. That is deliberate: an
@@ -642,12 +1017,28 @@ function renderFindings() {
     appendDetail(body, 'action', 'RECOMMENDED ACTION', finding.recommendation);
     appendDetail(body, 'evidence', 'EVIDENCE', finding.evidence);
 
-    // When the model gave no geometry, say so plainly instead of implying a
-    // position we do not have.
-    if (!finding.localized) {
-      body.appendChild(el('p', 'fc-noev',
-        'No image region for this finding: the model did not localise it. '
-        + 'The evidence is the description above, not a highlighted area.'));
+    // Evidence states exactly what the image supports, and no more. A finding
+    // the model saw but did not localise is FULL-FRAME evidence: real image,
+    // real reading, no rectangle — and it is never given an invented one. A
+    // finding with no visual reading at all says so rather than borrowing the
+    // image's authority.
+    if (finding.evidenceState === 'FULL_FRAME') {
+      const note = el('p', 'fc-noev');
+      note.dataset.state = 'FULL_FRAME';
+      note.appendChild(el('b', null, 'VISUAL EVIDENCE '));
+      note.appendChild(document.createTextNode(
+        'Full-frame evidence — no localized region returned by the vision model. '
+        + 'The finding is supported by the inspected image itself; the evidence is '
+        + 'the description above, not a highlighted area.'));
+      body.appendChild(note);
+    } else if (finding.evidenceState === 'NONE') {
+      const note = el('p', 'fc-noev');
+      note.dataset.state = 'NONE';
+      note.appendChild(el('b', null, 'NO VISUAL EVIDENCE '));
+      note.appendChild(document.createTextNode(
+        'No usable visual evidence for this finding in this capture. It rests on '
+        + 'the expected-state comparison, not on a visual reading of the image.'));
+      body.appendChild(note);
     }
 
     body.appendChild(buildVerification(finding));
@@ -748,7 +1139,45 @@ function renderProvenance() {
     host.appendChild(cell);
   }
 
-  $('eligibility').textContent = 'Hackathon eligibility: ' + p.eligibility + '. ' + p.eligibilityNote;
+  $('eligibility').textContent = 'Vision-stage eligibility: ' + p.eligibility + '. ' + p.eligibilityNote;
+
+  // Pipeline eligibility: per stage, because two models run and only one of them
+  // is NVIDIA. Collapsing that into a single verdict would either overstate the
+  // vision stage or understate the reasoning stage.
+  const pipeline = $('pipeline-eligibility');
+  if (pipeline !== null && view.pipelineEligibility !== undefined) {
+    const e = view.pipelineEligibility;
+    const requirement = e.nvidiaRequirement === 'MET'
+      ? 'MET — NVIDIA open-source inference ran on Nebius Token Factory'
+      : e.nvidiaRequirement === 'PARTIAL'
+        ? 'PARTIAL — an NVIDIA id was in use but no verified NVIDIA output was produced'
+        : 'NOT MET — no NVIDIA model produced output for this run';
+    pipeline.textContent =
+      'NVIDIA requirement: ' + requirement + '. '
+      + 'Vision ' + view.provenance.model + ': ' + e.vision + '. '
+      + 'Reasoning ' + (view.reasoning ? view.reasoning.model : '-') + ': ' + e.reasoning + '. '
+      + e.note;
+  }
+
+  // Geometry facts. A re-oriented photograph is disclosed, never silently fixed.
+  const geom = $('geometry-note');
+  if (geom !== null && view.geometry !== undefined) {
+    const g = view.geometry;
+    if (g.geometryNormalized && g.exifOrientation !== 1) {
+      geom.hidden = false;
+      geom.textContent =
+        'This source file carried EXIF orientation ' + g.exifOrientation + '. Its pixels were normalized '
+        + 'to orientation 1 before inspection, so the model, the display and the evidence overlay all '
+        + 'use one coordinate system. No image was re-encoded.';
+    } else if (g.storedWidth !== null && g.displayedWidth !== null
+      && g.storedWidth !== g.displayedWidth) {
+      geom.hidden = false;
+      geom.textContent = 'Stored ' + g.storedWidth + '×' + g.storedHeight
+        + ', displayed ' + g.displayedWidth + '×' + g.displayedHeight + '.';
+    } else {
+      geom.hidden = true;
+    }
+  }
 
   if (view.failure !== null) {
     const box = el('div', 'fail');
@@ -802,6 +1231,10 @@ function renderObservations() {
     const evidence = el('p', 'obs-ev');
     evidence.appendChild(el('b', null, 'EVIDENCE '));
     evidence.appendChild(document.createTextNode(observation.evidenceDescription));
+    if (!observation.localized) {
+      evidence.appendChild(el('span', 'obs-ev-full',
+        ' (full-frame — the model returned no localized region for this observation)'));
+    }
     row.appendChild(evidence);
 
     const acts = el('div', 'obs-acts');
@@ -852,6 +1285,13 @@ function renderStage() {
     image.dataset.src = src;
     image.src = src;
   }
+  // Keep the evidence stage in the same display orientation as the capture
+  // stage, so the operator never compares two different rotations of a site.
+  const capture = state.captures.filter((c) => c.id === p.captureId)[0];
+  const flip = capture !== undefined
+    ? displayNeedsFlip(capture.exifOrientation)
+    : displayNeedsFlip(view.geometry !== undefined ? view.geometry.exifOrientation : 1);
+  image.classList.toggle('img-flip180', flip);
   $('stage-cap').textContent =
     p.captureLabel + ' - ' + p.imageWidth + 'x' + p.imageHeight + ' - ' + bytes(p.byteLength)
     + ' - ' + p.mediaType;
@@ -880,10 +1320,12 @@ function safeRender(name, fn) {
 
 function renderAll() {
   safeRender('header', renderHeader);
+  safeRender('pipeline', renderPipeline);
   safeRender('rail', renderRail);
   safeRender('brief', renderBrief);
   safeRender('priorities', renderPriorities);
   safeRender('comparison', renderComparison);
+  safeRender('reasoning', renderReasoning);
   safeRender('findings', renderFindings);
   safeRender('provenance', renderProvenance);
   safeRender('observations', renderObservations);
@@ -905,8 +1347,9 @@ function renderFixtures() {
     button.appendChild(el('span', null, capture.label));
 
     const meta = el('div', 'capture-meta');
-    const source = el('span', 'capture-tag', capture.source === 'UPLOAD' ? 'UPLOAD' : 'DEMO FIXTURE');
+    const source = el('span', 'capture-tag', sourceLabel(capture.source));
     source.setAttribute('data-source', capture.source);
+    source.title = sourceTitle(capture.source);
     meta.appendChild(source);
     meta.appendChild(el('span', null, capture.width + 'x' + capture.height));
     meta.appendChild(el('span', null, bytes(capture.byteLength)));
@@ -936,6 +1379,39 @@ function showLoaded(label) {
   const image = $('capture-image');
   image.src = '/api/capture-image/' + encodeURIComponent(state.currentCaptureId);
   image.alt = label;
+  const capture = state.captures.filter((c) => c.id === state.currentCaptureId)[0];
+  image.classList.toggle('img-flip180', capture !== undefined && displayNeedsFlip(capture.exifOrientation));
+}
+
+/**
+ * Whether this capture must be DISPLAYED rotated 180 degrees.
+ *
+ * The pipeline stores orientation-normalized bytes (EXIF tag rewritten to 1,
+ * pixels untouched), so the browser paints exactly the pixels the model saw and
+ * every coordinate lives in one space. For most re-oriented files that is the
+ * whole fix: the five dataset images tagged orientation 6 ('007', '009', '015',
+ * '017', '021') carry pixels that are ALREADY upright — their tag was stale, so
+ * displaying the stored pixels as-is is what makes them upright.
+ *
+ * Orientation 3 is the measured exception (dataset '004' and '027'): their tags
+ * were accurate and the stored pixels really are 180 degrees from the scene, so
+ * tag normalization alone leaves them upside down. The display — and only the
+ * display — is rotated back here, and renderOverlay maps every evidence box
+ * through the same 180-degree flip, so a genuine box stays attached to the
+ * correct physical region. No byte is re-encoded and the model's coordinate
+ * space is untouched: the model still reads the same normalized bytes it is
+ * given everywhere else.
+ *
+ * Keyed on the ORIGINAL orientation the server records per capture. Orientation
+ * 4 (upside-down mirror) is grouped with 3 because both are axis-preserving
+ * 180-degree display rotations; no dataset image carries it. Axis-swapping
+ * orientations (5-8) are deliberately NOT honoured at display time: this
+ * dataset's tags of that class were measured stale, and honouring them would
+ * rotate upright images back to sideways. Revisit per file if the dataset ever
+ * gains images whose 5-8 tags are proven accurate.
+ */
+function displayNeedsFlip(orientation) {
+  return orientation === 3 || orientation === 4;
 }
 
 /**
@@ -1018,8 +1494,12 @@ async function runInspection() {
 
   const cached = $('cache-toggle').checked;
   setLamp('working', 'ANALYZING REALITY');
-  setStatus('ANALYZING REALITY - the model is reading the capture. This is a real inference and takes a few seconds.', 'working');
-  notify('Inspection running: real model inference on this capture.');
+  setStatus(
+    'ANALYZING REALITY - MiniCPM is reading the capture, then the comparison is computed in code, '
+    + 'then Nemotron reasons about the result. Two real model calls; this takes some seconds.',
+    'working'
+  );
+  notify('Inspection running: real vision inference, deterministic comparison, then Nemotron reasoning.');
 
   // An honest elapsed clock. NOT a fake progress bar: there is no way to know
   // how far through a vision call we are, so the UI must not invent one.
@@ -1027,8 +1507,8 @@ async function runInspection() {
   const tick = setInterval(() => {
     const secs = Math.round((Date.now() - startedAt) / 1000);
     setStatus(
-      'ANALYZING REALITY - ' + secs + 's elapsed. Real model inference on this capture; '
-      + 'there is no progress signal to show, only elapsed time.',
+      'RUNNING - ' + secs + 's elapsed. Vision, then comparison, then Nemotron reasoning. '
+      + 'There is no per-stage progress signal to show, only elapsed time.',
       'working',
     );
   }, 1000);
@@ -1058,7 +1538,31 @@ async function runInspection() {
         + ' finding(s), all UNVERIFIED and awaiting a named human decision.',
         'good',
       );
-      notify(how + ': ' + view.brief.overall.replace(/_/g, ' ') + '. Nothing is verified yet.', 'good');
+
+      // Report BOTH stages, and say plainly if one of them produced nothing. A
+      // silent reasoning failure here would leave the judge believing Nemotron
+      // contributed when it did not.
+      const reasoning = view.reasoning;
+      if (reasoning !== undefined && reasoning !== null) {
+        if (reasoning.status === 'AVAILABLE') {
+          notify(
+            how + ': ' + view.brief.overall.replace(/_/g, ' ') + '. '
+            + 'Nemotron reasoning: ' + reasoning.reasoning.certainty.replace(/_/g, ' ').toLowerCase()
+            + '. Nothing is verified yet.',
+            'good'
+          );
+        } else {
+          notify(
+            how + ': ' + view.brief.overall.replace(/_/g, ' ') + '. '
+            + 'CONSTRUCTION REASONING UNAVAILABLE (' + (reasoning.failureKind || 'not run') + ') - '
+            + 'the comparison below is unaffected and nothing has been invented in its place.',
+            'good'
+          );
+        }
+      } else {
+        notify(how + ': ' + view.brief.overall.replace(/_/g, ' ') + '. Nothing is verified yet.', 'good');
+      }
+
       // only move on to the evidence stage once the inspection really completed
       selectStep('evidence');
       // Open the first finding so the evidence is never hidden behind a closed card.
@@ -1198,6 +1702,7 @@ function renderWorkspace() {
   renderFixtures();
   renderExpected();
   renderStorage();
+  renderDataset();
   renderAll();
   if (state.view && state.view.provenance) {
     showLoaded(state.view.provenance.captureLabel);
@@ -1554,11 +2059,19 @@ async function boot() {
     renderExpected();
 
     renderWorkspace();
+    // The dataset index is separate from the workspace payload because it lists
+    // every file. Fetched after the workspace so the first paint is never blocked
+    // on a directory scan.
+    await loadDataset();
+
     setLamp('ready', 'Capture ready');
+    const hasDataset = state.dataset !== null && state.dataset.present;
     setStatus(
       state.captures.length > 0
-        ? 'Choose a capture or drop a site photograph, then inspect.'
-        : 'No captures in this project yet. Drop a site photograph or choose a demo capture.',
+        ? (hasDataset
+            ? 'Choose a capture, import a real dataset photograph below, or drop your own — then inspect.'
+            : 'Choose a capture or drop a site photograph, then inspect.')
+        : 'No captures in this project yet. Import a local dataset image or drop a photograph.',
       null
     );
   } catch (error) {

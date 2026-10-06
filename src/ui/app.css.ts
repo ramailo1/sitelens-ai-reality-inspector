@@ -466,6 +466,11 @@ body::before {
    instead of collapsing the whole inspection surface into a one-line strip. */
 .sheet-lg img { max-height: 620px; min-height: 300px; object-fit: contain; }
 
+/* Display-only 180-degree correction for captures whose source EXIF tag was
+   accurate (orientation 3/4): the stored pixels are upside down, the bytes stay
+   untouched, and renderOverlay flips evidence boxes to match. */
+.img-flip180 { transform: rotate(180deg); }
+
 .sheet-overlay { position: absolute; inset: 0; pointer-events: none; }
 .sheet-overlay:empty { display: none; }
 
@@ -622,6 +627,10 @@ body::before {
   font-size: 10.5px;
   color: var(--ink-4);
 }
+.fc-noev b { letter-spacing: .08em; color: var(--ink-3); }
+/* Full-frame evidence still IS evidence, so it reads one shade stronger than
+   the no-evidence state, which must read as an admitted gap, not a warning. */
+.fc-noev[data-state="FULL_FRAME"] { color: var(--ink-3); }
 
 .fc-acts {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -748,6 +757,7 @@ body::before {
 .obs-text { margin: 7px 0 0; font-size: 12.5px; }
 .obs-ev { margin: 6px 0 0; font-size: 11.5px; color: var(--ink-3); }
 .obs-ev b { font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; color: var(--ink-4); }
+.obs-ev-full { font-family: var(--mono); font-size: 9.5px; color: var(--ink-4); }
 .obs-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; align-items: center; }
 .obs-next { font-family: var(--mono); font-size: 10px; color: var(--ink-4); margin-right: auto; }
 
@@ -890,4 +900,337 @@ body::before {
 }
 .foot-thesis { color: var(--ink-2); font-weight: 600; letter-spacing: .02em; }
 .foot-r { margin-left: auto; }
+
+/* ==========================================================================
+   THE PIPELINE STRIP
+   Four verbs, four steps, each reporting its OWN state. This is the thesis made
+   permanent on screen: SEE by a model, COMPARE by our code, UNDERSTAND by a
+   second model, VERIFY by a person. A step that did not run says so, so a
+   silent stage can never be read as agreement.
+   ========================================================================== */
+.pipe {
+  position: relative;
+  z-index: 2;
+  border-bottom: 1px solid var(--rule-2);
+  background: var(--paper-3);
+}
+.pipe-steps {
+  max-width: var(--shell);
+  margin: 0 auto;
+  padding: 0 20px;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.pipe-step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "n k" "n model" "n note";
+  column-gap: 10px;
+  padding: 9px 14px 9px 0;
+  border-right: 1px solid var(--rule-hair);
+  border-left: 1px solid transparent;
+  padding-left: 14px;
+  margin-left: -14px;
+  transition: background var(--fast) var(--ease);
+}
+.pipe-step:last-child { border-right: 0; }
+.pipe-n {
+  grid-area: n;
+  align-self: start;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  color: var(--ink-4);
+  padding-top: 2px;
+}
+.pipe-k {
+  grid-area: k;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  color: var(--ink-3);
+}
+.pipe-model {
+  grid-area: model;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+.pipe-note {
+  grid-area: note;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-4);
+  line-height: 1.4;
+  margin-top: 1px;
+}
+.pipe-step[data-state="done"] { background: rgba(31, 111, 67, .055); }
+.pipe-step[data-state="done"] .pipe-n { color: var(--verify); }
+.pipe-step[data-state="fail"] { background: var(--review-wash); }
+.pipe-step[data-state="fail"] .pipe-n { color: var(--review); }
+.pipe-step[data-state="wait"] { background: rgba(28, 27, 25, .04); }
+.pipe-step[data-state="wait"] .pipe-n { color: var(--ink-2); }
+.pipe-step[data-state="idle"] { opacity: .62; }
+
+@media (max-width: 900px) {
+  .pipe-steps { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ==========================================================================
+   LOCAL DATASET BROWSER
+   The demo path onto REAL construction imagery. The labelling carries the
+   weight: every tile says LOCAL DATASET's truth, so a genuine archive
+   photograph can never be mistaken for a project capture or a synthetic scene.
+   ========================================================================== */
+.dataset {
+  margin-top: 14px;
+  border: 1px solid var(--rule-2);
+  background: var(--paper-2);
+}
+.dataset-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--rule-hair);
+  background: var(--paper-3);
+}
+.dataset-h {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.dataset-head .tag { margin-left: auto; }
+.dataset-note {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--rule-hair);
+}
+.dataset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+  gap: 1px;
+  background: var(--rule-hair);
+}
+.dataset-empty {
+  margin: 0;
+  padding: 14px 12px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.dataset-warn {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--review-wash);
+  color: var(--review);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.dataset .note-bad { margin: 0; }
+
+/* A tile is an instrument label, not a thumbnail: no image is decoded, so the
+   browser is not asked to hold 38 large files in memory to draw a grid. */
+.tile {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px 9px;
+  text-align: left;
+  background: var(--paper);
+  border: 0;
+  border-top: 2px solid transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.tile:hover:not(:disabled) { background: var(--paper-3); border-top-color: var(--ink-3); }
+.tile:disabled { cursor: not-allowed; opacity: .45; }
+.tile[data-hero="true"] { border-top-color: var(--red); }
+.tile-top { display: flex; align-items: center; gap: 6px; }
+.tile-id {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: .04em;
+}
+.tile-hero, .tile-big {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  padding: 1px 4px;
+}
+.tile-hero { background: var(--red); color: var(--paper); }
+.tile-big { background: var(--ink-4); color: var(--paper); margin-left: auto; }
+.tile-title {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--ink-2);
+  text-transform: capitalize;
+}
+.tile-meta, .tile-rot {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--ink-4);
+}
+.tile-rot { color: var(--review); }
+
+/* ==========================================================================
+   CONSTRUCTION REASONING  (stage 2)
+   The panel that makes the second model visible. Amber when it could not run,
+   so a missing stage is impossible to mistake for a clean bill of health.
+   ========================================================================== */
+.reason {
+  margin-top: 16px;
+  border: 1px solid var(--rule-2);
+  background: var(--paper-2);
+  border-left: 3px solid var(--ink-4);
+}
+.reason[data-status="AVAILABLE"] { border-left-color: var(--verify); }
+.reason[data-status="UNAVAILABLE"] { border-left-color: var(--review); }
+.reason-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 12px;
+  background: var(--paper-3);
+  border-bottom: 1px solid var(--rule-hair);
+}
+.reason-h {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.reason[data-status="AVAILABLE"] .reason-h { color: var(--verify); }
+.reason[data-status="UNAVAILABLE"] .reason-h { color: var(--review); }
+.reason-model {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.reason-lede {
+  margin: 0;
+  padding: 12px 14px 10px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink);
+  max-width: 78ch;
+}
+.reason[data-status="UNAVAILABLE"] .reason-lede {
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.reason-grid { margin: 0; padding: 0 14px 12px; }
+.reason-grid .fc-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--rule-hair);
+}
+.reason-grid .fc-row dt {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: var(--ink-4);
+  padding-top: 2px;
+}
+.reason-grid .fc-row dd { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+
+/* Certainty is a qualitative reading of evidence, so it is a chip, not a bar.
+   A bar would invite reading it as a measurement. */
+.reason-certainty {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 9px 0 2px;
+  border-top: 1px solid var(--rule-hair);
+}
+.reason-certainty-k {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: var(--ink-4);
+}
+.chip {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  padding: 2px 7px;
+  border: 1px solid currentColor;
+}
+.chip[data-certainty="SUPPORTED"] { color: var(--verify); background: var(--verify-wash); }
+.chip[data-certainty="UNCERTAIN"] { color: var(--review); background: var(--review-wash); }
+.chip[data-certainty="INSUFFICIENT_EVIDENCE"] { color: var(--reject); background: var(--reject-wash); }
+.reason-certainty-n {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-4);
+}
+
+.reason-fail {
+  margin: 0 14px 12px;
+  padding: 10px 12px;
+  background: var(--review-wash);
+  border-left: 2px solid var(--review);
+}
+.reason-fail-h {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  color: var(--review);
+}
+.reason-fail-kind {
+  margin: 3px 0 0;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+}
+.reason-fail ul { margin: 6px 0 0; padding-left: 16px; font-size: 11px; color: var(--ink-3); }
+.reason-fail-foot { margin: 7px 0 0; font-size: 11.5px; color: var(--ink-2); }
+.reason-foot {
+  margin: 0;
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--rule-hair);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--ink-4);
+}
+
+/* Geometry disclosure: a re-oriented photograph is stated, never silently fixed. */
+.geom {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  background: var(--review-wash);
+  border-left: 2px solid var(--review);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
 `;

@@ -9,17 +9,20 @@
  */
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createProvider, ProviderError } from './providers/factory.ts';
+import { createProvider, createReasoner, ProviderError } from './providers/factory.ts';
 import { InspectionSession } from './session.ts';
 import type { SessionView } from './session.ts';
 import { ProjectStore } from './projects.ts';
 import type { ProjectCapture } from './projects.ts';
 import type { AIProvider } from './providers/provider.ts';
 import { acceptCapture, MAX_CAPTURE_BYTES } from './upload.ts';
+import { normalizeOrientation } from './image-metadata.ts';
 import { INDEX_HTML, APP_CSS, APP_JS } from './ui-assets.ts';
 import { cleanItems, presetToState } from './expected-state.ts';
 import type { Preset } from './expected-state.ts';
 import { inspectionCache } from './cache.ts';
+import { WorkspacePersistence } from './persistence.ts';
+import { importDatasetCapture, readDatasetIndex } from './dataset.ts';
 import type { ExpectedState } from './types/inspection.ts';
 import { ELEMENT_KINDS, EXPECTATIONS } from './types/inspection.ts';
 
@@ -54,23 +57,11 @@ async function readBody(
   }
   return Buffer.concat(chunks);
 }
-/** Read a JSON request body. */
+/**
+ * Read a JSON request body. */
 async function readJsonBody(req: IncomingMessage, limitBytes?: number): Promise<string> {
   return (await readBody(req, limitBytes)).toString('utf8');
 }
-/**
- * Where uploaded imagery actually is.
- *
- * Stated as a value rather than buried in prose so the UI can show it verbatim:
- * the bytes live in this process, and nothing about the demo survives a restart.
- */
-const STORAGE_TRUTH = {
-  location: 'process memory',
-  durable: false,
-  detail:
-    'Uploaded images are held in this running process only. Nothing is written to ' +
-    'disk, so uploads, projects and references are lost when the server restarts.',
-} as const;
 
 /** Thrown when a review or state route is called with no capture selected. */
 class NoActiveCapture extends Error {
@@ -80,7 +71,15 @@ class NoActiveCapture extends Error {
   }
 }
 
-/** Capture as the UI sees it: identity, provenance and ownership, never raw bytes. */
+/**
+ * Capture as the UI sees it: identity, provenance and ownership, never raw bytes.
+ *
+ * `source` is structural, not cosmetic. It is the only thing that stops a
+ * photograph from a local validation folder being presented as something this
+ * application captured on this project's site, so the UI is required to render
+ * `LOCAL_DATASET` as its own label rather than folding it into either existing
+ * case.
+ */
 function captureSummary(capture: ProjectCapture): Record<string, unknown> {
   return {
     id: capture.id,
@@ -94,6 +93,8 @@ function captureSummary(capture: ProjectCapture): Record<string, unknown> {
     zoneId: capture.zoneId,
     projectId: capture.projectId,
     createdAt: capture.createdAt,
+    exifOrientation: capture.exifOrientation,
+    geometryNormalized: capture.geometryNormalized,
   };
 }
 
@@ -101,6 +102,13 @@ export interface ServerOptions {
   readonly provider: AIProvider;
   readonly zoneId: string | null;
   readonly initialCaptureId: string | null;
+  /**
+   * Durable state. Omit for the in-memory surface, which then keeps reporting
+   * process memory. The API never claims durability it does not have.
+   */
+  readonly persistence?: WorkspacePersistence | null;
+  /** Stage-2 reasoning model. Omit and stage 2 is reported as switched off. */
+  readonly reasoner?: ReturnType<typeof createReasoner> | null;
 }
 /**
  * Resolve an explicit expected-state payload from the browser.
@@ -143,20 +151,43 @@ export interface InspectionServerHandle {
   readonly store: ProjectStore;
 }
 export function createInspectionServer(options: ServerOptions): InspectionServerHandle {
-  const store = new ProjectStore({ provider: options.provider, zoneId: options.zoneId });
+  const persistence = options.persistence ?? null;
+  const reasoner = options.reasoner ?? createReasoner(process.env);
+  const store = new ProjectStore({
+    provider: options.provider,
+    zoneId: options.zoneId,
+    persistence,
+    reasoner,
+  });
+
+  // ORDER MATTERS, and getting it backwards destroys durable state.
+  //
+  // `restore()` must run BEFORE the demo project is seeded. Seeding calls
+  // create() -> persist(), which rewrites the workspace file from the in-memory
+  // store; doing that first overwrites whatever the previous run left behind
+  // with an empty store plus the demo shell. That was measured, not theorised:
+  // restoring a saved project reported zero restored projects for exactly this
+  // reason.
+  const restored = store.restore();
+
   // The repository has always opened on a populated demo project so the
   // inspection flow is reachable without setup. These are the generated
-  // synthetic fixtures, labelled as fixtures throughout the UI.
-  const seeded = store.seedDemoProject(
-    process.env['DEMO_PROJECT_NAME'] ?? 'North Core Construction',
-    process.env['DEMO_PROJECT_LOCATION'] ?? 'Dusk Survey, level 02',
-  );
+  // synthetic fixtures, labelled as fixtures throughout the UI. Seeded ONLY when
+  // nothing was restored, so a working copy that has real projects opens on the
+  // operator's own work rather than on the synthetic demo.
+  const seeded = store.list().length > 0
+    ? store.ensureSelection()
+    : store.seedDemoProject(
+        process.env['DEMO_PROJECT_NAME'] ?? 'North Core Construction',
+        process.env['DEMO_PROJECT_LOCATION'] ?? 'Dusk Survey, level 02',
+      );
+
   if (options.initialCaptureId) {
     const wanted = options.initialCaptureId;
     if (store.capturesOf(seeded.id).some((c) => c.id === wanted)) store.selectCapture(wanted);
   }
   if (store.selectedCaptureId() === null) {
-    const first = store.capturesOf(seeded.id)[0];
+    const first = store.capturesOf(store.activeProject()?.id ?? seeded.id)[0];
     if (first) store.selectCapture(first.id);
   }
   /**
@@ -193,6 +224,8 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
     const session = activeSession();
     const reference = project === null ? null : store.referenceFor(project.id);
     const preset = reference === null ? null : store.presets.get(reference.presetId);
+    const dataset = readDatasetIndex();
+    const reasoner = store.getReasoner();
     return {
       project,
       projects: store.list(),
@@ -211,7 +244,28 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       presets: store.presets.list().map((p) => ({
         id: p.id, name: p.name, zone: p.zone, source: p.source, itemCount: p.items.length,
       })),
-      storage: STORAGE_TRUTH,
+      // The storage truth of THIS instance, never a constant.
+      storage: store.describeStorage(),
+      // The pipeline's two model stages, always both, so a judge can see the
+      // split without opening the provenance panel.
+      pipeline: {
+        vision: { provider: options.provider.name, model: options.provider.model },
+        reasoning: {
+          provider: reasoner.name,
+          model: reasoner.model,
+          configured: reasoner.configured,
+        },
+      },
+      // The local dataset, discovered at call time. Absent is reported as
+      // absent; the browser is never handed a fabricated empty list with no
+      // explanation.
+      dataset: {
+        present: dataset.present,
+        directory: dataset.directory,
+        count: dataset.entries.length,
+        unreadable: dataset.unreadable,
+        note: dataset.note,
+      },
       view: session === null ? null : session.view(),
     };
   };
@@ -513,6 +567,56 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       return;
     }
 
+    // --- local dataset --------------------------------------------------------
+    // Discovery is a read-only view of the local validation folder. It never
+    // reads image bytes, so listing 38 files cannot cost 107 MB of I/O.
+    if (req.method === 'GET' && path === '/api/dataset') {
+      sendJson(res, 200, readDatasetIndex());
+      return;
+    }
+
+    // Import turns ONE dataset image into a real capture of the active project.
+    // The id is validated against the discovered index, so this cannot be used
+    // to read an arbitrary path off the machine.
+    if (req.method === 'POST' && path === '/api/dataset/import') {
+      if (store.activeProject() === null) {
+        sendJson(res, 400, { error: 'create a project before importing a dataset image' });
+        return;
+      }
+      const body = await readJsonBody(req);
+      let payload: { id?: unknown } = {};
+      if (body.trim().length > 0) {
+        try {
+          payload = JSON.parse(body) as { id?: unknown };
+        } catch {
+          sendJson(res, 400, { error: 'invalid JSON body' });
+          return;
+        }
+      }
+      if (typeof payload.id !== 'string' || payload.id.length === 0) {
+        sendJson(res, 400, { error: 'id is required' });
+        return;
+      }
+      const imported = importDatasetCapture(payload.id);
+      if (!imported.ok) {
+        sendJson(res, 404, { error: imported.reason, message: imported.message });
+        return;
+      }
+      // Relative to the dataset directory so the state survives the repository
+      // being moved or opened from a different root.
+      const stored = store.addCapture({
+        ...imported.capture,
+        source: 'LOCAL_DATASET',
+        bytesPath: imported.entry.filename,
+        bytesRelativeToDataset: true,
+        exifOrientation: imported.capture.exifOrientation,
+        geometryNormalized: imported.capture.geometryNormalized,
+      });
+      store.selectCapture(stored.id);
+      sendJson(res, 200, { capture: captureSummary(stored), ...workspace() });
+      return;
+    }
+
     // --- capture bytes -------------------------------------------------------
     if (req.method === 'GET' && path.startsWith('/api/capture-image/')) {
       const id = decodeURIComponent(path.slice('/api/capture-image/'.length));
@@ -562,7 +666,11 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'no capture selected' });
         return;
       }
-      sendJson(res, 200, await session.run({ useCache: cacheEnabled }));
+      const view = await session.run({ useCache: cacheEnabled });
+      // Written only after a run that produced a usable result, so a failed or
+      // empty inspection never becomes the record a restart restores.
+      store.persistInspection(session.view().provenance.captureId);
+      sendJson(res, 200, view);
       return;
     }
 
@@ -604,8 +712,11 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       // The upload is owned by the active project and selected immediately, so
       // the operator can inspect it without a second step. Its session is fresh,
       // which is what stops one image's observations appearing against another.
+      // Orientation is normalized before storage, so the model, the display and
+      // the evidence overlay all work in one coordinate system.
       const stored = store.addCapture({
         ...result.capture,
+        bytes: normalizeOrientation(result.capture.bytes),
         source: 'UPLOAD',
       });
       store.selectCapture(stored.id);
@@ -641,16 +752,16 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'a named reviewer is required' });
         return;
       }
-      sendJson(
-        res,
-        200,
-        requireSession().review({
+      const reviewed = requireSession().review({
           observationId,
           decision,
           reviewer: reviewer.trim(),
           note: typeof note === 'string' ? note : null,
-        }),
-      );
+        });
+      // A human decision is the most valuable thing in the product, so it is
+      // written through immediately rather than waiting for the next run.
+      if (reviewed.provenance.captureId !== null) store.persistInspection(reviewed.provenance.captureId);
+      sendJson(res, 200, reviewed);
       return;
     }
     if (req.method === 'POST' && path === '/api/review-finding') {
@@ -682,16 +793,14 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'a named reviewer is required' });
         return;
       }
-      sendJson(
-        res,
-        200,
-        requireSession().reviewFinding({
+      const settled = requireSession().reviewFinding({
           findingId,
           decision,
           reviewer: reviewer.trim(),
           note: typeof note === 'string' ? note : null,
-        }),
-      );
+        });
+      if (settled.provenance.captureId !== null) store.persistInspection(settled.provenance.captureId);
+      sendJson(res, 200, settled);
       return;
     }
     if (req.method === 'POST' && path === '/api/finding-state') {
@@ -743,7 +852,13 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
   }
   return { server, store };
 }
-/** Entry point used by `npm run ui`. */
+/**
+ * Entry point used by `npm run ui`.
+ *
+ * Persistence is ON by default here and OFF in tests, which construct a server
+ * without one. That is the only reason the two behave differently, and the API
+ * reports whichever is actually in force rather than a fixed string.
+ */
 export async function startInspectionServer(port = 4317): Promise<void> {
   let provider: AIProvider;
   try {
@@ -756,15 +871,27 @@ export async function startInspectionServer(port = 4317): Promise<void> {
     }
     throw error;
   }
+  const reasoner = createReasoner(process.env);
+  const persistFlag = (process.env['SITELENS_PERSIST'] ?? 'on').trim().toLowerCase();
+  const persistence = persistFlag === 'off' || persistFlag === '0' ? null : new WorkspacePersistence();
+  const dataset = readDatasetIndex();
+
   const handle = createInspectionServer({
     provider,
+    reasoner,
+    persistence,
     zoneId: process.env['DEMO_ZONE_ID'] ?? 'zone_level_02',
     initialCaptureId: process.env['DEMO_CAPTURE'] ?? null,
   });
   handle.server.listen(port, LOOPBACK, () => {
     console.log('\n  SiteLens AI Reality Inspector');
     console.log(`  provider  : ${provider.name}`);
-    console.log(`  model     : ${provider.model}`);
+    console.log(`  vision    : ${provider.model}`);
+    console.log(`  reasoning : ${reasoner.model}${reasoner.configured ? '' : '  (NOT CONFIGURED)'}`);
+    console.log(`  storage   : ${handle.store.describeStorage().location}`);
+    console.log(
+      `  dataset   : ${dataset.present ? `${dataset.entries.length} images in ${dataset.directory}` : `none at ${dataset.directory}`}`,
+    );
     console.log(`  listening : http://${LOOPBACK}:${port}\n`);
     console.log('  Loopback only. Press Ctrl+C to stop.\n');
   });

@@ -97,6 +97,23 @@ test('ABSENT fails when the element is visible and passes when it is not', () =>
     expected({ element: 'EXCAVATION', expectation: 'ABSENT', expectedCount: null }),
     detection({ element: 'EXCAVATION' }),
   );
+test('a row records whether the model reported the element at all', () => {
+  // This flag is what separates full-frame evidence from no visual evidence
+  // downstream, so both sides of it are pinned here.
+  const reported = compareItem(expected({ expectedCount: 12 }), detection({ count: 4 }));
+  assert.equal(reported.detectionReported, true);
+
+  const explicitAbsent = compareItem(
+    expected({ element: 'SLAB', expectation: 'PRESENT', expectedCount: null }),
+    detection({ element: 'SLAB', present: false }),
+  );
+  assert.equal(explicitAbsent.detectionReported, true, '"looked and not there" is still a reading');
+
+  const silent = compareItem(expected({ expectedCount: 12 }), null);
+  assert.equal(silent.detectionReported, false);
+  assert.equal(silent.status, 'UNDETERMINED');
+});
+
 test('the most confident reading wins when a kind is reported twice', () => {
   const rows = compareExpectedState(
     {
