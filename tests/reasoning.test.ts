@@ -311,6 +311,7 @@ test('the reasoning context carries the comparison, not the model prose', () => 
   const context = buildReasoningContext({
     projectName: 'North Core Construction',
     captureLabel: '021 — rebar welding',
+    imageCount: 1,
     expected,
     detections: [],
     observations: [],

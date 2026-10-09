@@ -285,7 +285,17 @@ export function isDegenerateReasoning(
 /** The structured record handed to the reasoning model. */
 export interface ReasoningContextInput {
   readonly projectName: string | null;
+  /**
+   * Names every photograph in the inspection, in order.
+   *
+   * For a single photograph this is that photograph's own label verbatim. For a
+   * group it names all of them, so the reasoning model is told up front that it
+   * is reasoning over SEVERAL frames and must not describe any one of them as
+   * "the capture".
+   */
   readonly captureLabel: string;
+  /** How many photographs this inspection covers. */
+  readonly imageCount: number;
   readonly expected: ExpectedState;
   readonly detections: readonly DetectedElement[];
   readonly observations: readonly AIObservation[];
@@ -320,6 +330,16 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
       : `Project "${input.projectName.trim()}". This name is operator-entered and is NOT evidence of anything on site.`,
   );
   lines.push(`Capture label: ${input.captureLabel}`);
+  // Stated explicitly for a group, so the model reasons about the SET rather than
+  // about whichever frame it happens to read first. For one photograph this adds
+  // nothing and is left out.
+  if (input.imageCount > 1) {
+    lines.push(
+      `This inspection covers ${input.imageCount} photographs of the same subject, analysed together. `
+      + 'Evidence from all of them is combined below. Where they disagree, that disagreement is reported '
+      + 'as a disagreement and never resolved by adding the photographs up.',
+    );
+  }
   lines.push('');
 
   lines.push('EXPECTED STATE (comparison reference, NOT a design document)');
@@ -359,9 +379,13 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
     lines.push('- The vision model returned no usable observations.');
   }
   observations.forEach((observation, index) => {
+    // Which photograph produced this observation. Over a group, an unattributed
+    // observation is unattributable evidence, so the source is carried into the
+    // prompt rather than left in the session.
+    const from = input.imageCount > 1 ? ` (from ${observation.captureLabel})` : '';
     lines.push(
       `${index + 1}. [${observation.category}] ${observation.observation} `
-      + `(confidence ${observation.confidence.toFixed(2)})`,
+      + `(confidence ${observation.confidence.toFixed(2)})${from}`,
     );
   });
   lines.push('');
@@ -371,10 +395,17 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
     lines.push('- No comparison rows: nothing was inspected, or no expected items exist.');
   }
   for (const row of input.rows) {
+    // The photographs a row rests on. A disputed count is exactly the case where
+    // the model must see that two frames disagreed, or it will narrate one of
+    // them as if it settled the question.
+    const sources = input.imageCount > 1 && row.sourceCaptureIds.length > 1
+      ? ` Across photographs: ${row.sourceCaptureIds.join(' + ')}.`
+      : '';
     lines.push(
       `- ${row.element} ${row.expectation}: ${row.status}. `
       + `Expected: ${row.expectedText}. Observed: ${row.observedText}.`
-      + (row.difference ? ` Difference: ${row.difference}` : ''),
+      + (row.difference ? ` Difference: ${row.difference}` : '')
+      + sources,
     );
   }
   lines.push('');

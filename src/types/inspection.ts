@@ -158,6 +158,20 @@ export interface ComparisonRow {
   readonly detectionReported: boolean;
   /** The DIFFERENCE sentence. Empty when there is no difference. */
   readonly difference: string;
+  /**
+   * Which photographs contributed to this row.
+   *
+   * Empty for a single-image inspection, which is exactly why the field exists:
+   * a consolidated row must never be an anonymous blob, and a single-image row
+   * has nothing to attribute beyond itself.
+   */
+  readonly sourceCaptureIds: readonly string[];
+  /**
+   * True when photographs gave different counts for this element. A disputed row
+   * is UNDETERMINED and its `difference` states the disagreement. Never resolved
+   * by summing, averaging or taking the highest.
+   */
+  readonly countDisputed: boolean;
 }
 
 /**

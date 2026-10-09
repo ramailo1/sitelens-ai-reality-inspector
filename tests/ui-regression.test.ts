@@ -14,6 +14,74 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { INDEX_HTML, APP_JS, APP_CSS } from '../src/ui-assets.ts';
 
+/* ------------------------------------------------------------------ *
+ * Multi-image UI.
+ *
+ * The original defect was a multi-file picker that silently read files[0], so
+ * an operator who chose three photographs got one inspection and no indication
+ * that two had been dropped. These assert the picker is multi, the whole list is
+ * uploaded, and the result states how many photographs it rests on.
+ * ------------------------------------------------------------------ */
+
+test('the picker accepts several photographs at once', () => {
+  assert.match(INDEX_HTML, /<input type="file" id="file"[^>]*\bmultiple\b/,
+    'the file input must be multiple, or extra photographs cannot be chosen at all');
+});
+
+test('a multi-file pick uploads the WHOLE list, not just the first entry', () => {
+  // The exact defect: reading files[0] and calling it a multi-file upload.
+  assert.doesNotMatch(APP_JS, /uploadFile\(event\.target\.files\[0\]\)/,
+    'the change handler must not pass only files[0]');
+  assert.match(APP_JS, /uploadFiles\(picked\)/,
+    'the change handler must forward the whole FileList');
+  assert.match(APP_JS, /uploadFiles\(event\.dataTransfer\.files\)/,
+    'drag and drop must forward the whole drop, not just the first file');
+});
+
+test('the inspection runs over the open GROUP, not a single capture', () => {
+  assert.match(APP_JS, /post\('\/api\/run', \{ captureIds: photos/,
+    'a run must target every open photograph, otherwise only the first is analysed');
+  // A run with nothing open must refuse rather than inspecting a stale capture.
+  assert.match(APP_JS, /Open at least one photo/,
+    'the UI must refuse to run with no photographs open');
+});
+
+test('the page states how many photographs an inspection rests on', () => {
+  assert.match(INDEX_HTML, /id="imgs-list"/, 'the photograph strip must exist');
+  assert.match(INDEX_HTML, /id="basis-list"/, 'the evidence basis list must exist');
+  assert.match(APP_JS, /function renderBasis\(/, 'the basis list must be rendered');
+  assert.match(APP_JS, /function renderImages\(/, 'the photograph strip must be rendered');
+});
+
+test('a failed photograph stays visible as failed, never dropped from the strip', () => {
+  assert.match(APP_JS, /status === 'FAILED' \? 'imgs\.status\.failed'/,
+    'a failed photograph must be labelled FAILED rather than omitted');
+  assert.match(APP_CSS, /\.img-item-failed\s*\{[^}]*border-color/,
+    'a failed photograph must be visually distinct');
+});
+
+test('a partial run is announced as partial, before any pleasant summary', () => {
+  // The notification order matters: a partial inspection must not read as a pass.
+  const start = APP_JS.indexOf('const failedImages =');
+  assert.ok(start > -1, 'the partial-failure branch must exist');
+  // Slice to the end of the completion branch, so the ordering assertion can see
+  // both the partial notice and the summary it must precede.
+  const end = APP_JS.indexOf('selectStep(', start);
+  const branch = APP_JS.slice(start, end);
+  assert.match(branch, /run\.partialLamp/, 'a partial run must light the partial lamp');
+  assert.ok(
+    branch.indexOf('t(\'run.partial\')') < branch.indexOf('t(\'run.withReasoning\')'),
+    'partial failure must be reported BEFORE the pleasant reasoning summary, or a 2-of-3 run reads as a pass',
+  );
+  assert.match(branch, /failedImages\.length > 0 \? 'bad' : 'good'/,
+    'a partial run must be toned bad even when reasoning succeeded');
+});
+
+test('every observation names the photograph it came from', () => {
+  assert.match(APP_JS, /t\('obs\.from'\)/, 'each observation must render its source photograph');
+  assert.match(APP_CSS, /\.obs-photo\s*\{/, 'the source photograph must be styled, not unstyled');
+});
+
 test('detail rows are never appended unguarded', () => {
   // appendChild(null) throws a TypeError, which previously aborted the render
   // chain before the image was ever given a src.

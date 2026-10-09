@@ -287,6 +287,7 @@ test('findingFrom refuses an observation that was never verified', () => {
   const result = findingFrom({
     id: 'obs_x',
     captureId: capture.id,
+    captureLabel: capture.label,
     projectId: null,
     zoneId: null,
     category: 'OBSERVED_ELEMENT',

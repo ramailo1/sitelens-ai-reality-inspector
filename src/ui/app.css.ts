@@ -1297,4 +1297,80 @@ body::before {
   line-height: 1.5;
   color: var(--ink-2);
 }
+
+/* ==========================================================================
+   LANGUAGE AND THE PHOTOGRAPHS OF ONE INSPECTION
+
+   Two concerns share this block because both are about not misleading a
+   reader. The language rules keep Latin runs (model ids, counts, timestamps)
+   readable inside Arabic text instead of letting the bidi algorithm reorder
+   them. The photo rules make the count of photographs legible without counting
+   thumbnails, and keep a FAILED photograph visible as failed: hiding it would
+   let a partial inspection read as a complete one.
+   ========================================================================== */
+
+/* The language control stays LTR in every language: a selector listing
+   en / fr / ar / zh is read in code order, not in prose order. */
+.langbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; }
+.lang-k { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-4); }
+.lang-select {
+  font-family: var(--mono); font-size: 12px; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--rule-2); padding: 4px 6px;
+}
+.lang-note { font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
+.lang-hint { font-size: 11.5px; color: var(--ink-3); margin: 6px 0 0; max-width: 78ch; }
+.i18n-surface[lang="zh-CN"] { line-height: 1.75; }
+.i18n-surface[lang="zh-CN"] .bay-h,
+.i18n-surface[lang="zh-CN"] .panel-h { letter-spacing: .04em; }
+
+/* Numbers, ids and model names are Latin-runs inside Arabic text. Isolating each
+   one keeps "openbmb/MiniCPM-V-4_5" and a count from being reordered by the
+   bidirectional algorithm, which is what makes mixed content unreadable. */
+.i18n-surface[dir="rtl"] { text-align: right; }
+.i18n-surface[dir="rtl"] .mono,
+.i18n-surface[dir="rtl"] .obs-n,
+.i18n-surface[dir="rtl"] .obs-cat,
+.i18n-surface[dir="rtl"] .rig-name,
+.i18n-surface[dir="rtl"] .ident-v,
+.i18n-surface[dir="rtl"] .conf,
+.i18n-surface[dir="rtl"] .fc-title,
+.i18n-surface[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; text-align: left; }
+/* Long unbroken strings must wrap rather than push a card off the page. */
+.i18n-surface[dir="rtl"] .obs-text,
+.i18n-surface[dir="rtl"] .fc-title,
+.i18n-surface[dir="rtl"] .reason-lede { overflow-wrap: anywhere; }
+
+/* ---- the photographs of one inspection --------------------------------- */
+.imgs { border: 1px solid var(--rule); background: var(--paper-2); padding: 12px; margin-top: var(--gap); }
+.imgs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.imgs-h { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.imgs-n { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+.imgs-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 7px; }
+.img-item { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 8px; padding: 6px; border: 1px solid var(--rule); background: var(--paper); }
+.img-item-failed { border-color: var(--red); }
+.img-thumb { width: 40px; height: 40px; object-fit: cover; background: var(--paper-3); }
+.img-meta { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'ord label' 'status status'; gap: 1px 6px; min-width: 0; }
+.img-ord { grid-area: ord; font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
+.img-label { grid-area: label; font-size: 11px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.img-status { grid-area: status; font-family: var(--mono); font-size: 9px; letter-spacing: .08em; color: var(--ink-3); }
+.img-status-failed { color: var(--red); }
+.img-drop { position: absolute; top: 1px; right: 3px; border: 0; background: transparent; color: var(--ink-4); font-size: 15px; line-height: 1; cursor: pointer; padding: 2px 5px; }
+.img-drop:hover { color: var(--red); }
+.imgs-note { margin: 9px 0 0; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+.btn-xs { padding: 5px 10px; font-size: 11px; }
+
+/* ---- how many photographs this inspection actually rests on ------------- */
+.basis { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 3px; }
+.basis-item { display: grid; grid-template-columns: 66px minmax(0, 1fr) auto; align-items: baseline; gap: 8px; font-size: 11px; }
+.basis-dot { font-family: var(--mono); font-size: 9px; letter-spacing: .06em; color: var(--verify); }
+.basis-item-failed .basis-dot { color: var(--red); }
+.basis-name { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.basis-n { font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
+.basis-fail { grid-column: 2 / -1; font-size: 10px; color: var(--red); }
+.basis-warn { margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--red); }
+.basis-empty { font-size: 11px; color: var(--ink-4); }
+
+/* Which photograph an observation came from. Evidence without its source
+   photograph is not auditable once more than one image is in play. */
+.obs-photo { font-family: var(--mono); font-size: 10px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
 `;

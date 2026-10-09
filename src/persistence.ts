@@ -59,6 +59,23 @@ export interface PersistedInspection {
     readonly elements: readonly unknown[];
     readonly findings: readonly unknown[];
   };
+  /**
+   * Per-image payloads for a consolidated inspection.
+   *
+   * Optional: an inspection written from one photograph has exactly one entry
+   * and never reaches this field. When present it is the authoritative record,
+   * because it is the only shape that says WHICH photograph produced which
+   * observation.
+   */
+  readonly payloads?: readonly {
+    readonly captureId: string;
+    readonly captureLabel: string;
+    readonly payload: {
+      readonly observations: readonly unknown[];
+      readonly elements: readonly unknown[];
+      readonly findings: readonly unknown[];
+    };
+  }[] | undefined;
   /** Human decisions, keyed by the finding's stable content key. */
   readonly reviews: readonly {
     readonly key: string;
@@ -112,6 +129,14 @@ export interface PersistedWorkspace {
   readonly savedAt: string;
   readonly activeProjectId: string | null;
   readonly activeCaptureId: string | null;
+  /**
+   * The ordered photographs of the open inspection group.
+   *
+   * Absent in every workspace file written before multi-image existed; the reader
+   * then falls back to `[activeCaptureId]`, so an old file restores exactly as it
+   * always did.
+   */
+  readonly activeCaptureIds?: readonly string[] | undefined;
   readonly projects: readonly {
     readonly id: string;
     readonly name: string;
@@ -243,6 +268,10 @@ export class WorkspacePersistence {
       savedAt: typeof record['savedAt'] === 'string' ? record['savedAt'] : new Date().toISOString(),
       activeProjectId: readStringOrNull(record['activeProjectId']),
       activeCaptureId: readStringOrNull(record['activeCaptureId']),
+      // An older file has no group; its single active capture IS the group.
+      activeCaptureIds: Array.isArray(record['activeCaptureIds'])
+        ? (record['activeCaptureIds'] as string[])
+        : undefined,
       projects: (record['projects'] as any[]).map((p) => ({
         id: String(p.id),
         name: String(p.name),
@@ -303,6 +332,12 @@ export class WorkspacePersistence {
       originalLatencyMs:
         typeof record['originalLatencyMs'] === 'number' ? record['originalLatencyMs'] : null,
       payload: payload as PersistedInspection['payload'],
+      // Absent on a single-image record, which is exactly how the reader knows
+      // to use the merged payload instead. Spread rather than assigned as
+      // `undefined`, because this project compiles with exactOptionalPropertyTypes.
+      ...(Array.isArray(record['payloads'])
+        ? { payloads: record['payloads'] as PersistedInspection['payloads'] }
+        : {}),
       reviews: Array.isArray(record['reviews'])
         ? (record['reviews'] as PersistedInspection['reviews'])
         : [],

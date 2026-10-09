@@ -42,7 +42,8 @@ export const DEFAULT_NEBIUS_BASE_URL = 'https://api.tokenfactory.nebius.com/v1/'
  *
  * Not an NVIDIA model. Every nvidia/* id in the catalogue was probed with real
  * image input and all returned `HTTP 400 This model does not support image
- * input`, so eligibility is reported as NOT_ELIGIBLE rather than claimed.
+ * input`, so the VISION stage is reported as NOT_ELIGIBLE rather than claimed.
+ * The NVIDIA requirement is met, when it is met, by the reasoning stage below.
  */
 export const DEFAULT_NEBIUS_MODEL = 'openbmb/MiniCPM-V-4_5';
 

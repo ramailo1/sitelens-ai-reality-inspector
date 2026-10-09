@@ -33,6 +33,14 @@ export type { InferenceOrigin };
 /** Result of one inspection run. */
 export interface InspectionResult {
   readonly captureId: string;
+  /**
+   * Every capture that contributed to a consolidated result, in order.
+   *
+   * Absent on a single-image result, where `captureId` alone is the whole
+   * truth. Present and length > 1 on a consolidated one, which is how downstream
+   * code tells "one photograph" from "three photographs merged".
+   */
+  readonly captureIds?: readonly string[];
   readonly provider: string;
   readonly model: string;
   /** Only schema-valid observations. May be empty. */
@@ -102,6 +110,78 @@ export type InspectionStatus = 'COMPLETED' | 'VALIDATION_FAILED' | 'VALIDATION_E
  * said that survived validation counts: observations, elements and findings
  * alike.
  */
+/**
+ * Combine per-image results into ONE consolidated result.
+ *
+ * Concatenation, never mutation: each image's observations, elements and
+ * findings are carried through untouched, so every one keeps the capture id,
+ * bounding box and confidence the model gave it. The merged result records the
+ * full set of captures so downstream code can always ask which photographs
+ * contributed.
+ *
+ * `bands` is index-aligned to `observations` by construction, so the two are
+ * concatenated together. That alignment is what `view()` relies on to report a
+ * confidence band per observation.
+ */
+export function mergeImageResults(
+  results: readonly InspectionResult[],
+): InspectionResult {
+  const observations: AIObservation[] = [];
+  const elements: DetectedElement[] = [];
+  const modelFindings: InspectionFinding[] = [];
+  const rejected: { readonly issues: readonly ValidationIssue[] }[] = [];
+  const rejectedInspection: { readonly issues: readonly ValidationIssue[] }[] = [];
+  const bands: ('LOW' | 'MEDIUM' | 'HIGH')[] = [];
+  const captureIds: string[] = [];
+
+  for (const result of results) {
+    if (!captureIds.includes(result.captureId)) captureIds.push(result.captureId);
+    observations.push(...result.observations);
+    elements.push(...(result.elements ?? []));
+    modelFindings.push(...(result.modelFindings ?? []));
+    rejected.push(...result.rejected);
+    rejectedInspection.push(...(result.rejectedInspection ?? []));
+    // Defensive: a result whose bands are short must not shift every later
+    // observation's band, which would misreport confidences across the group.
+    for (let i = 0; i < result.observations.length; i++) {
+      bands.push(result.bands[i] ?? 'LOW');
+    }
+  }
+
+  const first = results[0];
+  if (first === undefined) {
+    throw new Error('mergeImageResults requires at least one result');
+  }
+
+  // The timestamp of the FIRST image's inspection: the run started there. Using
+  // it keeps `inspectedAt` meaning "when this inspection began", not "when the
+  // last photograph happened to finish".
+  const inspectedAt = results
+    .map((r) => Date.parse(r.inspectedAt))
+    .filter((n) => !Number.isNaN(n))
+    .reduce((min, n) => (n < min ? n : min), Date.parse(first.inspectedAt));
+
+  return {
+    captureId: first.captureId,
+    captureIds,
+    provider: first.provider,
+    model: first.model,
+    observations,
+    rejected,
+    bands,
+    inspectedAt: Number.isNaN(inspectedAt) ? first.inspectedAt : new Date(inspectedAt).toISOString(),
+    elements,
+    modelFindings,
+    rejectedInspection,
+    // A group is only ever CACHED as a whole. Claiming per-image cache origins
+    // would require tracking them, and a mixed FRESH/CACHED group presented as
+    // one thing is exactly the ambiguity this product refuses.
+    inferenceOrigin: results.every((r) => r.inferenceOrigin === 'CACHED') ? 'CACHED' : 'FRESH',
+    originalInferenceAt: results[0]?.originalInferenceAt ?? null,
+    originalLatencyMs: null,
+  };
+}
+
 export function classifyUsableOutput(result: InspectionResult): InspectionStatus {
   const usable =
     result.observations.length > 0 ||
@@ -243,6 +323,9 @@ export class RealityInspector {
       const observation: AIObservation = {
         id: this.idFactory(),
         captureId: options.image.captureId,
+        // Falls back to the id when a caller supplies no label, so an observation
+        // is never unattributable. Never invented prose: the id is a real id.
+        captureLabel: options.image.captureLabel ?? options.image.captureId,
         projectId: options.projectId ?? null,
         zoneId: options.zoneId ?? null,
         category: value.category,

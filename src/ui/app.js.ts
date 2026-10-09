@@ -8,11 +8,26 @@
  *   - a finding is never rendered as settled until a human has settled it
  *   - the synthetic/offline path is labelled on screen, never implied to be AI
  *   - nothing advances past an inspection that did not actually complete
+ *   - the inspection language changes PRESENTATION only. It never refetches,
+ *     never re-runs, and never edits the canonical view.
  */
+
+import { clientLocalizationPayload } from '../localization.ts';
 
 export const APP_JS = `'use strict';
 
 const $ = (id) => document.getElementById(id);
+
+/**
+ * The inspection vocabulary, shipped from the server module that owns it.
+ *
+ * One source of truth: the browser renders from these strings instead of
+ * keeping a second copy that would drift out of step with the projection the
+ * server already computed.
+ */
+const I18N = ${JSON.stringify(clientLocalizationPayload())};
+
+const LANG_STORAGE_KEY = 'sitelens.inspectionLanguage';
 
 const state = {
   view: null,
@@ -33,8 +48,104 @@ const state = {
   running: false,
   importing: null,
   pendingDelete: null,
-  pendingReviewIntent: null
+  pendingReviewIntent: null,
+  lang: 'en',
+  // The ordered photographs of the OPEN inspection. Length 1 in the historical
+  // case; the run target is always this whole list, never a single id.
+  captureIds: [],
+  // Photographs the server refused as byte-identical duplicates of something
+  // already open. Kept so the operator is told what happened to them.
+  duplicateCaptureIds: []
 };
+
+/**
+ * Label lookup for the selected language.
+ *
+ * Fails closed: an unknown key, or a language with no entry, resolves to English
+ * and finally to the key itself, so a missing translation shows up as itself
+ * rather than as an empty label.
+ */
+function t(key) {
+  const catalog = I18N.strings[state.lang] || I18N.strings[I18N.defaultLanguage];
+  const value = catalog ? catalog[key] : undefined;
+  if (typeof value === 'string') return value;
+  const fallback = I18N.strings[I18N.defaultLanguage];
+  const english = fallback ? fallback[key] : undefined;
+  return typeof english === 'string' ? english : key;
+}
+
+/** Read the persisted preference, rejecting anything unsupported. */
+function readStoredLanguage() {
+  try {
+    const raw = window.localStorage ? window.localStorage.getItem(LANG_STORAGE_KEY) : null;
+    if (raw === null || raw === undefined) return I18N.defaultLanguage;
+    const match = I18N.languages.filter((l) => l.code === raw)[0];
+    return match === undefined ? I18N.defaultLanguage : match.code;
+  } catch (error) {
+    return I18N.defaultLanguage;
+  }
+}
+
+function storeLanguage(code) {
+  try {
+    if (window.localStorage) window.localStorage.setItem(LANG_STORAGE_KEY, code);
+  } catch (error) {
+    // A blocked or full storage must not break the switch. The preference simply
+    // does not survive a reload, which is the honest outcome.
+  }
+}
+
+/**
+ * Apply the language to the DOCUMENTED localized surface.
+ *
+ * Two generic hooks, so no field can quietly bypass localization:
+ *
+ *   1. lang / dir on every .i18n-surface element.
+ *   2. textContent for every element carrying a data-i18n key.
+ *
+ * The second hook is why the static headings follow the language: they are
+ * declared once in the markup with a key, and this function rewrites them on
+ * every switch. A heading added later inherits the behaviour automatically
+ * instead of needing a per-field edit.
+ *
+ * Only the result bays carry lang/dir. The masthead, the capture controls and
+ * the project menu stay LTR on purpose: flipping the whole instrument would
+ * invert the pipeline strip and the geometry overlay for no benefit.
+ */
+function applyLanguage() {
+  const option = I18N.languages.filter((l) => l.code === state.lang)[0];
+  const dir = option === undefined ? 'ltr' : option.dir;
+  const bcp47 = option === undefined ? I18N.defaultLanguage : option.bcp47;
+  const surfaces = document.querySelectorAll('.i18n-surface');
+  for (let i = 0; i < surfaces.length; i++) {
+    surfaces[i].setAttribute('lang', bcp47);
+    surfaces[i].setAttribute('dir', dir);
+  }
+
+  // Static markup. A key with no catalog entry falls back to English inside
+  // t(), and the coverage test asserts that never happens.
+  const translated = document.querySelectorAll('[data-i18n]');
+  for (let i = 0; i < translated.length; i++) {
+    const node = translated[i];
+    const key = node.getAttribute('data-i18n');
+    if (key === null || key === undefined || key === '') continue;
+    node.textContent = t(key);
+  }
+
+  const label = $('lang-label');
+  if (label) label.textContent = t('lang.label');
+  const note = $('lang-note');
+  if (note) note.textContent = t('lang.hint');
+}
+
+/** The localized projection of the current inspection, or null. */
+function localized() {
+  const view = state.view;
+  if (view === null || view === undefined) return null;
+  const all = view.localized;
+  if (all === null || all === undefined) return null;
+  return all[state.lang] || all[I18N.defaultLanguage] || null;
+}
 
 const TAB_ORDER = ['capture', 'inspect', 'evidence', 'findings'];
 
@@ -107,7 +218,13 @@ function applyWorkspace(payload) {
     state.dataset = payload.dataset;
   }
   state.captures = payload.captures || [];
+  // The server is authoritative about which photographs are open, including the
+  // grouped order. Falls back to the single id so an older payload still works.
+  state.captureIds = Array.isArray(payload.activeCaptureIds) && payload.activeCaptureIds.length > 0
+    ? payload.activeCaptureIds.slice()
+    : (payload.activeCaptureId ? [payload.activeCaptureId] : []);
   state.currentCaptureId = payload.activeCaptureId || null;
+  state.duplicateCaptureIds = Array.isArray(payload.duplicateCaptureIds) ? payload.duplicateCaptureIds.slice() : [];
   state.view = payload.view || null;
   state.activeId = null;
   state.openIds.clear();
@@ -115,18 +232,15 @@ function applyWorkspace(payload) {
 
 /** Human label for a capture source. Three cases, never collapsed into two. */
 function sourceLabel(source) {
-  if (source === 'LOCAL_DATASET') return 'LOCAL DATASET';
-  if (source === 'UPLOAD') return 'UPLOAD';
-  return 'DEMO FIXTURE';
+  if (source === 'LOCAL_DATASET') return t('capture.sourceDataset');
+  if (source === 'UPLOAD') return t('capture.sourceUpload');
+  return t('capture.sourceFixture');
 }
 
 function sourceTitle(source) {
-  if (source === 'LOCAL_DATASET') {
-    return 'A genuine photograph from the local validation dataset, held on this machine only. '
-      + 'It is not tracked by git, and it was not captured on the site of this project.';
-  }
-  if (source === 'UPLOAD') return 'A photograph supplied by the operator.';
-  return 'A synthetic scene generated in code. Not a photograph, and not evidence of accuracy.';
+  if (source === 'LOCAL_DATASET') return t('capture.titleDataset');
+  if (source === 'UPLOAD') return t('capture.titleUpload');
+  return t('capture.titleFixture');
 }
 
 /** Status text is mirrored outside the tab panels, so a message raised on one
@@ -583,7 +697,9 @@ function formatReviewerObj(rev) {
 function renderReviewer() {
   const rev = state.project ? state.project.reviewer : null;
   const formatted = formatReviewerObj(rev);
-  const displayVal = formatted ? formatted : 'Not configured';
+  // The reviewer's own name and role are the reviewer's words, never
+  // translated. Only the frame around them follows the language.
+  const displayVal = formatted ? formatted : t('panel.reviewerUnset');
 
   const metaNode = $('meta-reviewer');
   if (metaNode) metaNode.textContent = displayVal;
@@ -595,7 +711,7 @@ function renderReviewer() {
   if (boxNode) boxNode.dataset.configured = formatted ? 'true' : 'false';
 
   const changeBtn = $('reviewer-change-btn');
-  if (changeBtn) changeBtn.textContent = formatted ? 'Change reviewer' : 'Set reviewer';
+  if (changeBtn) changeBtn.textContent = formatted ? t('panel.changeReviewer') : t('panel.setReviewer');
 }
 
 function openReviewerModal(pendingReviewIntent) {
@@ -666,11 +782,15 @@ function renderHeader() {
   // own badge and the time of the inference behind it.
   $('hdr-cache').hidden = origin !== 'CACHED';
   if (origin === 'CACHED') {
-    $('hdr-cache').textContent = 'CACHED AI RESULT - inference from '
-      + (view.originalInferenceAt ?? 'an earlier run').replace('T', ' ').slice(0, 19);
+    const when = view.originalInferenceAt;
+    $('hdr-cache').textContent = fillText(t('header.cached'), {
+      at: when === null || when === undefined
+        ? t('header.cachedEarlier')
+        : when.replace('T', ' ').slice(0, 19),
+    });
   }
   if (origin === 'FRESH' && view.provenance.inferenceExecuted) {
-    setText('hdr-provenance', view.provenance.provider + ' - live inference');
+    setText('hdr-provenance', view.provenance.provider + ' — ' + t('header.liveInference'));
   }
 }
 
@@ -685,13 +805,13 @@ function updateInspectIntro() {
   if (!sub) return;
   const view = state.view;
   if (view === null || view.outcome === 'PENDING') {
-    sub.textContent = 'The model has not been asked anything yet.';
+    sub.textContent = t('intro.pending');
   } else if (view.outcome === 'FAILED') {
-    sub.textContent = 'The last inspection did not complete — see the failure note below.';
+    sub.textContent = t('intro.failed');
   } else if (view.inferenceOrigin === 'CACHED') {
-    sub.textContent = 'Showing the restored inspection of this capture. Inspect again for a fresh reading.';
+    sub.textContent = t('intro.cached');
   } else {
-    sub.textContent = 'Fresh inference complete — findings await a named human decision.';
+    sub.textContent = t('intro.fresh');
   }
 }
 
@@ -699,16 +819,20 @@ function renderRail() {
   const view = state.view;
   if (view === null) return;
   const c = view.counters;
+  const l10n = localized();
 
   setText('rail-elements', c.totalCounted > 0 ? c.totalCounted : c.elementsDetected);
   setText('rail-attention', c.attentionAreas + c.incompleteAreas);
   setText('rail-findings', view.inspectionFindings.length);
-  setText('rail-findings-n', c.pending + ' awaiting review, ' + c.verified + ' verified');
+  setText('rail-findings-n', fillText(t('rail.pending'), {
+    pending: c.pending,
+    verified: c.verified
+  }));
 
   // Confidence is shown as a percentage only when one exists; "no confidence"
   // is a legitimate reading and is not rounded to zero.
   setText('rail-confidence', c.highestConfidence === null ? 'n/a' : Math.round(c.highestConfidence * 100) + '%');
-  setText('rail-overall', view.brief.overall.replace(/_/g, ' '));
+  setText('rail-overall', l10n === null ? view.brief.overall.replace(/_/g, ' ') : l10n.brief.overallLabel);
   $('rail-verdict').dataset.overall = view.brief.overall;
 }
 
@@ -717,17 +841,39 @@ function renderBrief() {
   const host = $('brief');
   clear(host);
   if (view === null) return;
+  const l10n = localized();
 
-  for (const line of view.brief.lines) {
+  // The canonical brief lines are English sentences; the localized brief is the
+  // same facts regenerated in the selected language. Same counts, same verdict.
+  const lines = l10n === null ? view.brief.lines : l10n.brief.lines;
+  const leadPrefix = t('brief.overallPrefix').split('{')[0];
+  for (const line of lines) {
     if (line.trim().length === 0) continue;
     const node = el('p', 'brief-line', line);
-    if (line.indexOf('Overall inspection') === 0) node.dataset.lead = 'true';
+    if (line.indexOf(leadPrefix) === 0) node.dataset.lead = 'true';
     host.appendChild(node);
   }
-  if (view.brief.highestPriority !== null) {
-    host.appendChild(el('p', 'brief-line', 'Highest priority: ' + view.brief.highestPriority));
+  const highest = l10n === null ? view.brief.highestPriority : l10n.brief.highestPriority;
+  if (highest !== null) {
+    host.appendChild(el('p', 'brief-line', fillText(t('brief.highestPriority'), { title: highest })));
   }
-  setText('brief-verdict', view.brief.overall.replace(/_/g, ' '));
+  setText('brief-verdict', l10n === null ? view.brief.overall.replace(/_/g, ' ') : l10n.brief.overallLabel);
+}
+
+/**
+ * Placeholder fill, matching the server-side projection exactly.
+ *
+ * A token with no value is left visible rather than blanked, so a missing
+ * parameter shows on screen instead of silently shortening a sentence.
+ */
+function fillText(template, params) {
+  // Written without regex escapes on purpose. This file is a template literal,
+  // so a backslash-w would be consumed by the outer template and the emitted
+  // client would silently stop matching placeholders.
+  return String(template).replace(/\{([a-zA-Z]+)\}/g, (whole, token) => {
+    const value = params[token];
+    return value === undefined || value === null ? whole : String(value);
+  });
 }
 
 function renderPriorities() {
@@ -735,19 +881,22 @@ function renderPriorities() {
   const host = $('priorities');
   clear(host);
   if (view === null) return;
+  const l10n = localized();
+  const list = l10n === null ? null : l10n.priorities;
 
   if (view.priorities.length === 0) {
-    host.appendChild(el('p', 'empty', 'No open attention areas. Nothing was flagged, or every flag has already been reviewed.'));
+    host.appendChild(el('p', 'empty', t('priority.empty')));
     return;
   }
 
-  view.priorities.forEach((priority) => {
+  view.priorities.forEach((priority, index) => {
+    const localizedPriority = list === null ? null : (list[index] || null);
     const item = el('li', 'prio');
     item.dataset.attention = priority.attention;
     item.appendChild(el('span', 'prio-n', String(priority.rank).padStart(2, '0')));
     const body = el('div');
-    body.appendChild(el('p', 'prio-t', priority.title));
-    body.appendChild(el('p', 'prio-b', priority.basis));
+    body.appendChild(el('p', 'prio-t', localizedPriority === null ? priority.title : localizedPriority.title));
+    body.appendChild(el('p', 'prio-b', localizedPriority === null ? priority.basis : localizedPriority.basis));
     item.appendChild(body);
     item.addEventListener('click', () => openFinding(priority.findingId));
     host.appendChild(item);
@@ -761,19 +910,23 @@ function renderComparison() {
   if (!host) return;
   clear(host);
   if (view === null) return;
+  const l10n = localized();
 
   if (view.comparison.length === 0) {
-    host.appendChild(el('p', 'empty', 'No expected state loaded, so nothing can be compared.'));
+    host.appendChild(el('p', 'empty', t('comparison.empty')));
     return;
   }
 
-  view.comparison.forEach((row) => {
+  view.comparison.forEach((row, index) => {
+    const localizedRow = l10n === null ? null : (l10n.comparison[index] || null);
     const item = el('div', 'cmp');
     item.dataset.status = row.status;
 
     const head = el('div', 'cmp-head');
-    head.appendChild(el('span', 'cmp-el', pretty(row.element)));
-    head.appendChild(el('span', 'tag cmp-tag', row.status.replace(/_/g, ' ')));
+    head.appendChild(el('span', 'cmp-el', localizedRow === null ? pretty(row.element) : localizedRow.elementLabel));
+    head.appendChild(el('span', 'tag cmp-tag', localizedRow === null
+      ? row.status.replace(/_/g, ' ')
+      : localizedRow.statusLabel));
     item.appendChild(head);
 
     const grid = el('dl', 'cmp-grid');
@@ -783,12 +936,12 @@ function renderComparison() {
       row_.appendChild(el('dd', null, value));
       grid.appendChild(row_);
     };
-    pair('EXPECTED', row.expectedText);
-    pair('OBSERVED', row.observedText);
-    if (row.difference) pair('DIFFERENCE', row.difference);
-    if (row.countBasis === 'VISUAL_COUNT' && row.observedCount !== null) {
-      pair('COUNT BASIS', 'Visual count from one photograph. Not a measured quantity.');
-    }
+    pair(t('comparison.expected'), localizedRow === null ? row.expectedText : localizedRow.expectedText);
+    pair(t('comparison.observed'), localizedRow === null ? row.observedText : localizedRow.observedText);
+    const difference = localizedRow === null ? row.difference : localizedRow.difference;
+    if (difference) pair(t('comparison.difference'), difference);
+    const basisNote = localizedRow === null ? null : localizedRow.countBasisNote;
+    if (basisNote !== null) pair(t('comparison.countBasis'), basisNote);
     item.appendChild(grid);
     host.appendChild(item);
   });
@@ -800,7 +953,7 @@ function statusTag(status) {
       : status === 'REJECTED' ? 'tag tag-reject'
         : status === 'NEEDS_REVIEW' ? 'tag tag-review'
           : 'tag';
-  return el('span', cls, status.replace(/_/g, ' '));
+  return el('span', cls, t('status.' + status));
 }
 
 /**
@@ -828,10 +981,9 @@ function renderReasoning() {
 
   if (view === null) {
     stage.dataset.status = 'UNAVAILABLE';
-    $('reason-stage').textContent = 'NOT RUN';
+    $('reason-stage').textContent = t('panel.stageReasoningNotRun');
     $('reason-model').textContent = '-';
-    $('reason-lede').textContent =
-      'Run the inspection to have Nemotron reason about what the evidence does and does not establish.';
+    $('reason-lede').textContent = t('reasoning.notRun');
     $('reason-fail').hidden = true;
     $('reason-foot').hidden = true;
     return;
@@ -843,29 +995,33 @@ function renderReasoning() {
   if (r.status === 'AVAILABLE') {
     const reasoning = r.reasoning;
     stage.dataset.status = 'AVAILABLE';
-    $('reason-stage').textContent = 'STAGE 2 · NEMOTRON';
+    $('reason-stage').textContent = t('reason.stageLabel');
     $('reason-model').textContent = r.model;
     $('reason-lede').textContent = reasoning.summary;
 
+    // The reasoning prose is Nemotron's own English. The LABELS around it are
+    // localized; the sentences are not translated, because inventing a
+    // translation of a construction-safety claim is not something this product
+    // will do quietly.
     const rows = [
-      ['WHAT IT MEANS', reasoning.whatMatters],
-      ['WHY IT MATTERS', reasoning.rationale],
-      ['RECOMMENDATION', reasoning.recommendation],
-      ['VERIFICATION', reasoning.verification],
+      [t('reasoning.summary'), reasoning.whatMatters],
+      [t('reasoning.rationale'), reasoning.rationale],
+      [t('reasoning.recommendation'), reasoning.recommendation],
+      [t('reasoning.verification'), reasoning.verification],
     ];
     for (const [label, value] of rows) appendDetail(host, label, label, value);
 
     const certainty = el('div', 'reason-certainty');
-    certainty.appendChild(el('span', 'reason-certainty-k', 'CERTAINTY'));
+    certainty.appendChild(el('span', 'reason-certainty-k', t('reasoning.certainty')));
     const chip = el('span', 'chip');
     chip.dataset.certainty = reasoning.certainty;
-    chip.textContent = reasoning.certainty.replace(/_/g, ' ');
+    chip.textContent = t('certainty.' + reasoning.certainty);
     certainty.appendChild(chip);
     if (reasoning.confidence !== null && reasoning.confidence !== undefined) {
       certainty.appendChild(el('span', 'reason-certainty-n',
-        'model-stated ' + reasoning.confidence.toFixed(2) + ' — not a measurement, not a verification'));
+        fillText(t('reasoning.modelStated'), { value: reasoning.confidence.toFixed(2) })));
     } else {
-      certainty.appendChild(el('span', 'reason-certainty-n', 'no confidence stated'));
+      certainty.appendChild(el('span', 'reason-certainty-n', t('reason.noConfidence')));
     }
     host.appendChild(certainty);
 
@@ -875,24 +1031,23 @@ function renderReasoning() {
     const p = r.provenance;
     const foot = $('reason-foot');
     foot.hidden = false;
-    foot.textContent =
-      'Reasoned over ' + p.detectionsConsidered + ' detected element(s) and ' + p.rowsConsidered
-      + ' comparison row(s)'
-      + (state.view !== null && state.view.inferenceOrigin === 'CACHED'
-        ? ', restored with the original inspection'
-        : ' in ' + p.latencyMs + ' ms')
-      + (p.degenerate
-        ? '. WARNING: this answer closely restates the visual observation and adds little reasoning.'
-        : '. The reasoning above is additional to the visual observation, not a restatement of it.');
+    const cached = state.view !== null && state.view.inferenceOrigin === 'CACHED';
+    foot.textContent = fillText(t('reason.footPrefix'), {
+      detections: p.detectionsConsidered,
+      rows: p.rowsConsidered,
+    }) + (cached ? t('reason.footCached') : fillText(t('reason.footLive'), { ms: p.latencyMs }))
+      + '. ' + (p.degenerate ? t('reasoning.degenerate') : t('reasoning.additional'));
     return;
   }
 
   // Unavailable. Say why, and say that the stages below are unaffected.
   stage.dataset.status = 'UNAVAILABLE';
-  $('reason-stage').textContent = r.failureKind === null ? 'NOT RUN' : 'UNAVAILABLE';
+  $('reason-stage').textContent = r.failureKind === null
+    ? t('panel.stageReasoningNotRun')
+    : t('reason.unavailableHead');
   $('reason-model').textContent = r.model === 'none' ? '-' : r.model;
   $('reason-lede').textContent = r.message === null
-    ? 'Construction reasoning has not been produced for this capture.'
+    ? t('reason.noneProduced')
     : r.message;
 
   const fail = $('reason-fail');
@@ -909,8 +1064,7 @@ function renderReasoning() {
     }
     fail.appendChild(list);
   }
-  fail.appendChild(el('p', 'reason-fail-foot',
-    'Nothing has been invented in its place. The comparison above is computed in code and stands on its own.'));
+  fail.appendChild(el('p', 'reason-fail-foot', t('reasoning.foot')));
 
   $('reason-foot').hidden = true;
 }
@@ -943,12 +1097,12 @@ function renderPipeline() {
     step2.dataset.state = 'idle';
     step3.dataset.state = 'idle';
     step4.dataset.state = 'idle';
-    set('pipe-vision-note', 'not run yet');
+    set('pipe-vision-note', t('pipe.notRun'));
     // A reference can be loaded without a run having happened; claiming "no
     // expected state" here would contradict the panel beside the grid.
-    set('pipe-compare-note', 'awaiting first inspection');
-    set('pipe-reason-note', 'not run yet');
-    set('pipe-verify-note', 'nothing verified');
+    set('pipe-compare-note', t('pipe.awaitingInspection'));
+    set('pipe-reason-note', t('pipe.notRun'));
+    set('pipe-verify-note', t('pipe.nothingVerified'));
     updateInspectIntro();
     return;
   }
@@ -961,37 +1115,45 @@ function renderPipeline() {
   set('pipe-vision-model', p.model);
   set('pipe-vision-note',
     view.outcome === 'FAILED'
-      ? 'did not complete — ' + (view.failure !== null ? view.failure.kind.toLowerCase().replace(/_/g, ' ') : 'failed')
+      ? fillText(t('pipe.didNotComplete'), {
+          kind: view.failure !== null ? view.failure.kind.toLowerCase().replace(/_/g, ' ') : t('fail.error')
+        })
       : view.isDemoFixture
-        ? 'synthetic fixture, not AI inference'
+        ? t('pipe.syntheticFixture')
         : view.inferenceOrigin === 'CACHED'
-          ? 'restored result, not a fresh call'
-          : view.detections.length + ' element(s), ' + view.observations.length + ' observation(s) in ' + p.latencyMs + ' ms');
+          ? t('pipe.restoredResult')
+          : fillText(t('pipe.visionCounts'), {
+              elements: view.detections.length,
+              observations: view.observations.length,
+              ms: p.latencyMs,
+            }));
 
   // 02 COMPARE — ours, in code. Never attributed to a model.
   const matched = view.comparison.filter((r2) => r2.status === 'MATCH').length;
   const attention = view.comparison.filter((r2) => r2.status === 'ATTENTION').length;
   const undetermined = view.comparison.filter((r2) => r2.status === 'UNDETERMINED').length;
   step2.dataset.state = view.comparison.length > 0 ? 'done' : 'idle';
-  set('pipe-compare-model', 'SiteLens deterministic engine (src/compare.ts)');
+  set('pipe-compare-model', t('pipe.compareEngine'));
   set('pipe-compare-note', view.comparison.length === 0
-    ? 'no expected state loaded'
-    : matched + ' match · ' + attention + ' attention · ' + undetermined + ' undetermined');
+    ? t('pipe.noExpectedState')
+    : fillText(t('pipe.compareCounts'), { matched, attention, undetermined }));
 
   // 03 UNDERSTAND
   if (r === undefined || r === null) {
     step3.dataset.state = 'idle';
-    set('pipe-reason-note', 'not run yet');
+    set('pipe-reason-note', t('pipe.notRun'));
   } else if (r.status === 'AVAILABLE') {
     step3.dataset.state = 'done';
     set('pipe-reason-model', r.model);
     set('pipe-reason-note',
-      r.reasoning.certainty.replace(/_/g, ' ').toLowerCase()
-      + (r.provenance && r.provenance.degenerate ? ' — adds little to the visual reading' : ''));
+      t('certainty.' + r.reasoning.certainty)
+      + (r.provenance && r.provenance.degenerate ? ' — ' + t('pipe.degenerate') : ''));
   } else {
     step3.dataset.state = 'fail';
     set('pipe-reason-model', r.model === 'none' ? '-' : r.model);
-    set('pipe-reason-note', r.failureKind === null ? 'not run yet' : r.failureKind.replace(/_/g, ' ').toLowerCase());
+    set('pipe-reason-note', r.failureKind === null
+      ? t('pipe.notRun')
+      : t('fail.' + r.failureKind.toLowerCase()));
   }
 
   // 04 VERIFY
@@ -999,8 +1161,11 @@ function renderPipeline() {
   step4.dataset.state = counters.verified > 0 ? 'done' : (counters.pending > 0 ? 'wait' : 'idle');
   set('pipe-verify-note',
     counters.verified === 0 && counters.rejected === 0
-      ? 'nothing verified — ' + counters.pending + ' awaiting a named human'
-      : counters.verified + ' verified · ' + counters.rejected + ' rejected');
+      ? fillText(t('pipe.verifyPending'), { n: counters.pending })
+      : fillText(t('pipe.verifyCounts'), {
+          verified: counters.verified,
+          rejected: counters.rejected,
+        }));
 
   updateInspectIntro();
 }
@@ -1043,14 +1208,18 @@ function renderFindings() {
   const host = $('findings-cards');
   clear(host);
   if (view === null) return;
+  const l10n = localized();
 
   const list = view.inspectionFindings;
   if (list.length === 0) {
-    host.appendChild(el('p', 'empty', 'No findings. Run an inspection, or nothing in this capture differs from the reference.'));
+    host.appendChild(el('p', 'empty', t('finding.empty')));
     return;
   }
 
   list.forEach((finding, index) => {
+    // The canonical finding drives behaviour; the localized copy drives text.
+    // They share one id, and the id is what the human review is keyed on.
+    const f = l10n === null ? null : (l10n.findings[index] || null);
     const open = state.openIds.has(finding.id) || state.activeId === finding.id;
     const card = el('article', 'finding-card');
     card.dataset.findingId = finding.id;
@@ -1062,11 +1231,15 @@ function renderFindings() {
     head.setAttribute('role', 'button');
     head.setAttribute('tabindex', '0');
     head.appendChild(el('span', 'fc-id', String(index + 1).padStart(2, '0')));
-    head.appendChild(el('span', 'fc-title', finding.title));
+    head.appendChild(el('span', 'fc-title', f === null ? finding.title : f.title));
 
     const tail = el('div', 'fc-tail');
-    tail.appendChild(el('span', 'tag tag-ai', finding.origin === 'COMPARISON' ? 'COMPARISON' : 'VISUAL'));
-    if (finding.severity !== 'INFO') tail.appendChild(el('span', 'tag tag-attention', finding.severity));
+    tail.appendChild(el('span', 'tag tag-ai', f === null
+      ? (finding.origin === 'COMPARISON' ? t('finding.origin.comparison') : t('finding.origin.visual'))
+      : f.originLabel));
+    if (finding.severity !== 'INFO') {
+      tail.appendChild(el('span', 'tag tag-attention', f === null ? finding.severity : f.severityLabel));
+    }
     tail.appendChild(statusTag(finding.verificationStatus));
     head.appendChild(tail);
 
@@ -1087,19 +1260,20 @@ function renderFindings() {
     card.appendChild(head);
 
     const body = el('div', 'fc-body');
-    appendDetail(body, 'what', 'WHAT', finding.observation);
-    appendDetail(body, 'where', 'WHERE', finding.location !== null
-      ? finding.location + (finding.element !== null ? ' (' + pretty(finding.element) + ')' : '')
+    appendDetail(body, 'what', t('finding.what'), f === null ? finding.observation : f.what);
+    const where = f === null ? finding.location : f.where;
+    appendDetail(body, 'where', t('finding.where'), where !== null
+      ? where + (finding.element !== null ? ' (' + t('element.' + finding.element) + ')' : '')
       : null);
-    appendDetail(body, 'why', 'WHY FLAGGED', finding.reason);
-    appendDetail(body, 'expected', 'EXPECTED', finding.expected);
-    appendDetail(body, 'difference', 'DIFFERENCE', finding.difference);
+    appendDetail(body, 'why', t('finding.why'), f === null ? finding.reason : f.reason);
+    appendDetail(body, 'expected', t('finding.expected'), f === null ? finding.expected : f.expected);
+    appendDetail(body, 'difference', t('finding.difference'), f === null ? finding.difference : f.difference);
 
     // Confidence is labelled as model confidence in the visual reading, never
-    // as a measurement confidence.
+    // as a measurement confidence. The NUMBER is canonical and never localized.
     const confidenceRow = el('div', 'fc-row');
     confidenceRow.dataset.k = 'confidence';
-    confidenceRow.appendChild(el('dt', null, 'CONFIDENCE'));
+    confidenceRow.appendChild(el('dt', null, t('finding.confidence')));
     const cd = el('dd');
     const track = el('span', 'conf-track');
     const fill = el('i', 'conf-fill');
@@ -1108,35 +1282,34 @@ function renderFindings() {
     track.appendChild(fill);
     cd.appendChild(track);
     cd.appendChild(document.createTextNode(
-      Math.round(finding.confidence * 100) + '% - model confidence in its visual reading only'
+      Math.round(finding.confidence * 100) + '% - ' + t('finding.confidenceNote')
     ));
     confidenceRow.appendChild(cd);
     body.appendChild(confidenceRow);
 
-    appendDetail(body, 'action', 'RECOMMENDED ACTION', finding.recommendation);
-    appendDetail(body, 'evidence', 'EVIDENCE', finding.evidence);
+    appendDetail(body, 'action', t('finding.action'), f === null ? finding.recommendation : f.recommendation);
+    appendDetail(body, 'evidence', t('finding.evidence'), f === null ? finding.evidence : f.evidence);
 
     // Evidence states exactly what the image supports, and no more. A finding
     // the model saw but did not localise is FULL-FRAME evidence: real image,
     // real reading, no rectangle — and it is never given an invented one. A
     // finding with no visual reading at all says so rather than borrowing the
     // image's authority.
-    if (finding.evidenceState === 'FULL_FRAME') {
+    const evidenceNote = f === null ? null : f.evidenceNote;
+    if (evidenceNote !== null) {
       const note = el('p', 'fc-noev');
-      note.dataset.state = 'FULL_FRAME';
-      note.appendChild(el('b', null, 'VISUAL EVIDENCE '));
-      note.appendChild(document.createTextNode(
-        'Full-frame evidence — no localized region returned by the vision model. '
-        + 'The finding is supported by the inspected image itself; the evidence is '
-        + 'the description above, not a highlighted area.'));
+      note.dataset.state = finding.evidenceState;
+      note.appendChild(el('b', null, (f === null ? '' : f.evidenceNoteHead) + ' '));
+      note.appendChild(document.createTextNode(evidenceNote));
       body.appendChild(note);
-    } else if (finding.evidenceState === 'NONE') {
-      const note = el('p', 'fc-noev');
-      note.dataset.state = 'NONE';
-      note.appendChild(el('b', null, 'NO VISUAL EVIDENCE '));
-      note.appendChild(document.createTextNode(
-        'No usable visual evidence for this finding in this capture. It rests on '
-        + 'the expected-state comparison, not on a visual reading of the image.'));
+    }
+
+    // A finding whose narrative came from a model is LABELLED as untranslated
+    // English. The words are the model's; pretending otherwise would be a lie
+    // about where the text came from.
+    if (f !== null && !f.translated) {
+      const note = el('p', 'fc-source');
+      note.appendChild(el('span', null, t('lang.sourceEnglish')));
       body.appendChild(note);
     }
 
@@ -1154,26 +1327,32 @@ function renderFindings() {
  * it, which is the audit trail the product promises.
  */
 function buildVerification(finding) {
+  const pct = Math.round(finding.confidence * 100);
   if (finding.verificationStatus !== 'UNVERIFIED') {
     const settled = el('div', 'fc-settled');
     settled.dataset.status = finding.verificationStatus;
     settled.appendChild(el('span', null,
-      'HUMAN VERIFIED -> ' + finding.verificationStatus.replace(/_/g, ' ')));
+      fillText(t('finding.settledPrefix'), { status: t('status.' + finding.verificationStatus) })));
     if (finding.review) {
       settled.appendChild(el('span', null,
-        'by ' + finding.review.reviewer + ' at ' + finding.review.reviewedAt.replace('T', ' ').slice(0, 19)));
+        fillText(t('finding.settledBy'), {
+          reviewer: finding.review.reviewer,
+          at: finding.review.reviewedAt.replace('T', ' ').slice(0, 19)
+        })));
+      // A reviewer's own note is their words, in the language they wrote them.
+      // It is never translated.
       if (finding.review.note) settled.appendChild(el('span', null, '"' + finding.review.note + '"'));
     }
     return settled;
   }
 
   const acts = el('div', 'fc-acts');
-  acts.appendChild(el('span', 'fc-acts-lbl', 'AI FINDING - CONFIDENCE ' + Math.round(finding.confidence * 100) + '%'));
+  acts.appendChild(el('span', 'fc-acts-lbl', fillText(t('finding.aiPrefix'), { pct })));
 
   const decisions = [
-    ['VERIFIED', 'CONFIRM', 'btn btn-verify'],
-    ['REJECTED', 'REJECT', 'btn btn-reject'],
-    ['NEEDS_REVIEW', 'NEEDS REVIEW', 'btn']
+    ['VERIFIED', t('finding.confirm'), 'btn btn-verify'],
+    ['REJECTED', t('finding.reject'), 'btn btn-reject'],
+    ['NEEDS_REVIEW', t('finding.needsReview'), 'btn']
   ];
   for (const decision of decisions) {
     const button = el('button', decision[2], decision[1]);
@@ -1187,10 +1366,15 @@ function buildVerification(finding) {
   return acts;
 }
 
+/** Map a review decision enum to its localized past-tense label. */
+function decisionWord(decision) {
+  return decision === 'VERIFIED' ? 'confirmed' : decision === 'REJECTED' ? 'rejected' : 'deferred';
+}
+
 async function submitReview(findingId, decision) {
   const currentReviewer = formatReviewerObj(state.project ? state.project.reviewer : null);
   if (!currentReviewer) {
-    notify('REVIEWER NOT CONFIGURED — Set your reviewer identity before recording a human finding decision.', 'bad');
+    notify(t('review.reviewerMissingFinding'), 'bad');
     openReviewerModal({ findingId: findingId, decision: decision });
     return;
   }
@@ -1201,38 +1385,179 @@ async function submitReview(findingId, decision) {
       reviewer: currentReviewer,
       note: $('note').value.trim() || null
     });
-    const label = decision === 'VERIFIED' ? 'confirmed' : decision === 'REJECTED' ? 'rejected' : 'deferred for review';
-    notify('Finding ' + label + ' by ' + currentReviewer + '.', decision === 'REJECTED' ? 'bad' : 'good');
-    setLamp('done', 'Human review recorded');
+    notify(fillText(t('review.recorded'), {
+      status: t('review.' + decisionWord(decision)),
+      reviewer: currentReviewer,
+    }), decision === 'REJECTED' ? 'bad' : 'good');
+    setLamp('done', t('review.lampRecorded'));
     renderAll();
   } catch (error) {
     notify(error.message, 'bad');
   }
 }
 
+/**
+ * The NVIDIA verdict, and the two model stages behind it.
+ *
+ * Three separate facts, kept separate on screen: the verdict for THIS RUN,
+ * which is the headline; per stage, whether the model is an NVIDIA model at all;
+ * and per stage, what that stage contributed.
+ *
+ * The vision model really is not an NVIDIA model and this says so, in its own
+ * row, underneath the verdict. What it must never do is let that row stand in
+ * for the run's qualification.
+ */
+function renderQualification() {
+  const host = $('qualification');
+  if (host === null) return;
+  const view = state.view;
+  const e = view !== null && view !== undefined ? view.pipelineEligibility : null;
+  const l10n = localized();
+  const list = $('qual-stages');
+  if (list !== null) clear(list);
+
+  if (e === null || e === undefined) {
+    host.hidden = true;
+    return;
+  }
+  host.hidden = false;
+  host.dataset.requirement = e.nvidiaRequirement;
+
+  const verdict = e.nvidiaRequirement === 'MET'
+    ? 'MET'
+    : e.nvidiaRequirement === 'PARTIAL'
+      ? 'PARTIAL'
+      : t('qual.notMet');
+  // The verdict, the platform and the qualifying stage. The platform and model
+  // names are technical and stay as they are; the surrounding words do not.
+  $('qual-verdict').textContent = verdict + ' — ' + (e.qualifyingStage === null
+    ? t('qual.noQualifying')
+    : e.platform + fillText(t('qual.qualifyingStage'), {
+        stage: e.qualifyingStage === 'REASONING' ? t('qual.stageReasoning') : t('qual.stageVision'),
+      }));
+  // The end-to-end path sentence is regenerated in the selected language from
+  // the same canonical classification, rather than shipped as English prose.
+  $('qual-path').textContent = l10n !== null && l10n.qualification !== null
+    ? l10n.qualification.path
+    : e.qualificationPath;
+
+  if (list === null) return;
+  for (let i = 0; i < e.stages.length; i++) {
+    const stage = e.stages[i];
+    const l10nStage = l10n !== null && l10n.qualification !== null
+      ? l10n.qualification.stages[i] || null
+      : null;
+    const row = el('li', 'qual-stage');
+    row.dataset.stage = stage.stage;
+    row.dataset.classification = stage.classification;
+
+    const head = el('div', 'qual-stage-h');
+    head.appendChild(el('span', 'qual-stage-n', stage.stage === 'VISION'
+      ? t('rail.inspection')
+      : t('panel.stageReasoningHeading')));
+    head.appendChild(el('span', 'qual-stage-role', l10nStage === null ? stage.role : l10nStage.role));
+    row.appendChild(head);
+
+    const model = el('p', 'qual-stage-model');
+    model.appendChild(document.createTextNode(stage.model));
+    model.appendChild(el('span', 'qual-nvidia', stage.isNvidiaModel
+      ? t('qual.nvidiaModel')
+      : t('qual.notNvidiaModel')));
+    row.appendChild(model);
+
+    const detail = el('p', 'qual-stage-note');
+    detail.appendChild(el('b', null, (stage.stage === 'VISION' ? t('qual.visionHead') : t('qual.reasoningHead')) + ' '));
+    detail.appendChild(document.createTextNode(
+      t('elig.' + stage.classification) + '. ' + (l10nStage === null ? stage.note : l10nStage.note)));
+    row.appendChild(detail);
+
+    list.appendChild(row);
+  }
+}
+
 /** Provenance and eligibility: which engine actually ran, always. */
+/**
+ * State, in words, how many photographs this inspection is based on.
+ *
+ * A reader of the evidence must be able to tell "one photo" from "four photos"
+ * without counting anything. A failed photograph is listed as failed, because
+ * "based on 3 photographs" would overstate the evidence when only 2 succeeded.
+ */
+function renderBasis() {
+  const host = $('basis-list');
+  const badge = $('basis-n');
+  if (!host) return;
+  clear(host);
+
+  const view = state.view;
+  const images = view !== null && Array.isArray(view.images) ? view.images : [];
+  const open = state.captureIds.length;
+  const analysed = images.filter((image) => image.status !== 'FAILED');
+  const failed = images.filter((image) => image.status === 'FAILED');
+
+  if (badge) {
+    badge.textContent = open > 0
+      ? fillText(t('imgs.count'), { count: open })
+      : t('imgs.countZero');
+  }
+  if (images.length === 0) {
+    host.appendChild(el('li', 'basis-empty', t('imgs.basisPending')));
+    return;
+  }
+
+  for (const image of images) {
+    const ok = image.status !== 'FAILED';
+    const item = el('li', 'basis-item' + (ok ? '' : ' basis-item-failed'));
+    item.appendChild(el('span', 'basis-dot', ok ? t('imgs.status.done') : t('imgs.status.failed')));
+    item.appendChild(el('span', 'basis-name', image.captureLabel || image.captureId));
+    // The observations array is absent on a restored or older payload, so the
+    // count is shown only when the server actually sent one.
+    const observed = Array.isArray(image.observations) ? image.observations.length : null;
+    if (observed !== null && observed > 0) {
+      item.appendChild(el('span', 'basis-n', fillText(t('imgs.obsCount'), { count: observed })));
+    }
+    if (!ok && image.failure) {
+      item.appendChild(el('span', 'basis-fail', image.failure));
+    }
+    host.appendChild(item);
+  }
+  if (failed.length > 0) {
+    host.appendChild(el('li', 'basis-warn',
+      fillText(t('imgs.basisPartial'), { analysed: analysed.length, failed: failed.length })));
+  }
+}
+
 function renderProvenance() {
   const view = state.view;
   const host = $('provenance');
   const failHost = $('failures');
   clear(host);
   clear(failHost);
+  renderBasis();
+  // Rendered before the early return so a cleared view cannot leave a stale
+  // verdict on screen.
+  renderQualification();
   if (view === null) return;
 
   const p = view.provenance;
   // A restored result is real but was NOT re-run, so "inference executed: yes"
   // plus "0 ms" would read as a broken live call. State the restoration.
   const restored = view.inferenceOrigin === 'CACHED';
+  // Every VALUE here is canonical: the provider name, the model id, the counts,
+  // the latency and the timestamp are the same in every language. Only the row
+  // LABELS follow the selected language.
   const rows = [
-    ['Provider', p.provider],
-    ['Model', p.model],
-    ['Inference executed', restored ? 'no — result restored from disk' : (p.inferenceExecuted ? 'yes' : 'no')],
-    ['Elements detected', view.detections.length],
-    ['Observations accepted', p.observationsAccepted],
-    ['Observations rejected', p.observationsRejected],
-    ['Latency', restored ? 'not re-run' : p.latencyMs + ' ms'],
-    ['Captured at', p.inspectedAt.replace('T', ' ').slice(0, 19)],
-    ['Human review performed', p.humanReviewPerformed ? 'yes' : 'no']
+    [t('prov.provider'), p.provider],
+    [t('prov.model'), p.model],
+    [t('prov.inferenceExecuted'), restored
+      ? t('prov.restored')
+      : (p.inferenceExecuted ? t('prov.yes') : t('prov.no'))],
+    [t('prov.elementsDetected'), view.detections.length],
+    [t('prov.observationsAccepted'), p.observationsAccepted],
+    [t('prov.observationsRejected'), p.observationsRejected],
+    [t('prov.latency'), restored ? t('prov.notRerun') : p.latencyMs + ' ms'],
+    [t('prov.capturedAt'), p.inspectedAt.replace('T', ' ').slice(0, 19)],
+    [t('prov.humanReview'), p.humanReviewPerformed ? t('prov.yes') : t('prov.no')]
   ];
   for (const row of rows) {
     const cell = el('div');
@@ -1241,41 +1566,20 @@ function renderProvenance() {
     host.appendChild(cell);
   }
 
-  $('eligibility').textContent = 'Vision-stage eligibility: ' + p.eligibility + '. ' + p.eligibilityNote;
-
-  // Pipeline eligibility: per stage, because two models run and only one of them
-  // is NVIDIA. Collapsing that into a single verdict would either overstate the
-  // vision stage or understate the reasoning stage.
-  const pipeline = $('pipeline-eligibility');
-  if (pipeline !== null && view.pipelineEligibility !== undefined) {
-    const e = view.pipelineEligibility;
-    const requirement = e.nvidiaRequirement === 'MET'
-      ? 'MET — NVIDIA open-source inference ran on Nebius Token Factory'
-      : e.nvidiaRequirement === 'PARTIAL'
-        ? 'PARTIAL — an NVIDIA id was in use but no verified NVIDIA output was produced'
-        : 'NOT MET — no NVIDIA model produced output for this run';
-    pipeline.textContent =
-      'NVIDIA requirement: ' + requirement + '. '
-      + 'Vision ' + view.provenance.model + ': ' + e.vision + '. '
-      + 'Reasoning ' + (view.reasoning ? view.reasoning.model : '-') + ': ' + e.reasoning + '. '
-      + e.note;
-  }
-
   // Geometry facts. A re-oriented photograph is disclosed, never silently fixed.
   const geom = $('geometry-note');
   if (geom !== null && view.geometry !== undefined) {
     const g = view.geometry;
     if (g.geometryNormalized && g.exifOrientation !== 1) {
       geom.hidden = false;
-      geom.textContent =
-        'This source file carried EXIF orientation ' + g.exifOrientation + '. Its pixels were normalized '
-        + 'to orientation 1 before inspection, so the model, the display and the evidence overlay all '
-        + 'use one coordinate system. No image was re-encoded.';
+      geom.textContent = fillText(t('prov.geometry'), { n: g.exifOrientation });
     } else if (g.storedWidth !== null && g.displayedWidth !== null
       && g.storedWidth !== g.displayedWidth) {
       geom.hidden = false;
-      geom.textContent = 'Stored ' + g.storedWidth + '×' + g.storedHeight
-        + ', displayed ' + g.displayedWidth + '×' + g.displayedHeight + '.';
+      geom.textContent = fillText(t('prov.geometryStored'), {
+        sw: g.storedWidth, sh: g.storedHeight,
+        dw: g.displayedWidth, dh: g.displayedHeight,
+      });
     } else {
       geom.hidden = true;
     }
@@ -1283,16 +1587,18 @@ function renderProvenance() {
 
   if (view.failure !== null) {
     const box = el('div', 'fail');
-    box.appendChild(el('p', 'fail-h', 'INSPECTION FAILED (' + view.failure.kind + ')'));
-    box.appendChild(el('p', null, view.failure.message));
+    box.appendChild(el('p', 'fail-h', fillText(t('prov.failedHead'), { kind: view.failure.kind })));
+    box.appendChild(el('p', null, describeFailure(view.failure.kind, view.failure.message)));
     failHost.appendChild(box);
   }
 
   if (p.rejectionIssues.length > 0) {
     const box = el('div', 'fail');
-    box.appendChild(el('p', 'fail-h', p.rejectionIssues.length + ' MODEL ENTRIES REJECTED BY VALIDATION'));
+    box.appendChild(el('p', 'fail-h', fillText(t('prov.rejectedHead'), { n: p.rejectionIssues.length })));
     const list = el('ul');
     for (const issue of p.rejectionIssues.slice(0, 8)) {
+      // The FIELD NAME is a machine identifier and stays verbatim; the message
+      // is a validator sentence and follows the language.
       list.appendChild(el('li', null, issue.field + ': ' + issue.message));
     }
     box.appendChild(list);
@@ -1308,15 +1614,23 @@ function renderObservations() {
   if (view === null) return;
 
   if (view.observations.length === 0) {
-    host.appendChild(el('p', 'empty', 'No raw observations were returned for this capture.'));
+    host.appendChild(el('p', 'empty', t('obs.empty')));
   }
 
   view.observations.forEach((observation, index) => {
     const row = el('div', 'obs');
     row.appendChild(el('span', 'obs-n', String(index + 1).padStart(2, '0')));
     row.appendChild(el('span', 'obs-cat', observation.category));
-    row.appendChild(el('span', 'tag', observation.severity));
+    row.appendChild(el('span', 'tag', t('severity.' + observation.severity)));
     row.appendChild(statusTag(observation.verificationStatus));
+
+    // Which photograph this observation came from. Over a group, an evidence
+    // line without its photograph is not auditable, so the source is always
+    // shown even for a single image.
+    const photo = el('span', 'obs-photo', fillText(t('obs.from'), {
+      label: observation.captureLabel || observation.captureId,
+    }));
+    row.appendChild(photo);
 
     const conf = el('span', 'conf');
     const track = el('span', 'conf-track');
@@ -1328,36 +1642,48 @@ function renderObservations() {
     // The band is a qualitative reading of model confidence, not a severity.
     // Saying so in the label stops "HIGH" being read as an alert level.
     conf.appendChild(el('span', null,
-      observation.confidence.toFixed(2) + ' · ' + observation.confidenceBand + ' band'));
+      fillText(t('obs.band'), {
+        value: observation.confidence.toFixed(2),
+        band: t('severity.' + observation.confidenceBand),
+      })));
     row.appendChild(conf);
 
+    // The observation text and the evidence description are MiniCPM's own
+    // English. They are not translated; the label on this surface says so.
     row.appendChild(el('p', 'obs-text', observation.observation));
+    row.appendChild(el('p', 'fc-source', t('lang.sourceEnglish')));
 
     const evidence = el('p', 'obs-ev');
-    evidence.appendChild(el('b', null, 'EVIDENCE '));
+    evidence.appendChild(el('b', null, t('finding.evidence') + ' '));
     evidence.appendChild(document.createTextNode(observation.evidenceDescription));
     if (!observation.localized) {
-      evidence.appendChild(el('span', 'obs-ev-full',
-        ' (full-frame — the model returned no localized region for this observation)'));
+      evidence.appendChild(el('span', 'obs-ev-full', ' ' + t('obs.fullFrame')));
     }
     row.appendChild(evidence);
 
     const acts = el('div', 'obs-acts');
     if (observation.suggestedAction !== 'NO_ACTION') {
-      acts.appendChild(el('span', 'obs-next', 'Next: ' + observation.suggestedAction));
+      acts.appendChild(el('span', 'obs-next',
+        fillText(t('obs.next'), { action: t('action.' + observation.suggestedAction) })));
     }
     if (observation.review && observation.review.reviewer) {
-      acts.appendChild(el('span', 'obs-next', 'by ' + observation.review.reviewer));
+      // The reviewer's own words are never translated; only the frame around them.
+      acts.appendChild(el('span', 'obs-next', fillText(t('finding.settledBy'), {
+        reviewer: observation.review.reviewer,
+        at: observation.review.reviewedAt.replace('T', ' ').slice(0, 19),
+      })));
     }
     for (const decision of ['VERIFIED', 'NEEDS_REVIEW', 'REJECTED']) {
-      const label = decision === 'NEEDS_REVIEW' ? 'Needs review' : decision;
+      const label = decision === 'NEEDS_REVIEW'
+        ? t('finding.needsReview')
+        : decision === 'VERIFIED' ? t('finding.confirm') : t('finding.reject');
       const button = el('button', 'btn', label);
       button.type = 'button';
       button.dataset.decision = decision;
       button.addEventListener('click', async () => {
         const currentReviewer = formatReviewerObj(state.project ? state.project.reviewer : null);
         if (!currentReviewer) {
-          notify('REVIEWER NOT CONFIGURED — Set your reviewer identity before recording a decision.', 'bad');
+          notify(t('review.reviewerMissingObservation'), 'bad');
           openReviewerModal();
           return;
         }
@@ -1368,7 +1694,10 @@ function renderObservations() {
             reviewer: currentReviewer,
             note: $('note').value.trim() || null
           });
-          notify('Observation ' + decision.replace(/_/g, ' ') + ' by ' + currentReviewer + '.', 'good');
+          notify(fillText(t('review.recordedObservation'), {
+            status: t('review.' + decisionWord(decision)),
+            reviewer: currentReviewer,
+          }), 'good');
           renderAll();
         } catch (error) {
           notify(error.message, 'bad');
@@ -1425,6 +1754,8 @@ function safeRender(name, fn) {
 }
 
 function renderAll() {
+  applyLanguage();
+  safeRender('imgs', renderImages);
   safeRender('header', renderHeader);
   safeRender('pipeline', renderPipeline);
   safeRender('rail', renderRail);
@@ -1474,6 +1805,74 @@ function renderFixtures() {
 
     host.appendChild(row);
   });
+}
+
+/**
+ * Render the strip of photographs belonging to the open inspection.
+ *
+ * The count is stated in words because "3 photographs" and "1 photograph" read
+ * very differently to an operator deciding whether they have covered the level.
+ * Failed photographs stay visible with a failed status: hiding them would let a
+ * partial inspection look complete.
+ */
+function renderImages() {
+  const section = $('imgs');
+  if (!section) return;
+  const ids = state.captureIds;
+  section.hidden = ids.length === 0;
+  if (ids.length === 0) return;
+
+  $('imgs-n').textContent = fillText(t('imgs.count'), { count: ids.length });
+  const host = $('imgs-list');
+  host.textContent = '';
+
+  const outcomes = {};
+  if (state.view !== null && Array.isArray(state.view.images)) {
+    for (const image of state.view.images) outcomes[image.captureId] = image;
+  }
+
+  ids.forEach(function (id, index) {
+    const capture = state.captures.filter((c) => c.id === id)[0];
+    const outcome = outcomes[id];
+    const item = el('li', 'img-item' + (outcome !== undefined && outcome.status === 'FAILED' ? ' img-item-failed' : ''));
+
+    const thumb = el('img', 'img-thumb');
+    thumb.src = '/api/capture-image/' + encodeURIComponent(id);
+    thumb.alt = capture !== undefined ? capture.label : id;
+    thumb.loading = 'lazy';
+    item.appendChild(thumb);
+
+    const meta = el('div', 'img-meta');
+    meta.appendChild(el('span', 'img-ord', fillText(t('imgs.ordinal'), { index: index + 1 })));
+    meta.appendChild(el('span', 'img-label', capture !== undefined ? capture.label : id));
+    const statusKey = outcome === undefined
+      ? 'imgs.status.ready'
+      : (outcome.status === 'FAILED' ? 'imgs.status.failed' : 'imgs.status.done');
+    meta.appendChild(el('span', 'img-status img-status-' + statusKey.replace('imgs.status.', ''), t(statusKey)));
+    item.appendChild(meta);
+
+    const drop = el('button', 'img-drop', '×');
+    drop.type = 'button';
+    drop.setAttribute('aria-label', fillText(t('imgs.dropOne'), { label: capture !== undefined ? capture.label : id }));
+    drop.addEventListener('click', () => removeCaptureFromGroup(id));
+    item.appendChild(drop);
+
+    host.appendChild(item);
+  });
+
+  $('imgs-note').textContent = fillText(t('imgs.note'), { count: ids.length });
+}
+
+async function removeCaptureFromGroup(captureId) {
+  const remaining = state.captureIds.filter((id) => id !== captureId);
+  if (remaining.length === 0) return;
+  try {
+    applyWorkspace(await post('/api/captures/select', { captureIds: remaining }));
+    renderAll();
+    setLamp('ready', t('imgs.ready'));
+  } catch (error) {
+    notify(error.message, 'bad');
+  }
 }
 
 function showLoaded(label) {
@@ -1538,56 +1937,98 @@ function displayNeedsFlip(orientation) {
 async function loadCapture(captureId) {
   state.activeId = null;
   state.openIds.clear();
-  setLamp('working', 'Selecting capture');
+    setLamp('working', t('imgs.ready'));
   notify('');
   try {
+    // Selecting one row opens exactly that photograph as its own inspection.
+    // Selecting several is done by adding photos, not by clicking rows, so
+    // there is no ambiguous multi-select state to explain here.
     applyWorkspace(await post('/api/captures/select', { captureId: captureId }));
     renderWorkspace();
     const inspected = state.view !== null && state.view.outcome !== 'PENDING';
-    setLamp('ready', 'Capture selected - inspect when ready');
+    setLamp('ready', t('imgs.ready'));
     setStatus(
-      inspected
-        ? 'Restored the last inspection of this capture. Inspect again for a fresh reading.'
-        : 'Capture selected. Press Inspect reality to analyse it.',
+      inspected ? t('imgs.restored') : t('imgs.selected'),
       null
     );
-    notify(inspected ? 'Capture selected; showing its last inspection.' : 'Capture selected.', 'good');
+    notify(inspected ? t('imgs.restoredShort') : t('imgs.selectedShort'), 'good');
   } catch (error) {
-    setLamp('problem', 'Capture could not be selected');
+    setLamp('problem', t('imgs.selectFailed'));
     notify(error.message, 'bad');
   }
 }
 
-async function uploadFile(file) {
-  if (!file) return;
+/**
+ * Upload one or more photographs into the OPEN inspection.
+ *
+ * Sequential, and the status line says so, because that is literally what
+ * happens: each file is its own request and its own vision call later. A
+ * multi-file picker that silently took files[0] is the defect this replaces.
+ */
+async function uploadFiles(files) {
+  if (!files || files.length === 0) return;
+  const list = Array.prototype.slice.call(files);
   const error = $('drop-error');
   error.hidden = true;
 
-  setLamp('working', 'Reading capture');
-  try {
-    const body = await fetch(
-      '/api/upload?name=' + encodeURIComponent(file.name) + '&type=' + encodeURIComponent(file.type),
-      { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }
-    );
-    const payload = await body.json();
-    if (!body.ok) {
-      error.textContent = payload.message || payload.error || 'That file could not be read.';
-      error.hidden = false;
-      setLamp('problem', 'Capture rejected');
-      return;
-    }
+  let accepted = 0;
+  let refused = 0;
+  let lastPayload = null;
 
-    applyWorkspace(payload);
-    showLoaded(payload.capture.label);
-    renderFixtures();
-    notify('Capture added to ' + (state.project ? state.project.name : 'this project') + '. Inspect it when ready.', 'good');
-    setLamp('ready', 'Capture loaded - inspect when ready');
-    renderAll();
-  } catch (uploadError) {
-    error.textContent = uploadError.message;
-    error.hidden = false;
-    setLamp('problem', 'Capture rejected');
+  for (let i = 0; i < list.length; i++) {
+    const file = list[i];
+    setLamp('working', fillText(t('imgs.reading'), { index: i + 1, total: list.length }));
+    setStatus(fillText(t('imgs.reading'), { index: i + 1, total: list.length }), null);
+    try {
+      const body = await fetch(
+        '/api/upload?name=' + encodeURIComponent(file.name) + '&type=' + encodeURIComponent(file.type),
+        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }
+      );
+      const payload = await body.json();
+      if (!body.ok) {
+        refused += 1;
+        error.textContent = payload.message || payload.error || t('imgs.readFailed');
+        error.hidden = false;
+        setLamp('problem', t('imgs.rejected'));
+        continue;
+      }
+      applyWorkspace(payload);
+      lastPayload = payload;
+      accepted += 1;
+      renderFixtures();
+      renderAll();
+    } catch (uploadError) {
+      refused += 1;
+      error.textContent = uploadError.message;
+      error.hidden = false;
+      setLamp('problem', t('imgs.rejected'));
+    }
   }
+
+  if (accepted === 0) return;
+  renderAll();
+  setLamp('ready', fillText(t('imgs.loaded'), { count: state.captureIds.length }));
+  if (lastPayload !== null) {
+    showLoaded(lastPayload.capture ? lastPayload.capture.label : '');
+  }
+  // Duplicates are reported by the server, so the operator learns that two of
+  // their three photographs were the same frame rather than wondering why only
+  // two were analysed.
+  const duplicates = state.duplicateCaptureIds || [];
+  if (duplicates.length > 0) {
+    notify(fillText(t('imgs.duplicates'), { count: duplicates.length, total: accepted + duplicates.length }), 'bad');
+  } else if (refused > 0) {
+    notify(fillText(t('imgs.partial'), { accepted, refused }), 'bad');
+  } else {
+    notify(fillText(t('imgs.added'), {
+      count: state.captureIds.length,
+      project: state.project ? state.project.name : '',
+    }), 'good');
+  }
+}
+
+async function uploadFile(file) {
+  return uploadFiles(file === undefined ? [] : [file]);
 }
 
 /**
@@ -1604,30 +2045,31 @@ async function runInspection() {
   if (runButton) runButton.disabled = true;
 
   const cached = $('cache-toggle').checked;
-  setLamp('working', 'ANALYZING REALITY');
-  setStatus(
-    'ANALYZING REALITY - MiniCPM is reading the capture, then the comparison is computed in code, '
-    + 'then Nemotron reasons about the result. Two real model calls; this takes some seconds.',
-    'working'
-  );
-  notify('Inspection running: real vision inference, deterministic comparison, then Nemotron reasoning.');
+  // The whole open group is the run target. One inspection over N photographs.
+  const photos = state.captureIds.length > 0 ? state.captureIds.slice() : [];
+  if (photos.length === 0) {
+    state.running = false;
+    if (runButton) runButton.disabled = false;
+    setLamp('problem', t('imgs.noneOpen'));
+    notify(t('imgs.noneOpen'), 'bad');
+    return;
+  }
+
+  setLamp('working', t('run.working'));
+  setStatus(fillText(t('run.brief'), { count: photos.length }), 'working');
+  notify(fillText(t('run.notify'), { count: photos.length }));
 
   // An honest elapsed clock. NOT a fake progress bar: there is no way to know
-  // how far through a vision call we are, so the UI must not invent one.
+  // how far through a vision call we are, so the UI must not invent one. The
+  // counts in the message are real: N vision calls, then one reasoning call.
   const startedAt = Date.now();
   const tick = setInterval(() => {
     const secs = Math.round((Date.now() - startedAt) / 1000);
-    setStatus(
-      'RUNNING - ' + secs + 's elapsed. Vision, then comparison, then Nemotron reasoning. '
-      + 'There is no per-stage progress signal to show, only elapsed time.',
-      'working',
-    );
+    setStatus(fillText(t('run.elapsed'), { secs, count: photos.length }), 'working');
   }, 1000);
 
   try {
-    state.view = state.currentCaptureId !== null
-      ? await post('/api/run', { captureId: state.currentCaptureId, cache: cached })
-      : await post('/api/run', { cache: cached });
+    state.view = await post('/api/run', { captureIds: photos, cache: cached });
 
     const view = state.view;
     state.activeId = null;
@@ -1639,39 +2081,60 @@ async function runInspection() {
       // State the provenance of the result explicitly. "Complete" alone would
       // be ambiguous between a live call, a cache hit and a fixture.
       const how = origin === 'CACHED'
-        ? 'CACHED AI RESULT (previous inference)'
+        ? t('origin.cached')
         : origin === 'DEMO_FIXTURE'
-          ? 'DEMO FIXTURE'
-          : 'FRESH AI INFERENCE';
-      setLamp('done', 'FINDINGS READY - awaiting human review');
+          ? t('origin.fixture')
+          : t('origin.fresh');
+      setLamp('done', t('run.readyLamp'));
       setStatus(
-        how + ' complete in ' + took + 's. ' + view.inspectionFindings.length
-        + ' finding(s), all UNVERIFIED and awaiting a named human decision.',
+        fillText(t('run.done'), { how, secs: Math.round((Date.now() - startedAt) / 1000), findings: view.inspectionFindings.length }),
         'good',
       );
 
       // Report BOTH stages, and say plainly if one of them produced nothing. A
       // silent reasoning failure here would leave the judge believing Nemotron
       // contributed when it did not.
+      // Truthfulness about partial failure comes BEFORE the pleasant summary.
+      // An inspection over 3 photos where 1 failed is not a clean pass, and the
+      // operator must hear which photograph was skipped and why.
+      const failedImages = Array.isArray(view.images)
+        ? view.images.filter((image) => image.status === 'FAILED')
+        : [];
+      const analysedImages = Array.isArray(view.images)
+        ? view.images.filter((image) => image.status !== 'FAILED')
+        : [];
+      if (failedImages.length > 0) {
+        setLamp('problem', t('run.partialLamp'));
+        notify(fillText(t('run.partial'), {
+          analysed: analysedImages.length,
+          failed: failedImages.length,
+          names: failedImages.map((image) => image.captureLabel).join(', '),
+        }), 'bad');
+      }
+
       const reasoning = view.reasoning;
       if (reasoning !== undefined && reasoning !== null) {
         if (reasoning.status === 'AVAILABLE') {
           notify(
-            how + ': ' + view.brief.overall.replace(/_/g, ' ') + '. '
-            + 'Nemotron reasoning: ' + reasoning.reasoning.certainty.replace(/_/g, ' ').toLowerCase()
-            + '. Nothing is verified yet.',
-            'good'
+            fillText(t('run.withReasoning'), {
+              how,
+              overall: view.brief.overall.replace(/_/g, ' '),
+              certainty: reasoning.reasoning.certainty.replace(/_/g, ' ').toLowerCase(),
+            }),
+            failedImages.length > 0 ? 'bad' : 'good'
           );
         } else {
           notify(
-            how + ': ' + view.brief.overall.replace(/_/g, ' ') + '. '
-            + 'CONSTRUCTION REASONING UNAVAILABLE (' + (reasoning.failureKind || 'not run') + ') - '
-            + 'the comparison below is unaffected and nothing has been invented in its place.',
-            'good'
+            fillText(t('run.noReasoning'), {
+              how,
+              overall: view.brief.overall.replace(/_/g, ' '),
+              kind: reasoning.failureKind || 'not run',
+            }),
+            failedImages.length > 0 ? 'bad' : 'good'
           );
         }
       } else {
-        notify(how + ': ' + view.brief.overall.replace(/_/g, ' ') + '. Nothing is verified yet.', 'good');
+        notify(fillText(t('run.plainDone'), { how, overall: view.brief.overall.replace(/_/g, ' ') }), failedImages.length > 0 ? 'bad' : 'good');
       }
 
       // only move on to the evidence stage once the inspection really completed
@@ -1715,21 +2178,19 @@ async function runInspection() {
  * rather than one generic "something went wrong".
  */
 function describeFailure(kind, message) {
+  // Routed through the catalog by failure kind, so a failure notice speaks the
+  // operator's language. An unrecognised kind falls through to the raw message
+  // rather than being invented into a sentence that never happened.
   switch (kind) {
     case 'TIMEOUT':
-      return 'AI provider timed out. The model did not answer in time; no result was produced.';
     case 'UNAVAILABLE':
-      return 'Could not reach the AI provider (network or server error). No result was produced.';
     case 'AUTHENTICATION':
-      return 'AI provider rejected the credential (authentication failed). Check NEBIUS_API_KEY.';
     case 'RATE_LIMITED':
-      return 'AI provider rate-limited this request. Wait a moment and run again.';
     case 'NOT_CONFIGURED':
-      return 'No AI provider is configured, so no inspection was performed.';
     case 'MALFORMED_RESPONSE':
-      return 'AI model returned an invalid response that could not be parsed.';
+      return t('fail.' + kind.toLowerCase());
     default:
-      return 'AI provider error (' + kind + '): ' + message;
+      return t('fail.error') + ' (' + kind + '): ' + message;
   }
 }
 
@@ -2063,7 +2524,51 @@ function reportBootFailure(error) {
   notify(what, 'bad');
 }
 
+/**
+ * The inspection-language control.
+ *
+ * Populated from the server's own vocabulary, labelled by endonym, and
+ * keyboard-operable as a native <select>. No flags: a flag names a country, and
+ * one flag cannot express four languages.
+ *
+ * On change: remember the preference, re-render, and stop. There is no request
+ * here and there must never be one. Every language of this inspection already
+ * arrived with the payload, so switching cannot re-run MiniCPM, cannot re-run
+ * Nemotron, cannot touch Nebius, and cannot alter a single canonical fact.
+ */
+function wireLanguage() {
+  const select = $('lang-select');
+  if (select === null) return;
+
+  state.lang = readStoredLanguage();
+
+  while (select.firstChild) select.removeChild(select.firstChild);
+  for (const option of I18N.languages) {
+    // Each option carries its own lang/dir so a screen reader and the native
+    // picker both announce the language correctly inside an RTL list.
+    const node = document.createElement('option');
+    node.value = option.code;
+    node.textContent = option.label;
+    node.setAttribute('lang', option.bcp47);
+    node.setAttribute('dir', option.dir);
+    select.appendChild(node);
+  }
+  select.value = state.lang;
+
+  select.addEventListener('change', (event) => {
+    const chosen = event.target.value;
+    const match = I18N.languages.filter((l) => l.code === chosen)[0];
+    // An unsupported value falls back to English rather than rendering a
+    // half-translated surface.
+    state.lang = match === undefined ? I18N.defaultLanguage : match.code;
+    storeLanguage(state.lang);
+    // Presentation only: no request, deliberately.
+    renderAll();
+  });
+}
+
 function wire() {
+  wireLanguage();
   $('proj-btn').addEventListener('click', () => setMenu($('proj-menu').hidden));
   $('proj-new').addEventListener('click', () => { setMenu(false); openProjectModal('create'); });
   $('proj-rename').addEventListener('click', () => { setMenu(false); openProjectModal('rename'); });
@@ -2111,7 +2616,13 @@ function wire() {
     event.stopPropagation();
     $('file').click();
   });
-  $('file').addEventListener('change', (event) => uploadFile(event.target.files[0]));
+  // The WHOLE picked list is uploaded, not just the first entry.
+  $('file').addEventListener('change', (event) => {
+    const picked = event.target.files;
+    uploadFiles(picked);
+    // Reset so re-picking the same file fires 'change' again.
+    event.target.value = '';
+  });
   $('replace').addEventListener('click', () => $('file').click());
   $('remove').addEventListener('click', () => {
     const capture = state.captures.filter((c) => c.id === state.currentCaptureId)[0];
@@ -2137,7 +2648,12 @@ function wire() {
       drop.dataset.over = 'false';
     });
   });
-  drop.addEventListener('drop', (event) => uploadFile(event.dataTransfer.files[0]));
+  drop.addEventListener('drop', (event) => {
+    if (event.dataTransfer) {
+      event.preventDefault();
+      uploadFiles(event.dataTransfer.files);
+    }
+  });
 
   $('expected-apply').addEventListener('click', () => {
     // Apply whatever is currently in the editor: an edited count, or the

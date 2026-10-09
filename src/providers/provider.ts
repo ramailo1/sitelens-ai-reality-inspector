@@ -17,6 +17,11 @@ export interface InspectionImage {
   readonly mediaType: string;
   /** Stable identifier of the capture this image came from. */
   readonly captureId: string;
+  /**
+   * Human-readable label of the capture, carried so every observation can name
+   * the photograph it came from. Provenance only: never sent to the model.
+   */
+  readonly captureLabel?: string | undefined;
 }
 
 export interface InspectRequest {

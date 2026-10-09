@@ -88,6 +88,14 @@ export interface ObservationEvidence {
 export interface AIObservation {
   readonly id: string;
   readonly captureId: string;
+  /**
+   * Human-readable label of the photograph this observation came from.
+   *
+   * Carried on the observation itself so the reasoning prompt can attribute
+   * evidence to a frame without resolving ids back to captures at the last
+   * moment. Equal to the capture's own label for a single photograph.
+   */
+  readonly captureLabel: string;
   /** Optional project/zone scoping, when the caller supplies tenancy. */
   readonly projectId: string | null;
   readonly zoneId: string | null;

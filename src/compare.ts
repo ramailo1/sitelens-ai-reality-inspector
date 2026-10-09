@@ -24,6 +24,9 @@ import type {
   ExpectedState,
 } from './types/inspection.ts';
 import { elementLabel } from './types/inspection.ts';
+import type { ComparisonSource } from './multi-image.ts';
+import { describeDisagreement, reconcileReading } from './multi-image.ts';
+import type { ImageDetections } from './multi-image.ts';
 
 export interface CompareOptions {
   /** Overridable for tests; defaults to a deterministic id per expected item. */
@@ -64,6 +67,19 @@ function observedTextFor(item: ExpectedItem, detection: DetectedElement | null):
 }
 
 /**
+ * The multi-image extension of CompareOptions.
+ *
+ * `sources` carries the per-image readings already reconciled into this row. When
+ * present, `multi-image.ts` has decided `detection`, `detectionReported` and
+ * the status inputs, and this module's job is only to record who contributed.
+ * When absent, the single-image path runs completely unchanged.
+ */
+export interface MultiImageCompareOptions extends CompareOptions {
+  readonly sources?: readonly ComparisonSource[];
+  readonly countDisputed?: boolean;
+}
+
+/**
  * Compare ONE expected item against ONE detected element.
  *
  * `detection` is the element the model reported for the same kind, or null when
@@ -74,7 +90,7 @@ function observedTextFor(item: ExpectedItem, detection: DetectedElement | null):
 export function compareItem(
   item: ExpectedItem,
   detection: DetectedElement | null,
-  options: CompareOptions = {},
+  options: MultiImageCompareOptions = {},
 ): ComparisonRow {
   // Deterministic id derived from the expected item, NOT a random uuid. A row
   // that changed identity on every re-render would orphan any human review
@@ -159,6 +175,12 @@ export function compareItem(
     boundingBox,
     detectionReported,
     difference,
+    // Empty on the single-image path: one image attributes itself through
+    // `captureId` and needs no list.
+    sourceCaptureIds: options.sources === undefined
+      ? []
+      : options.sources.map((s) => s.captureId),
+    countDisputed: options.countDisputed === true,
   };
 }
 
@@ -183,6 +205,97 @@ export function compareExpectedState(
   }
 
   return expected.items.map((item) => compareItem(item, best.get(item.element) ?? null, options));
+}
+
+/**
+ * Compare an expected state against SEVERAL photographs at once.
+ *
+ * This is the consolidated path. It reconciles each element kind across all
+ * images first (see multi-image.ts for why images are never summed), then runs
+ * the SAME comparison rules per row. So a consolidated inspection and a
+ * single-image inspection reach their verdicts by identical arithmetic.
+ *
+ * `images` must carry the per-image readings produced by the real vision calls.
+ * With one image this produces the same rows as `compareExpectedState`.
+ */
+export function compareAcrossImages(
+  expected: ExpectedState,
+  images: readonly ImageDetections[],
+  options: CompareOptions = {},
+): ComparisonRow[] {
+  const reconciled = new Map<string, ReturnType<typeof reconcileReading>>();
+  for (const item of expected.items) {
+    reconciled.set(item.element, reconcileReading(item.element, images));
+  }
+
+  return expected.items.map((item) => {
+    const reading = reconciled.get(item.element)!;
+
+    if (item.expectation === 'COUNT' && reading.disputed) {
+      // Photographs genuinely disagree, so neither does the group.
+      // compareItem(null) already yields UNDETERMINED with an honest
+      // "not determinable" observation; the difference is then replaced with the
+      // actual readings, so the operator sees WHICH photographs disagree rather
+      // than a bare unknown.
+      const row = compareItem(item, null, {
+        ...options,
+        sources: reading.sources,
+        countDisputed: true,
+      });
+      return {
+        ...row,
+        difference: describeDisagreement(reading, images),
+        // The highest-confidence sighting is still real evidence for presence,
+        // so its box is kept for the overlay even though the count is disputed.
+        confidence: reading.confidence,
+      };
+    }
+
+    // Not disputed: reconcile to the single best reading so the existing rules
+    // apply unchanged. A disputed reading above bypasses those rules on purpose,
+    // because applying a COUNT rule to a number nobody photographed is the exact
+    // fabrication this product refuses.
+    const best = pickRepresentative(item.element, images, reading);
+    const row = compareItem(item, best, {
+      ...options,
+      sources: reading.sources,
+      countDisputed: false,
+    });
+    return row;
+  });
+}
+
+/**
+ * The detection the single-image rules should evaluate.
+ *
+ * When every image that counted agreed, that agreed count is represented by the
+ * highest-confidence image that reported it, so `compareItem`'s COUNT arithmetic
+ * produces the right verdict. When nothing was counted, the highest-confidence
+ * sighting stands and the count stays null, which the COUNT rules already treat
+ * as UNDETERMINED.
+ */
+function pickRepresentative(
+  element: string,
+  images: readonly ImageDetections[],
+  reading: ReturnType<typeof reconcileReading>,
+): DetectedElement | null {
+  let best: DetectedElement | null = null;
+  for (const image of images) {
+    for (const detection of image.detections) {
+      if (detection.element !== element) continue;
+      if (reading.count !== null && detection.count !== reading.count) continue;
+      if (best === null || detection.confidence > best.confidence) best = detection;
+    }
+  }
+  if (best !== null) return best;
+  // No detection at all, but images reported an explicit absence.
+  for (const image of images) {
+    for (const detection of image.detections) {
+      if (detection.element !== element) continue;
+      if (best === null || detection.confidence > best.confidence) best = detection;
+    }
+  }
+  return best;
 }
 
 /** Roll comparison rows up into the counters the right-hand panel shows. */

@@ -12,7 +12,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createProvider, createReasoner, ProviderError } from './providers/factory.ts';
 import { InspectionSession } from './session.ts';
 import type { SessionView } from './session.ts';
-import { ProjectStore, formatReviewer } from './projects.ts';
+import { ProjectStore, formatReviewer, groupKey } from './projects.ts';
 import type { ProjectCapture } from './projects.ts';
 import type { AIProvider } from './providers/provider.ts';
 import { acceptCapture, MAX_CAPTURE_BYTES } from './upload.ts';
@@ -27,6 +27,31 @@ import type { ExpectedState } from './types/inspection.ts';
 import { ELEMENT_KINDS, EXPECTATIONS } from './types/inspection.ts';
 
 const LOOPBACK = '127.0.0.1';
+
+/**
+ * Ceiling on one consolidated inspection.
+ *
+ * Bounded because each photograph costs one real vision call, and an unbounded
+ * list would be a way to spend a provider budget by accident. Twelve is well
+ * above the realistic number of frames a site team shoots of one zone, and the
+ * limit is reported rather than silently truncating a selection.
+ */
+export const MAX_INSPECTION_IMAGES = 12;
+
+/**
+ * Append a capture to a pending selection, or null when the ceiling is reached.
+ *
+ * Null is a distinct return rather than a truncated list, because a silently
+ * shortened selection would inspect fewer photographs than the operator chose
+ * without saying so — the exact class of failure this product exists to prevent.
+ */
+function addToSelection(current: readonly string[], captureId: string): string[] | null {
+  const next = current.slice();
+  if (next.includes(captureId)) return next;
+  if (next.length >= MAX_INSPECTION_IMAGES) return null;
+  next.push(captureId);
+  return next;
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -231,6 +256,13 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       projects: store.list(),
       activeProjectId: project?.id ?? null,
       activeCaptureId: store.selectedCaptureId(),
+      // The ordered photographs of the OPEN inspection. The client renders this
+      // as one group rather than as N separate inspections.
+      activeCaptureIds: store.selectedCaptureIds(),
+      // Photographs the last selection REFUSED as byte-identical duplicates.
+      // Reported rather than dropped silently: "2 of 3 photographs inspected"
+      // must never be shown as "3 photographs inspected".
+      duplicateCaptureIds: store.refusedDuplicateIds(),
       captures: captures.map((c) => captureSummary(c)),
       reference: reference === null ? null : {
         presetId: reference.presetId,
@@ -423,18 +455,35 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
      */
     if (req.method === 'POST' && path === '/api/captures/select') {
       const body = await readJsonBody(req);
-      let payload: { captureId?: unknown } = {};
+      let payload: { captureId?: unknown; captureIds?: unknown } = {};
       try {
-        payload = JSON.parse(body) as { captureId?: unknown };
+        payload = JSON.parse(body) as { captureId?: unknown; captureIds?: unknown };
       } catch {
         sendJson(res, 400, { error: 'invalid JSON body' });
         return;
       }
-      if (typeof payload.captureId !== 'string' || payload.captureId.length === 0) {
+      // Accepts one id (the historical shape) or an ordered list for a
+      // consolidated inspection. Both go through the same ownership check, so a
+      // capture from another project is refused rather than inspected.
+      const requested: string[] = Array.isArray(payload.captureIds)
+        ? payload.captureIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : typeof payload.captureId === 'string' && payload.captureId.length > 0
+          ? [payload.captureId]
+          : [];
+      if (requested.length === 0) {
         sendJson(res, 400, { error: 'captureId is required' });
         return;
       }
-      const selected = store.selectCapture(payload.captureId);
+      if (requested.length > MAX_INSPECTION_IMAGES) {
+        sendJson(res, 400, {
+          error: 'TOO_MANY_IMAGES',
+          message:
+            `An inspection covers at most ${MAX_INSPECTION_IMAGES} photographs. `
+            + `Remove ${requested.length - MAX_INSPECTION_IMAGES} and try again.`,
+        });
+        return;
+      }
+      const selected = store.selectCaptureGroup(requested);
       if (!selected.ok) {
         sendJson(res, selected.reason === 'NOT_OWNED' ? 403 : 404, {
           error: selected.reason,
@@ -637,7 +686,19 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         exifOrientation: imported.capture.exifOrientation,
         geometryNormalized: imported.capture.geometryNormalized,
       });
-      store.selectCapture(stored.id);
+      // ADD to the pending selection, for the same reason as an upload: importing
+      // three dataset photographs must leave three selected for one inspection.
+      const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
+      if (withNew === null) {
+        sendJson(res, 400, {
+          error: 'TOO_MANY_IMAGES',
+          message:
+            `This inspection already holds ${store.selectedCaptureIds().length} photographs, `
+            + `which is the maximum of ${MAX_INSPECTION_IMAGES}. Remove one before adding another.`,
+        });
+        return;
+      }
+      store.selectCaptureGroup(withNew);
       sendJson(res, 200, { capture: captureSummary(stored), ...workspace() });
       return;
     }
@@ -665,14 +726,27 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       const raw = await readJsonBody(req);
       if (raw.trim().length > 0) {
         try {
-          const parsed = JSON.parse(raw) as { captureId?: unknown; cache?: unknown };
+          const parsed = JSON.parse(raw) as { captureId?: unknown; captureIds?: unknown; cache?: unknown };
           // Caching is opt-in per request AND gated by the server switch, so a
           // cached answer can never be served without the UI asking for it.
           if (typeof parsed.cache === 'boolean') cacheEnabled = parsed.cache;
-          if (typeof parsed.captureId === 'string') {
-            // Ownership is validated here, so a capture id from another project
-            // is refused rather than quietly inspected.
-            const selected = store.selectCapture(parsed.captureId);
+          // An explicit group re-selects it; otherwise the run targets whatever
+          // is already selected. Ownership is validated here either way, so a
+          // capture id from another project is refused rather than inspected.
+          const requested: string[] = Array.isArray(parsed.captureIds)
+            ? parsed.captureIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+            : typeof parsed.captureId === 'string' ? [parsed.captureId] : [];
+          if (requested.length > MAX_INSPECTION_IMAGES) {
+            sendJson(res, 400, {
+              error: 'TOO_MANY_IMAGES',
+              message:
+                `An inspection covers at most ${MAX_INSPECTION_IMAGES} photographs. `
+                + `Remove ${requested.length - MAX_INSPECTION_IMAGES} and try again.`,
+            });
+            return;
+          }
+          if (requested.length > 0) {
+            const selected = store.selectCaptureGroup(requested);
             if (!selected.ok) {
               sendJson(res, selected.reason === 'NOT_OWNED' ? 403 : 404, {
                 error: selected.reason,
@@ -693,8 +767,10 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       }
       const view = await session.run({ useCache: cacheEnabled });
       // Written only after a run that produced a usable result, so a failed or
-      // empty inspection never becomes the record a restart restores.
-      store.persistInspection(session.view().provenance.captureId);
+      // empty inspection never becomes the record a restart restores. Keyed by
+      // the group key, so a consolidated inspection persists under the identity
+      // it will be restored with.
+      store.persistInspection(groupKey(store.selectedCaptures()));
       sendJson(res, 200, view);
       return;
     }
@@ -734,9 +810,9 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: result.reason, message: result.message });
         return;
       }
-      // The upload is owned by the active project and selected immediately, so
-      // the operator can inspect it without a second step. Its session is fresh,
-      // which is what stops one image's observations appearing against another.
+// The upload is owned by the active project and selected immediately, so
+        // the operator can inspect it without a second step. Its session is fresh,
+        // which is what stops one image's observations appearing against another.
       // Orientation is normalized before storage, so the model, the display and
       // the evidence overlay all work in one coordinate system.
       const stored = store.addCapture({
@@ -744,7 +820,20 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         bytes: normalizeOrientation(result.capture.bytes),
         source: 'UPLOAD',
       });
-      store.selectCapture(stored.id);
+      // ADD to the pending selection rather than replacing it. Uploading three
+      // photographs in a row must leave three selected for ONE inspection, which
+      // is the whole point; replacing here is what made multi-select impossible.
+const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
+      if (withNew === null) {
+        sendJson(res, 400, {
+          error: 'TOO_MANY_IMAGES',
+          message:
+            `This inspection already holds ${store.selectedCaptureIds().length} photographs, `
+            + `which is the maximum of ${MAX_INSPECTION_IMAGES}. Remove one before adding another.`,
+        });
+        return;
+      }
+      store.selectCaptureGroup(withNew);
       sendJson(res, 200, { capture: captureSummary(stored), ...workspace() });
       return;
     }
@@ -792,7 +881,9 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         });
       // A human decision is the most valuable thing in the product, so it is
       // written through immediately rather than waiting for the next run.
-      if (reviewed.provenance.captureId !== null) store.persistInspection(reviewed.provenance.captureId);
+      // Keyed by the group, so a consolidated inspection's reviews are stored against
+    // the same identity the inspection restores under.
+    store.persistInspection(groupKey(store.selectedCaptures()));
       sendJson(res, 200, reviewed);
       return;
     }
@@ -838,7 +929,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
           reviewer: reviewerName,
           note: typeof note === 'string' ? note : null,
         });
-      if (settled.provenance.captureId !== null) store.persistInspection(settled.provenance.captureId);
+      store.persistInspection(groupKey(store.selectedCaptures()));
       sendJson(res, 200, settled);
       return;
     }

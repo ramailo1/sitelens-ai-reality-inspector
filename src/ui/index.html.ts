@@ -215,7 +215,7 @@ export const INDEX_HTML = `<!doctype html>
       <div class="split-l">
         <div class="drop" id="drop" tabindex="0" role="button"
              aria-label="Drop a PNG or JPEG capture here, or press Enter to choose a file">
-          <input type="file" id="file" accept="image/png,image/jpeg" hidden>
+          <input type="file" id="file" accept="image/png,image/jpeg" multiple hidden>
           <div class="drop-inner">
             <span class="drop-mark" aria-hidden="true"></span>
             <p class="drop-title">Drop capture here</p>
@@ -225,6 +225,23 @@ export const INDEX_HTML = `<!doctype html>
           </div>
         </div>
 
+        <!--
+          The photographs of the OPEN inspection.
+
+          This is one inspection, not several. The count is stated so the
+          operator can see what they are about to inspect, and each photograph
+          can be removed individually. Truth over convenience: a photograph that
+          failed is shown as failed rather than dropped from the strip.
+        -->
+        <section class="imgs" id="imgs" aria-labelledby="imgs-h" hidden>
+          <div class="imgs-head">
+            <span class="imgs-h" id="imgs-h" data-i18n="imgs.head">Inspection photos</span>
+            <span class="imgs-n" id="imgs-n"></span>
+          </div>
+          <ul class="imgs-list" id="imgs-list"></ul>
+          <p class="imgs-note" id="imgs-note"></p>
+        </section>
+
         <p class="note note-bad" id="drop-error" role="alert" hidden></p>
 
         <div class="loaded" id="loaded" hidden>
@@ -233,9 +250,9 @@ export const INDEX_HTML = `<!doctype html>
             <div class="sheet-overlay" id="overlay-capture"></div>
           </div>
           <div class="loaded-acts">
-            <button type="button" class="btn btn-ghost" id="replace">Replace</button>
-            <button type="button" class="btn btn-ghost" id="remove">Remove</button>
-            <button type="button" class="btn btn-red" id="run">Inspect reality</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="replace" data-i18n="imgs.addMore">Add photos</button>
+            <button type="button" class="btn btn-ghost btn-xs" id="remove" data-i18n="imgs.remove">Remove</button>
+            <button type="button" class="btn btn-red" id="run" data-i18n="imgs.inspect">Inspect reality</button>
           </div>
           <details class="storage">
             <summary>Storage &amp; persistence</summary>
@@ -320,19 +337,34 @@ export const INDEX_HTML = `<!doctype html>
   </section>
 
 
-  <section class="bay bay-run" id="bay-inspect" role="tabpanel"
-           data-bay="inspect" aria-labelledby="tab-inspect">
+  <section class="bay bay-run i18n-surface" id="bay-inspect" role="tabpanel"
+           data-bay="inspect" aria-labelledby="tab-inspect" lang="en" dir="ltr">
     <div class="bay-head">
-      <h2 class="bay-h">Inspection</h2>
-      <p class="bay-sub" id="run-sub">The model has not been asked anything yet.</p>
+      <h2 class="bay-h" data-i18n="panel.inspection">Inspection</h2>
+      <p class="bay-sub" id="run-sub" data-i18n="intro.pending">The model has not been asked anything yet.</p>
+      <!--
+        Inspection language.
+
+        A presentation control, not a second inspection. Switching it re-renders
+        the SAME findings in another language: no request, no model call, and no
+        change to the inspection, its evidence or its provenance. The surface
+        that flips to RTL is the result surface below, not the whole instrument.
+      -->
+      <div class="langbar" dir="ltr">
+        <label class="lang-k" id="lang-label" for="lang-select" data-i18n="lang.label">Inspection language</label>
+        <select class="lang-select" id="lang-select"
+                aria-describedby="lang-note" aria-labelledby="lang-label"></select>
+        <span class="lang-note" id="lang-note"></span>
+      </div>
     </div>
 
-    <div class="status" id="status" role="status" aria-live="polite">Capture a site image, then run the inspection.</div>
+    <div class="status" id="status" role="status" aria-live="polite"
+         data-i18n="intro.idle">Capture a site image, then run the inspection.</div>
 
     <div class="grid-2">
       <div class="panel">
         <div class="panel-head">
-          <h3 class="panel-h">Reality brief</h3>
+          <h3 class="panel-h" data-i18n="panel.realityBrief">Reality brief</h3>
           <span class="tag" id="brief-verdict">-</span>
         </div>
         <div id="brief"></div>
@@ -340,32 +372,51 @@ export const INDEX_HTML = `<!doctype html>
 
       <div class="panel">
         <div class="panel-head">
-          <h3 class="panel-h">Inspection priorities</h3>
-          <span class="tag">WHERE TO LOOK</span>
+          <h3 class="panel-h" data-i18n="panel.priorities">Inspection priorities</h3>
+          <span class="tag" data-i18n="panel.whereToLook">WHERE TO LOOK</span>
         </div>
-        <p class="panel-sub">
+        <p class="panel-sub" data-i18n="panel.prioritiesHint">
           Where your inspector should look first. These are not verdicts.
         </p>
         <ol class="prio-list" id="priorities"></ol>
       </div>
     </div>
 
-    <div class="panel">
-      <div class="panel-head"><h3 class="panel-h">Provenance</h3></div>
-      <dl class="tape tape-wide" id="provenance"></dl>
-      <p class="elig" id="eligibility"></p>
-      <p class="elig" id="pipeline-eligibility"></p>
+<div class="panel">
+          <div class="panel-head">
+            <h3 class="panel-h" data-i18n="panel.provenance">Provenance</h3>
+            <span class="tag" id="basis-n" data-i18n="imgs.count">1 photograph</span>
+          </div>
+          <ul class="basis" id="basis-list"></ul>
+          <dl class="tape tape-wide" id="provenance"></dl>
       <p class="geom" id="geometry-note" hidden></p>
+      <!--
+        The NVIDIA verdict, and the two model stages behind it.
+
+        The verdict is the headline because it answers the question a judge
+        actually asks. The per-stage rows underneath are subordinate: the vision
+        model is genuinely not an NVIDIA model, and this panel says so, but it
+        never lets that fact stand in for the run's overall qualification.
+      -->
+      <section class="qual" id="qualification" aria-labelledby="qual-h"
+               data-requirement="UNKNOWN" hidden>
+        <div class="qual-head">
+          <span class="qual-k" id="qual-h" data-i18n="panel.nvidiaRequirement">NVIDIA requirement</span>
+          <span class="qual-verdict" id="qual-verdict">-</span>
+        </div>
+        <p class="qual-path" id="qual-path"></p>
+        <ol class="qual-stages" id="qual-stages"></ol>
+      </section>
       <div id="failures"></div>
     </div>
   </section>
 
 
-  <section class="bay bay-obs" id="bay-evidence" role="tabpanel"
-           data-bay="evidence" aria-labelledby="tab-evidence">
+  <section class="bay bay-obs i18n-surface" id="bay-evidence" role="tabpanel"
+           data-bay="evidence" aria-labelledby="tab-evidence" lang="en" dir="ltr">
     <div class="bay-head">
-      <h2 class="bay-h">Reality and evidence</h2>
-      <p class="bay-sub">Select a finding to highlight where on the site it was flagged.</p>
+      <h2 class="bay-h" data-i18n="panel.realityEvidence">Reality and evidence</h2>
+      <p class="bay-sub" data-i18n="panel.evidenceHint">Select a finding to highlight where on the site it was flagged.</p>
     </div>
 
     <div class="stage-grid">
@@ -375,32 +426,32 @@ export const INDEX_HTML = `<!doctype html>
           <div class="sheet-overlay" id="overlay"></div>
           <div class="sheet-cal" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         </div>
-        <p class="stage-cap" id="stage-cap">No capture loaded.</p>
+        <p class="stage-cap" id="stage-cap" data-i18n="stage.noCapture">No capture loaded.</p>
       </div>
 
       <aside class="stage-r" aria-label="Inspection summary">
         <div class="rail">
-          <p class="rail-h">REALITY</p>
+          <p class="rail-h" data-i18n="rail.reality">REALITY</p>
           <p class="rail-v" id="rail-elements">-</p>
-          <p class="rail-n">elements detected</p>
+          <p class="rail-n" data-i18n="rail.elementsDetected">elements detected</p>
         </div>
         <div class="rail">
-          <p class="rail-h">INSPECTION</p>
+          <p class="rail-h" data-i18n="rail.inspection">INSPECTION</p>
           <p class="rail-v" id="rail-attention">-</p>
-          <p class="rail-n">attention areas</p>
+          <p class="rail-n" data-i18n="rail.attentionAreas">attention areas</p>
         </div>
         <div class="rail">
-          <p class="rail-h">FINDINGS</p>
+          <p class="rail-h" data-i18n="rail.findings">FINDINGS</p>
           <p class="rail-v" id="rail-findings">-</p>
-          <p class="rail-n" id="rail-findings-n">awaiting review</p>
+          <p class="rail-n" id="rail-findings-n" data-i18n="rail.awaitingReview">awaiting review</p>
         </div>
         <div class="rail">
-          <p class="rail-h">CONFIDENCE</p>
+          <p class="rail-h" data-i18n="rail.confidence">CONFIDENCE</p>
           <p class="rail-v" id="rail-confidence">-</p>
-          <p class="rail-n">highest finding</p>
+          <p class="rail-n" data-i18n="rail.highestFinding">highest finding</p>
         </div>
         <div class="rail rail-verdict" id="rail-verdict">
-          <p class="rail-h">OVERALL</p>
+          <p class="rail-h" data-i18n="rail.overall">OVERALL</p>
           <p class="rail-v" id="rail-overall">-</p>
         </div>
       </aside>
@@ -409,22 +460,23 @@ export const INDEX_HTML = `<!doctype html>
     <div class="review-bar">
       <div class="reviewer-status-box" id="reviewer-status-box">
         <div class="reviewer-status-info">
-          <span class="reviewer-lbl">INSPECTION REVIEWER</span>
-          <span class="reviewer-val" id="reviewer-current-val">Not configured</span>
+          <span class="reviewer-lbl" data-i18n="panel.reviewer">INSPECTION REVIEWER</span>
+          <span class="reviewer-val" id="reviewer-current-val" data-i18n="panel.reviewerUnset">Not configured</span>
         </div>
-        <button type="button" class="btn btn-ghost btn-xs" id="reviewer-change-btn">Set reviewer</button>
+        <button type="button" class="btn btn-ghost btn-xs" id="reviewer-change-btn"
+                data-i18n="panel.setReviewer">Set reviewer</button>
       </div>
       <label class="field">
-        <span class="field-t">Verification note</span>
+        <span class="field-t" data-i18n="panel.verificationNote">Verification note</span>
         <input type="text" id="note" placeholder="optional review note" autocomplete="off">
       </label>
     </div>
 
     <div class="trust" id="trust-line">
-      <span class="trust-tag">AI_SUSPECTED</span>
-      <span class="trust-arrow" aria-hidden="true">to</span>
-      <span class="trust-tag" id="trust-state">UNVERIFIED</span>
-      <span class="trust-note">Confidence never verifies itself.</span>
+      <span class="trust-tag" data-i18n="panel.trustSuspected">AI_SUSPECTED</span>
+      <span class="trust-arrow" aria-hidden="true" data-i18n="panel.trustTo">to</span>
+      <span class="trust-tag" id="trust-state" data-i18n="panel.trustUnverified">UNVERIFIED</span>
+      <span class="trust-note" data-i18n="panel.trustNote">Confidence never verifies itself.</span>
     </div>
 
     <!--
@@ -437,11 +489,11 @@ export const INDEX_HTML = `<!doctype html>
     -->
     <section class="reason" id="reason" aria-labelledby="reason-h" data-status="UNAVAILABLE">
       <div class="reason-head">
-        <h3 class="reason-h" id="reason-h">Construction reasoning</h3>
-        <span class="tag" id="reason-stage">NOT RUN</span>
+        <h3 class="reason-h" id="reason-h" data-i18n="panel.stageReasoningHeading">Construction reasoning</h3>
+        <span class="tag" id="reason-stage" data-i18n="panel.stageReasoningNotRun">NOT RUN</span>
         <span class="reason-model" id="reason-model">-</span>
       </div>
-      <p class="reason-lede" id="reason-lede">
+      <p class="reason-lede" id="reason-lede" data-i18n="reasoning.notRun">
         Run the inspection to have Nemotron reason about what the evidence does
         and does not establish.
       </p>
@@ -453,11 +505,11 @@ export const INDEX_HTML = `<!doctype html>
     <div id="findings-cards"></div>
   </section>
 
-  <section class="bay bay-find" id="bay-findings" role="tabpanel"
-           data-bay="findings" aria-labelledby="tab-findings">
+  <section class="bay bay-find i18n-surface" id="bay-findings" role="tabpanel"
+           data-bay="findings" aria-labelledby="tab-findings" lang="en" dir="ltr">
     <div class="bay-head">
-      <h2 class="bay-h">Findings and verification</h2>
-      <p class="bay-sub">Every AI finding needs a named person to confirm, reject or defer it.</p>
+      <h2 class="bay-h" data-i18n="panel.findingsAndVerification">Findings and verification</h2>
+      <p class="bay-sub" data-i18n="panel.findingsHint">Every AI finding needs a named person to confirm, reject or defer it.</p>
     </div>
     <div id="findings"></div>
   </section>

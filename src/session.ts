@@ -13,7 +13,9 @@
 
 import { RealityInspector } from './inspector.ts';
 import type { InspectionOutcome, InspectionResult, InspectionStatus } from './inspector.ts';
-import { classifyUsableOutput } from './inspector.ts';
+import { classifyUsableOutput, mergeImageResults } from './inspector.ts';
+import { compareAcrossImages } from './compare.ts';
+import type { ImageDetections, ImageProvenance } from './multi-image.ts';
 import { toCacheableFinding, toCacheableObservation } from './inspector-payload.ts';
 import type { AIProvider } from './providers/provider.ts';
 import { ProviderError } from './providers/provider.ts';
@@ -35,6 +37,9 @@ import {
 import type { HackathonEligibility, PipelineEligibility } from './eligibility.ts';
 import { findingFrom, FindingLedger } from './findings.ts';
 import type { Finding } from './findings.ts';
+import { localizeInspectionAll } from './localized-inspection.ts';
+import type { LocalizedInspection } from './localized-inspection.ts';
+import type { InspectionLanguage } from './localization.ts';
 import { readImageDimensions, readImageGeometry, toPixelBox } from './image-metadata.ts';
 import { compareExpectedState } from './compare.ts';
 import type { ComparisonRow } from './types/inspection.ts';
@@ -74,6 +79,15 @@ export interface DetectedElementView {
   readonly boundingBox: AIObservation['evidence']['boundingBox'];
   readonly pixelBox: ReturnType<typeof toPixelBox>;
   readonly localized: boolean;
+  /**
+   * Which photograph produced this reading.
+   *
+   * Present on every detection, including in a single-image inspection. A
+   * consolidated inspection is precisely the case where losing this would turn
+   * evidence from three frames into an anonymous blob.
+   */
+  readonly captureId: string;
+  readonly captureLabel: string;
 }
 
 /**
@@ -98,10 +112,29 @@ export interface FindingView extends Omit<InspectionFinding, 'id'> {
   readonly evidenceState: EvidenceState;
   /** Null when the model gave no location and we refuse to invent one. */
   readonly region: string | null;
+  /**
+   * Every photograph that supports this finding.
+   *
+   * One entry in a single-image inspection, several in a consolidated one. This
+   * is the answer to "which photograph supports this finding?", and it is never
+   * collapsed to a single representative image.
+   */
+  readonly sourceCaptureIds: readonly string[];
+  /** Labels for `sourceCaptureIds`, same order, so the UI need not re-resolve. */
+  readonly sourceCaptureLabels: readonly string[];
 }
 
 export interface ComparisonView extends ComparisonRow {
   readonly pixelBox: ReturnType<typeof toPixelBox>;
+  /**
+   * Which photograph this row's box belongs to.
+   *
+   * Null when the row drew no box, or when several images contributed and no
+   * single one is authoritative — the pixel box is then the highest-confidence
+   * contributor's and this names it, so the overlay can never be read against
+   * the wrong photograph.
+   */
+  readonly sourceCaptureId: string | null;
 }
 
 /** A recorded human decision against an inspection finding. */
@@ -153,6 +186,15 @@ export interface ObservationView {
   /** False when the model did not localise this observation. */
   readonly localized: boolean;
   readonly findingId: string | null;
+  /**
+   * Which photograph produced this observation.
+   *
+   * Carried from the observation itself, never inferred from the group. In a
+   * consolidated inspection this is the only thing that keeps evidence from three
+   * frames from becoming an anonymous blob.
+   */
+  readonly captureId: string;
+  readonly captureLabel: string;
 }
 
 export interface ProvenanceRecord {
@@ -174,7 +216,9 @@ export interface ProvenanceRecord {
   readonly observationsRejected: number;
   readonly trustState: string;
   readonly humanReviewPerformed: boolean;
+  /** VISION-STAGE classification of the vision model alone. Never the verdict. */
   readonly eligibility: HackathonEligibility;
+  /** Stage-scoped explanation of `eligibility`. */
   readonly eligibilityNote: string;
   readonly rejectionIssues: readonly ValidationIssue[];
 }
@@ -213,6 +257,15 @@ export interface SessionView {
   /** True when the result came from the deterministic offline fixture. */
   readonly isDemoFixture: boolean;
   /**
+   * EVERY photograph this inspection covers, INCLUDING the ones that failed.
+   *
+   * This is what makes a consolidated inspection legible: the result states how
+   * many photographs were offered, how many were read, and which frame each piece
+   * of evidence came from. A run that reported only its successes would let a
+   * partial inspection read as a complete one.
+   */
+  readonly images: readonly ImageProvenance[];
+  /**
    * STAGE 2: Nemotron construction reasoning.
    *
    * Always present. `status: 'UNAVAILABLE'` with a reason is the honest report
@@ -220,8 +273,24 @@ export interface SessionView {
    * way, which is the point of keeping them separate.
    */
   readonly reasoning: ReasoningView;
-  /** Per-stage hackathon eligibility, now that two models run. */
+  /**
+   * The two model stages plus the submission-level NVIDIA verdict.
+   *
+   * Three distinct statements live here and are kept apart: whether each model
+   * is an NVIDIA model, whether each stage met the requirement, and whether the
+   * run as a whole did.
+   */
   readonly pipelineEligibility: PipelineEligibility;
+  /**
+   * The same inspection, presented in every supported language.
+   *
+   * A pure projection of the fields above, computed once and shipped in the
+   * same payload, so the browser can switch language without a request and
+   * without touching the canonical facts. Selecting a language here is a
+   * presentation choice and can never alter what the inspection found, when it
+   * ran, which models ran it, or whether it qualifies.
+   */
+  readonly localized: Readonly<Record<InspectionLanguage, LocalizedInspection>>;
   /** Geometry facts about the capture, including any EXIF normalization. */
   readonly geometry: {
     readonly storedWidth: number | null;
@@ -231,6 +300,40 @@ export interface SessionView {
     readonly exifOrientation: number;
     readonly geometryNormalized: boolean;
   };
+}
+
+/**
+ * One photograph's part in a consolidated inspection.
+ *
+ * Always present for every offered photograph, INCLUDING the ones that failed.
+ * A run that reports only its successes would let a partial inspection read as a
+ * complete one, which is the specific failure this product exists to prevent.
+ */
+export interface ImageOutcome {
+  readonly captureId: string;
+  readonly captureLabel: string;
+  /** FAILED means this photograph contributed nothing. */
+  readonly status: 'ANALYSED' | 'FAILED';
+  readonly failure: string | null;
+  readonly elements: readonly DetectedElement[];
+  readonly observations: readonly AIObservation[];
+  readonly modelFindings: readonly InspectionFinding[];
+}
+
+/**
+ * Dimensions of one capture's stored bytes.
+ *
+ * Re-reads the header rather than trusting a value from the workspace file: a
+ * truncated upload must not reappear with a claimed size.
+ */
+function dimensionsByCaptureOf(target: DemoCapture): ReturnType<typeof readImageDimensions> {
+  return readImageDimensions(target.bytes);
+}
+
+/** The capture's provenance label, as a technical enum the UI can localize. */
+function sourceLabelFor(capture: DemoCapture): string {
+  const source = (capture as { source?: unknown }).source;
+  return typeof source === 'string' ? source : 'UPLOAD';
 }
 
 /** Geometry facts the UI shows so a rotated source file is visible, not hidden. */
@@ -254,6 +357,23 @@ export interface RestoredInspection {
     readonly elements: readonly unknown[];
     readonly findings: readonly unknown[];
   };
+  /**
+   * Per-image payloads for a consolidated inspection.
+   *
+   * Absent on every inspection written before multi-image existed; the reader
+   * then falls back to the single merged `payload` above. Present entries are
+   * re-validated individually, so a multi-image inspection restores through the
+   * same validators a fresh one does.
+   */
+  readonly payloads?: readonly {
+    readonly captureId: string;
+    readonly captureLabel: string;
+    readonly payload: {
+      readonly observations: readonly unknown[];
+      readonly elements: readonly unknown[];
+      readonly findings: readonly unknown[];
+    };
+  }[] | undefined;
   readonly reviews: readonly {
     readonly key: string;
     readonly status: string;
@@ -342,10 +462,29 @@ export class InspectionSession {
   // type-stripping loader does not support parameter properties.
   private readonly provider: AIProvider;
   private readonly reasoner: Reasoner;
+  /**
+   * Every photograph in this inspection.
+   *
+   * Length 1 is the historical case and behaves identically. Length >1 is a
+   * consolidated inspection: each image gets its own real vision call, the
+   * validated outputs are combined, and one comparison and one reasoning pass
+   * follow. `capture` below is always the FIRST image, so every existing
+   * single-image reader of this class is unchanged.
+   */
+  private readonly captures: readonly DemoCapture[];
+  /** The first photograph. The single-image identity of this session. */
   private readonly capture: DemoCapture;
   private readonly projectId: string | null;
   private readonly projectName: string | null;
   private readonly zoneId: string | null;
+  /**
+   * Per-image outcome of the most recent run.
+   *
+   * A FAILED entry is retained rather than dropped: the consolidated result must
+   * be able to say that three photographs were offered and two were read, so a
+   * partial run can never be presented as a complete one.
+   */
+  private imageOutcomes: readonly ImageOutcome[] = [];
   /** The comparison reference. Editable, and always reported back to the UI. */
   private expected: ExpectedState;
   private outcome: InspectionOutcome | null = null;
@@ -371,6 +510,14 @@ export class InspectionSession {
     options?: {
       readonly reasoner?: Reasoner;
       readonly projectName?: string | null;
+      /**
+       * The remaining photographs of a consolidated inspection.
+       *
+       * Accepted as an array rather than a second positional parameter so every
+       * existing construction site keeps compiling unchanged. The first entry of
+       * `captures` stays the session's primary image.
+       */
+      readonly additionalCaptures?: readonly DemoCapture[];
     },
   ) {
     this.provider = provider;
@@ -378,13 +525,98 @@ export class InspectionSession {
       kind: 'DISABLED',
       message: 'No construction-reasoning model is attached to this session.',
     });
-    this.capture = capture;
+    // De-duplicated by identity so a repeated capture cannot be analysed twice.
+    const seen = new Set<string>();
+    const all: DemoCapture[] = [];
+    for (const item of [capture, ...(options?.additionalCaptures ?? [])]) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      all.push(item);
+    }
+    this.captures = all;
+    this.capture = all[0] as DemoCapture;
     this.projectId = projectId;
     this.projectName = options?.projectName ?? null;
     this.zoneId = zoneId;
     this.expected = expected ?? defaultExpectedState();
     this.inspector = new RealityInspector({ provider });
     this.ledger = new FindingLedger();
+  }
+
+  /** The photographs this inspection covers, in the order they were supplied. */
+  public get imageIds(): readonly string[] {
+    return this.captures.map((c) => c.id);
+  }
+
+  /** How many real vision calls this inspection makes. */
+  public get imageCount(): number {
+    return this.captures.length;
+  }
+
+  /** The label of a capture this inspection holds, or its id if unknown. */
+  private labelFor(captureId: string): string {
+    return this.captures.find((c) => c.id === captureId)?.label ?? captureId;
+  }
+
+  /**
+   * Per-image provenance for the view.
+   *
+   * Includes the images that FAILED, because a consolidated inspection that
+   * reported only its successes would let a partial run read as complete.
+   */
+  private imageProvenance(): ImageProvenance[] {
+    return this.captures.map((capture) => {
+      const outcome = this.imageOutcomes.find((o) => o.captureId === capture.id);
+      const dims = dimensionsByCaptureOf(capture);
+      return {
+        captureId: capture.id,
+        captureLabel: capture.label,
+        source: sourceLabelFor(capture),
+        mediaType: capture.mediaType,
+        width: dims?.width ?? null,
+        height: dims?.height ?? null,
+        byteLength: capture.bytes.length,
+        status: outcome === undefined || outcome.status === 'FAILED' ? 'FAILED' : 'ANALYSED',
+        failure: outcome?.failure ?? null,
+        observationCount: outcome?.observations.length ?? 0,
+      };
+    });
+  }
+
+  /**
+   * The label the reasoning stage is told it is reasoning over.
+   *
+   * One image keeps its own label verbatim, so the existing single-image prompt
+   * is byte-identical. Several images name all of them, because a prompt that
+   * said "this capture" while handing over three photographs would misreport
+   * what the model was shown.
+   */
+  private captureGroupLabel(): string {
+    if (this.captures.length <= 1) return this.capture.label;
+    return this.captures.map((c) => c.label).join(' + ');
+  }
+
+  /** Per-image readings, in run order, for the reconciling comparison. */
+  private imageDetections(): ImageDetections[] {
+    return this.imageOutcomes.map((outcome) => ({
+      captureId: outcome.captureId,
+      captureLabel: outcome.captureLabel,
+      detections: outcome.elements,
+    }));
+  }
+
+  /**
+   * The comparison rows for this run.
+   *
+   * A single image takes the untouched single-image path. Several images go
+   * through the reconciling comparison, so counts are never summed and every
+   * row records which photographs contributed to it.
+   */
+  private comparisonRows(detections: readonly DetectedElement[]): ComparisonRow[] {
+    if (this.captures.length <= 1 || this.imageOutcomes.length <= 1) {
+      return compareExpectedState(this.expected, detections);
+    }
+    return compareAcrossImages(this.expected, this.imageDetections());
   }
 
   /**
@@ -408,38 +640,84 @@ export class InspectionSession {
     // The deterministic fixture is never served from cache: it costs nothing,
     // and a "cached" label on synthetic data would be actively misleading.
     const useCache = options.useCache === true && this.provider.name !== 'demo-fixture';
-    try {
-      const result = await this.inspector.inspectCached({
-        image: {
-          bytes: this.capture.bytes,
-          mediaType: this.capture.mediaType,
-          captureId: this.capture.id,
-        },
-        projectId: this.projectId,
-        zoneId: this.zoneId,
-        expectedSummary: expectedSummaryFor(this.expected),
-        cache: inspectionCache,
-        useCache,
-      });
-      // "Completed" means the validators accepted something. A response carrying
-      // only valid elements or only valid findings is real usable output, so
-      // keying this on observations.length alone reported a successful
-      // inspection as VALIDATION_EMPTY.
-      const status: InspectionStatus = classifyUsableOutput(result);
+    const expectedSummary = expectedSummaryFor(this.expected);
+
+    // ONE real vision call per photograph, in order. Sequential on purpose: the
+    // progress the operator sees is then literally true, and a rate-limited
+    // provider is not hit with N concurrent requests.
+    const results: InspectionResult[] = [];
+    const outcomes: ImageOutcome[] = [];
+    let firstProviderError: ProviderError | null = null;
+
+    for (const capture of this.captures) {
+      try {
+        const result = await this.inspector.inspectCached({
+          image: {
+            bytes: capture.bytes,
+            mediaType: capture.mediaType,
+            captureId: capture.id,
+            // Provenance only, never sent to the model. It is what lets every
+            // observation name the photograph it came from.
+            captureLabel: capture.label,
+          },
+          projectId: this.projectId,
+          zoneId: this.zoneId,
+          expectedSummary,
+          cache: inspectionCache,
+          useCache,
+        });
+        results.push(result);
+        outcomes.push({
+          captureId: capture.id,
+          captureLabel: capture.label,
+          status: 'ANALYSED',
+          failure: null,
+          elements: result.elements ?? [],
+          observations: result.observations,
+          modelFindings: result.modelFindings ?? [],
+        });
+      } catch (error: unknown) {
+        if (error instanceof ProviderError) {
+          // Recorded, not fatal. One unreadable photograph must not discard the
+          // evidence the others produced, but it must also never be counted as
+          // a success.
+          if (firstProviderError === null) firstProviderError = error;
+          outcomes.push({
+            captureId: capture.id,
+            captureLabel: capture.label,
+            status: 'FAILED',
+            failure: error.message,
+            elements: [],
+            observations: [],
+            modelFindings: [],
+          });
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    this.imageOutcomes = outcomes;
+
+    // "Completed" means the validators accepted something. A response carrying
+    // only valid elements or only valid findings is real usable output, so
+    // keying this on observations.length alone reported a successful
+    // inspection as VALIDATION_EMPTY.
+    if (results.length === 0) {
+      // Every photograph failed. Fail closed: no inspection is invented from
+      // images that were never read.
+      const error = firstProviderError;
+      this.outcome = error === null
+        ? { status: 'FAILED', kind: 'ERROR', message: 'No image in this inspection could be read.', detail: null }
+        : { status: 'FAILED', kind: error.kind, message: error.message, detail: error.detail ?? null };
+    } else {
+      const merged = mergeImageResults(results);
+      const status: InspectionStatus = classifyUsableOutput(merged);
       this.outcome = {
         status,
-        result,
-        validationFailures: result.rejected,
+        result: merged,
+        validationFailures: merged.rejected,
       };
-    } catch (error: unknown) {
-      if (error instanceof ProviderError) {
-        this.outcome = {
-          status: 'FAILED', kind: error.kind,
-          message: error.message, detail: error.detail ?? null,
-        };
-      } else {
-        throw error;
-      }
     }
     this.latencyMs = Date.now() - this.startedAt;
 
@@ -478,13 +756,24 @@ export class InspectionSession {
     const result = outcome.result;
     const context: ReasoningContextInput = {
       projectName: this.projectName,
-      captureLabel: this.capture.label,
+      // The whole set, because the reasoning stage must be told what it is
+      // reasoning over. A single image still produces the singular label.
+      captureLabel: this.captureGroupLabel(),
+      // How many frames this pass is reasoning over, so the prompt can say so
+      // and attribute each observation to one of them.
+      imageCount: this.captures.length,
       expected: this.expected,
       detections: result.elements ?? [],
+      // The COMBINED validated observations, not one image's. Every observation
+      // keeps its own captureId, so the prompt attributes each to its
+      // photograph and Nemotron can say which frame supports a claim.
       observations: result.observations,
       // The SAME rows the comparison panel renders. Reasoning is downstream of
       // arithmetic, never a substitute for it.
-      rows: compareExpectedState(this.expected, result.elements ?? []),
+      // The SAME rows the comparison panel renders, and for a multi-image
+      // inspection the reconciling rows, so Nemotron reasons over exactly the
+      // comparison a judge can read.
+      rows: this.comparisonRows(result.elements ?? []),
       findings: (result.modelFindings ?? []).map((f) => ({
         title: f.title,
         category: f.category,
@@ -537,20 +826,52 @@ export class InspectionSession {
     return this.reasoning;
   }
 
-  /** Raw validated provider payload, for persistence. Null before anything has run. */
+  /**
+   * Raw validated provider payload, for persistence.
+   *
+   * Keyed PER IMAGE, not merged. A stored inspection must be able to say which
+   * photograph produced which observation; merging them at write time would
+   * destroy exactly the provenance this feature exists to preserve.
+   *
+   * Null before anything has run. A single image still yields one entry, so the
+   * stored shape is uniform and an old single-payload file can be read back.
+   */
+  getPersistedPayloads(): readonly {
+    readonly captureId: string;
+    readonly captureLabel: string;
+    readonly payload: {
+      observations: readonly unknown[];
+      elements: readonly unknown[];
+      findings: readonly unknown[];
+    };
+  }[] {
+    const outcome = this.outcome;
+    if (outcome === null || outcome.status === 'FAILED' || outcome.status === 'PENDING') return [];
+    return this.imageOutcomes.map((image) => ({
+      captureId: image.captureId,
+      captureLabel: image.captureLabel,
+      payload: {
+        observations: image.observations.map(toCacheableObservation),
+        elements: image.elements,
+        findings: image.modelFindings.map(toCacheableFinding),
+      },
+    }));
+  }
+
+  /**
+   * The FIRST image's payload, for callers that only ever persisted one image.
+   *
+   * Kept so the single-image path is untouched. A multi-image inspection is
+   * persisted through `getPersistedPayloads()` instead, and never through this,
+   * because dropping the other images here would silently lose their evidence.
+   */
   getPersistedPayload(): {
     observations: readonly unknown[];
     elements: readonly unknown[];
     findings: readonly unknown[];
   } | null {
-    const outcome = this.outcome;
-    if (outcome === null || outcome.status === 'FAILED' || outcome.status === 'PENDING') return null;
-    const result = outcome.result;
-    return {
-      observations: result.observations.map(toCacheableObservation),
-      elements: result.elements ?? [],
-      findings: (result.modelFindings ?? []).map(toCacheableFinding),
-    };
+    const first = this.getPersistedPayloads()[0];
+    return first === undefined ? null : first.payload;
   }
 
   /** Review records, for persistence. */
@@ -669,38 +990,71 @@ export class InspectionSession {
    * leave the capture honestly un-inspected instead of showing an empty shell.
    */
   restoreInspection(record: RestoredInspection): boolean {
-    const rebuilt = this.inspector.rebuildFromPayload(
-      {
-        provider: record.provider,
-        model: record.model,
-        observations: record.payload.observations as readonly RawModelObservation[],
-        elements: record.payload.elements,
-        findings: record.payload.findings,
-      },
-      {
-        image: {
-          bytes: this.capture.bytes,
-          mediaType: this.capture.mediaType,
-          captureId: this.capture.id,
-        },
-        projectId: this.projectId,
-        zoneId: this.zoneId,
-        expectedSummary: expectedSummaryFor(this.expected),
-      },
-    );
+    // A stored inspection may hold ONE payload (every inspection written before
+    // multi-image) or SEVERAL, one per photograph. Both are read; the per-image
+    // payloads are rebuilt separately so each observation keeps the capture it
+    // came from, then merged into one consolidated result.
+    const sources = record.payloads !== undefined && record.payloads.length > 0
+      ? record.payloads
+      : [{ captureId: this.capture.id, captureLabel: this.capture.label, payload: record.payload }];
 
-    const status = classifyUsableOutput(rebuilt);
+    const rebuilt: InspectionResult[] = [];
+    const outcomes: ImageOutcome[] = [];
+
+    for (const source of sources) {
+      // A payload naming a capture this session does not hold is refused rather
+      // than misattributed: its bytes are unavailable, so its observations would
+      // carry an image identity nobody can inspect.
+      const capture = this.captures.find((c) => c.id === source.captureId);
+      if (capture === undefined) continue;
+
+      const rebuiltOne = this.inspector.rebuildFromPayload(
+        {
+          provider: record.provider,
+          model: record.model,
+          observations: source.payload.observations as readonly RawModelObservation[],
+          elements: source.payload.elements,
+          findings: source.payload.findings,
+        },
+        {
+          image: {
+            bytes: capture.bytes,
+            mediaType: capture.mediaType,
+            captureId: capture.id,
+          },
+          projectId: this.projectId,
+          zoneId: this.zoneId,
+          expectedSummary: expectedSummaryFor(this.expected),
+        },
+      );
+      rebuilt.push(rebuiltOne);
+      outcomes.push({
+        captureId: capture.id,
+        captureLabel: capture.label,
+        status: 'ANALYSED',
+        failure: null,
+        elements: rebuiltOne.elements ?? [],
+        observations: rebuiltOne.observations,
+        modelFindings: rebuiltOne.modelFindings ?? [],
+      });
+    }
+
+    if (rebuilt.length === 0) return false;
+
+    const merged = mergeImageResults(rebuilt);
+    const status = classifyUsableOutput(merged);
     if (status !== 'COMPLETED') return false;
 
+    this.imageOutcomes = outcomes;
     this.outcome = {
       status,
       result: {
-        ...rebuilt,
+        ...merged,
         inferenceOrigin: 'CACHED',
         originalInferenceAt: record.inspectedAt,
         originalLatencyMs: null,
       },
-      validationFailures: rebuilt.rejected,
+      validationFailures: merged.rejected,
     };
     this.startedAt = Date.parse(record.inspectedAt);
     if (Number.isNaN(this.startedAt)) this.startedAt = Date.parse(record.savedAt);
@@ -711,7 +1065,15 @@ export class InspectionSession {
 
   view(): SessionView {
     const outcome = this.outcome;
-    const dimensions = readImageDimensions(this.capture.bytes);
+    // Pixel boxes are only meaningful against the image they came from. With one
+    // image this is the historical behaviour; with several, each image's own
+    // dimensions are used, so a box drawn over photo 3 is never scaled by photo
+    // 1's width.
+    const dimensionsByCapture = new Map<string, ReturnType<typeof readImageDimensions>>();
+    for (const capture of this.captures) {
+      dimensionsByCapture.set(capture.id, readImageDimensions(capture.bytes));
+    }
+    const dimensions = dimensionsByCapture.get(this.capture.id) ?? null;
     const geometry = readImageGeometry(this.capture.bytes);
     const result: InspectionResult | null =
       outcome !== null && outcome.status !== 'FAILED' && outcome.status !== 'PENDING'
@@ -720,19 +1082,24 @@ export class InspectionSession {
 
     const findings = this.ledger.all();
 
-    // The inspection result is a snapshot taken at inference time. Reviews write
-    // replacement records into the store, so the current trust state must be
-    // read from the store rather than from the stale snapshot, otherwise a
-    // recorded review would not appear in the UI.
-    const liveById = new Map(
-      this.inspector.listObservations(this.capture.id).map((o) => [o.id, o] as const),
-    );
+    // Live observations from EVERY image in this inspection, so a recorded human
+    // review on photo 2's finding is not resurrected as UNVERIFIED because only
+    // photo 1's store slice was consulted.
+    const liveById = new Map<string, AIObservation>();
+    for (const capture of this.captures) {
+      for (const observation of this.inspector.listObservations(capture.id)) {
+        liveById.set(observation.id, observation);
+      }
+    }
+    const dimensionsFor = (captureId: string) => dimensionsByCapture.get(captureId) ?? dimensions;
 
     const observations: ObservationView[] = (result?.observations ?? []).map(
       (snapshot, index) => {
         const observation = liveById.get(snapshot.id) ?? snapshot;
         const box = observation.evidence.boundingBox;
-        const pixelBox = toPixelBox(box, dimensions);
+        // Scaled by the dimensions of the photograph THIS observation came from,
+        // so a box from photo 3 is never drawn against photo 1's width.
+        const pixelBox = toPixelBox(box, dimensionsFor(observation.captureId));
         return {
           id: observation.id,
           category: observation.category,
@@ -753,6 +1120,8 @@ export class InspectionSession {
           localized: pixelBox !== null,
           findingId:
             findings.find((f) => f.sourceObservationId === observation.id)?.id ?? null,
+          captureId: observation.captureId,
+          captureLabel: this.labelFor(observation.captureId),
         };
       },
     );
@@ -768,8 +1137,19 @@ export class InspectionSession {
     ];
 
     const rawDetections: readonly DetectedElement[] = result?.elements ?? [];
+    // Which photograph produced each reading. Recorded here rather than on
+    // DetectedElement because that type is validated model output and must stay
+    // exactly what the model returned.
+    const detectionCaptureByIndex = new Map<number, string>();
+    for (const image of this.imageOutcomes) {
+      image.elements.forEach((_, index) => detectionCaptureByIndex.set(index, image.captureId));
+    }
+    let detectionCursor = 0;
     const detections: DetectedElementView[] = rawDetections.map((d) => {
-      const pixelBox = toPixelBox(d.boundingBox, dimensions);
+      const captureId = detectionCaptureByIndex.get(detectionCursor) ?? this.capture.id;
+      detectionCursor += 1;
+      const own = dimensionsFor(captureId);
+      const pixelBox = toPixelBox(d.boundingBox, own);
       return {
         element: d.element,
         present: d.present,
@@ -780,13 +1160,18 @@ export class InspectionSession {
         boundingBox: d.boundingBox,
         pixelBox,
         localized: pixelBox !== null,
+        captureId,
+        captureLabel: this.labelFor(captureId),
       };
     });
 
     // Rows exist only alongside a real inspection. With no result there is nothing
     // observed, so producing rows would render every expectation as UNDETERMINED
     // and read like a finding rather than an un-inspected capture.
-    const rows = result === null ? [] : compareExpectedState(this.expected, rawDetections);
+    //
+    // With several photographs this is the RECONCILING comparison, which records
+    // which images contributed to each row and refuses to sum counts.
+    const rows = result === null ? [] : this.comparisonRows(rawDetections);
 
     // Whether the model reported anything at all for each row's element. This is
     // what separates a finding the inspected image supports (full-frame evidence)
@@ -814,13 +1199,25 @@ export class InspectionSession {
 
     const inspectionFindings: FindingView[] = synthesized.map((f) => {
       const review = this.reviewsByKey.get(stableKey(f)) ?? null;
-      const pixelBox = toPixelBox(f.boundingBox, dimensions);
       // Evidence state, from strongest to weakest. AI findings are validated
       // observations of THIS image, so unlocalised ones are full-frame by
       // construction; comparison findings follow what their row's model
       // actually reported.
       const detectionReported =
         f.origin === 'AI' || (f.comparisonId !== null && detectionReportedByRow.get(f.comparisonId) === true);
+
+      // Source attribution. A COMPARISON finding rests on its row, so it inherits
+      // the row's sources. An AI finding came from one image, so it inherits the
+      // observation it was derived from — never the group, which would claim
+      // photographs did not see it.
+      const rowSources = f.comparisonId !== null
+        ? (rows.find((r) => r.id === f.comparisonId)?.sourceCaptureIds ?? [])
+        : [];
+      const sourceCaptureIds = rowSources.length > 0 ? rowSources : [f.captureId];
+      const primarySource = sourceCaptureIds[0] as string;
+
+      // Pixel boxes must be scaled by the dimensions of the image they came from.
+      const pixelBox = toPixelBox(f.boundingBox, dimensionsFor(primarySource));
       const view: FindingView = {
         ...f,
         verificationStatus: review === null ? 'UNVERIFIED' : review.status,
@@ -830,6 +1227,8 @@ export class InspectionSession {
         evidenceState:
           pixelBox !== null ? 'LOCALIZED' : detectionReported ? 'FULL_FRAME' : 'NONE',
         region: f.location,
+        sourceCaptureIds,
+        sourceCaptureLabels: sourceCaptureIds.map((id) => this.labelFor(id)),
       };
       return view;
     });
@@ -851,20 +1250,27 @@ export class InspectionSession {
       rows,
     });
 
-    const comparison: ComparisonView[] = rows.map((row) => ({
-      ...row,
-      pixelBox: toPixelBox(row.boundingBox, dimensions),
-    }));
+    const comparison: ComparisonView[] = rows.map((row) => {
+      // The row's box came from whichever image contributed the winning reading.
+      // Named explicitly, so a highlight is never drawn against the wrong frame.
+      const sourceCaptureId = row.sourceCaptureIds.length > 0
+        ? (row.sourceCaptureIds[0] as string)
+        : this.capture.id;
+      return {
+        ...row,
+        pixelBox: toPixelBox(row.boundingBox, dimensionsFor(sourceCaptureId)),
+        sourceCaptureId,
+      };
+    });
 
     // Stage 2, shaped for display. Always an object: an unavailable reasoning
     // stage is reported as such rather than omitted, so the UI can say whether
     // Nemotron contributed or why it did not.
     const reasoningView: ReasoningView = buildReasoningView(this.reasoning, this.reasoner);
 
-    // Per-stage eligibility. `ProvenanceRecord.eligibility` keeps reporting the
-    // VISION stage alone, unchanged, because that is the claim it has always
-    // made; the pipeline view adds the reasoning stage on top of it rather than
-    // overwriting a field other code already reads.
+    // Two separate claims, deliberately not collapsed. `provenance.eligibility`
+    // is the MODEL/STAGE-level fact about the vision model alone; the pipeline
+    // view adds the reasoning stage and states the submission-level result.
     const eligibility = classifyEligibility({
       provider: this.provider.name,
       model: this.provider.model,
@@ -872,6 +1278,7 @@ export class InspectionSession {
     const pipelineEligibility = classifyPipelineEligibility({
       visionProvider: this.provider.name,
       visionModel: this.provider.model,
+      visionExecuted: outcome !== null && outcome.status !== 'FAILED',
       reasoningProvider: this.reasoner.name,
       reasoningModel: this.reasoner.model,
       reasoningProduced: reasoningView.status === 'AVAILABLE',
@@ -924,8 +1331,40 @@ export class InspectionSession {
       originalInferenceAt: result?.originalInferenceAt ?? null,
       originalLatencyMs: result?.originalLatencyMs ?? null,
       isDemoFixture: synthetic,
+      // Provenance for every offered photograph, failures included.
+      images: this.imageProvenance(),
       reasoning: reasoningView,
       pipelineEligibility,
+      // Built LAST, from the canonical structures above, and never fed back into
+      // them. Presentation only: four languages of the same inspection, shipped
+      // together so the browser never has to ask for a second one.
+      localized: localizeInspectionAll({
+        detections: detections.map((d) => ({
+          element: d.element,
+          present: d.present,
+          count: d.count,
+          confidence: d.confidence,
+        })),
+        expected: { items: this.expected.items },
+        comparison,
+        inspectionFindings,
+        priorities,
+        counters,
+        isDemoFixture: synthetic,
+        // Classification facts only, never the English sentences: the projection
+        // re-renders the panel in each language from these.
+        qualification: {
+          visionModel: this.provider.model,
+          reasoningModel: this.reasoner.model,
+          visionIsNvidia: pipelineEligibility.stages.some((s) => s.stage === 'VISION' && s.isNvidiaModel),
+          reasoningIsNvidia: pipelineEligibility.stages.some((s) => s.stage === 'REASONING' && s.isNvidiaModel),
+          visionClassification: pipelineEligibility.vision,
+          reasoningClassification: pipelineEligibility.reasoning,
+          nvidiaRequirement: pipelineEligibility.nvidiaRequirement,
+          qualifyingStage: pipelineEligibility.qualifyingStage,
+          platform: pipelineEligibility.platform,
+        },
+      }),
       geometry: {
         storedWidth: geometry?.stored.width ?? null,
         storedHeight: geometry?.stored.height ?? null,

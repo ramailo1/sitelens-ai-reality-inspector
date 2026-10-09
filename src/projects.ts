@@ -27,9 +27,24 @@ import type { ReasoningFailureKind } from './reasoning.ts';
 import { PresetStore, cloneExpectedState, presetToState } from './expected-state.ts';
 import { DEFAULT_EXPECTED_PRESET_ID } from './expected-state.ts';
 import type { ExpectedState } from './types/inspection.ts';
+import { partitionDuplicates } from './multi-image.ts';
 
 export const MAX_PROJECT_NAME = 80;
 export const MAX_PROJECT_LOCATION = 120;
+
+/**
+ * A deterministic key for a group of captures.
+ *
+ * Ordered, so the same photographs in the same order reuse one session (and so
+ * one set of human reviews), while a different order is a genuinely different
+ * inspection and gets its own. A single capture keys to its own id, which is what
+ * keeps every pre-existing session reachable by the id the workspace file stores.
+ */
+export function groupKey(captures: readonly ProjectCapture[]): string {
+  const first = captures[0];
+  if (captures.length <= 1) return first === undefined ? 'group_empty' : first.id;
+  return `grp_${captures.map((c) => c.id).join('+')}`;
+}
 
 export interface ReviewerIdentity {
   readonly name: string;
@@ -163,6 +178,16 @@ export class ProjectStore {
   private readonly hydrated = new Set<string>();
   private activeProjectId: string | null = null;
   private activeCaptureId: string | null = null;
+  /**
+   * The ordered photographs of the CURRENT inspection group.
+   *
+   * Length 1 in the single-image case, which is every case that predates
+   * multi-image. `activeCaptureId` remains the primary so nothing that reads it
+   * has to change.
+   */
+  private activeCaptureIds: string[] = [];
+  /** Byte-identical photographs refused from the last selection. */
+  private duplicateCaptureIds: string[] = [];
 
   public constructor(options: {
     readonly provider: AIProvider;
@@ -341,6 +366,10 @@ export class ProjectStore {
     const pool = inspected.length > 0 ? inspected : captures;
     const last = pool.length > 0 ? pool[pool.length - 1] : undefined;
     this.activeCaptureId = last === undefined ? null : last.id;
+    // A default selection is always ONE photograph. Reopening a consolidated
+    // group here would silently re-group the operator's captures behind their
+    // back; an explicit selection is the only thing that forms a group.
+    this.activeCaptureIds = last === undefined ? [] : [last.id];
     // The capture is now on screen, so its last inspection must be too. Without
     // this, a restart left the default capture showing an empty evidence stage
     // even though a real inspection and real verifications were on disk.
@@ -534,36 +563,130 @@ export class ProjectStore {
 
   /** Session for a capture, created on first use and reused afterwards. */
   public sessionFor(capture: ProjectCapture): InspectionSession {
-    const existing = this.sessions.get(capture.id);
+    return this.sessionForGroup([capture]);
+  }
+
+  /**
+   * The session for an ORDERED group of captures.
+   *
+   * One image is the historical case and behaves exactly as before. Several
+   * images make ONE consolidated inspection: each gets its own real vision call,
+   * the validated outputs combine, and one comparison and one reasoning pass
+   * follow.
+   *
+   * Keyed by a deterministic group id rather than by a random uuid, so reopening
+   * the same set of photographs reuses the same session — and therefore the same
+   * human reviews — instead of orphaning them. The first capture is the primary,
+   * which is what the single-image code paths read.
+   */
+  public sessionForGroup(captures: readonly ProjectCapture[]): InspectionSession {
+    const first = captures[0];
+    if (first === undefined) {
+      throw new Error('an inspection session requires at least one capture');
+    }
+    const groupId = groupKey(captures);
+    const existing = this.sessions.get(groupId);
     if (existing) return existing;
+
     const created = new InspectionSession(
       this.provider,
-      capture,
-      capture.projectId,
-      capture.zoneId,
-      this.expectedFor(capture.projectId),
+      first,
+      first.projectId,
+      first.zoneId,
+      this.expectedFor(first.projectId),
       {
         reasoner: this.reasoner,
         // The project NAME is context for the reasoning stage, and the name is
         // operator-entered rather than observed, so the prompt says so explicitly.
-        projectName: this.projects.get(capture.projectId)?.name ?? null,
+        projectName: this.projects.get(first.projectId)?.name ?? null,
+        additionalCaptures: captures.slice(1),
       },
     );
-    this.sessions.set(capture.id, created);
+    this.sessions.set(groupId, created);
     return created;
   }
 
-  public selectCapture(captureId: string): ProjectResult<InspectionSession> {
-    const owned = this.activeCapture(captureId);
-    if (!owned.ok) return owned;
-    this.activeCaptureId = captureId;
-    const session = this.sessionFor(owned.value);
-    // Reopen whatever this capture was last inspected to, so returning to a
-    // project lands on its findings and its human verifications rather than on
-    // an empty evidence stage. No model is called to do this.
-    this.hydrateFromPersistence(owned.value, session);
+  /**
+   * Select one or more captures as the inspection to work on.
+   *
+   * The group is stored as ordered ids, because the operator's chosen order is
+   * the order the vision calls run in and the order provenance is reported in.
+   * Replaces any previous selection rather than accumulating: two inspections
+   * cannot be active at once, or "the current inspection" stops meaning anything.
+   */
+  public selectCaptureGroup(captureIds: readonly string[]): ProjectResult<InspectionSession> {
+    if (captureIds.length === 0) {
+      return { ok: false, reason: 'UNKNOWN_CAPTURE', message: 'Select at least one photograph.' };
+    }
+    const owned: ProjectCapture[] = [];
+    for (const id of captureIds) {
+      const found = this.activeCapture(id);
+      if (!found.ok) return found;
+      owned.push(found.value);
+    }
+    // De-duplicated while preserving order, so selecting the same photograph
+    // twice cannot analyse it twice or count it as two pieces of evidence.
+    const unique: ProjectCapture[] = [];
+    const seen = new Set<string>();
+    for (const capture of owned) {
+      if (seen.has(capture.id)) continue;
+      seen.add(capture.id);
+      unique.push(capture);
+    }
+
+    // A byte-identical photograph is the same evidence twice, whatever it is named.
+    // The second copy is refused here and reported, never quietly inspected.
+    const deduped = partitionDuplicates(unique);
+    this.duplicateCaptureIds = deduped.refused.slice();
+    // The original ProjectCapture objects, so their provenance survives.
+    const ordered: ProjectCapture[] = deduped.accepted.slice();
+
+    this.activeCaptureId = (ordered[0] as ProjectCapture).id;
+    this.activeCaptureIds = ordered.map((c) => c.id);
+    const session = this.sessionForGroup(ordered);
+    // Reopen whatever this group was last inspected to, so returning to a project
+    // lands on its findings rather than on an empty evidence stage. No model is
+    // called to do this.
+    for (const capture of ordered) this.hydrateFromPersistence(capture, session);
     this.persist();
     return { ok: true, value: session };
+  }
+
+  /**
+   * Photographs dropped from the last selection as byte-identical duplicates.
+   *
+   * Reported so the UI can say "2 of 3 photographs inspected; one was a
+   * duplicate" rather than quietly analysing two and claiming three.
+   */
+  public refusedDuplicateIds(): readonly string[] {
+    return this.duplicateCaptureIds;
+  }
+
+  /** The captures of the current inspection group, in order. */
+  public selectedCaptureIds(): readonly string[] {
+    if (this.activeCaptureIds.length > 0) return this.activeCaptureIds;
+    return this.activeCaptureId === null ? [] : [this.activeCaptureId];
+  }
+
+  /** The captures of the current group, resolved against the active project. */
+  public selectedCaptures(): ProjectCapture[] {
+    const out: ProjectCapture[] = [];
+    for (const id of this.selectedCaptureIds()) {
+      const owned = this.activeCapture(id);
+      if (owned.ok) out.push(owned.value);
+    }
+    return out;
+  }
+
+  /**
+   * Select ONE capture as the inspection to work on.
+   *
+   * The single-image case, unchanged. Multi-image goes through
+   * `selectCaptureGroup`, which this delegates to, so both paths share one
+   * selection rule rather than two that can disagree.
+   */
+  public selectCapture(captureId: string): ProjectResult<InspectionSession> {
+    return this.selectCaptureGroup([captureId]);
   }
 
   /**
@@ -579,11 +702,16 @@ export class ProjectStore {
   ): void {
     const store = this.persistence;
     if (store === null) return;
-    if (this.hydrated.has(capture.id)) return;
-    this.hydrated.add(capture.id);
     if (session.inspected()) return;
 
-    const record = store.loadInspection(capture.id);
+    // A consolidated inspection is WRITTEN under the group key, so it must be
+    // READ under the group key too. Keyed by a single capture id instead, every
+    // reopen of a multi-photo inspection would silently come back empty.
+    const key = groupKey(this.selectedCaptures());
+    if (this.hydrated.has(key)) return;
+    this.hydrated.add(key);
+
+    const record = store.loadInspection(key);
     if (record === null) return;
     if (!session.restoreInspection(record)) return;
 
@@ -616,12 +744,13 @@ export class ProjectStore {
 
   public activeSession(): InspectionSession | null {
     if (this.activeCaptureId === null) return null;
-    const capture = this.captures.get(this.activeCaptureId);
-    // The capture may have been selected by switching projects rather than by an
-    // explicit selectCapture, so the session is resolved here. Returning null
-    // instead would leave a restored project showing no inspection at all.
-    if (!capture || capture.projectId !== this.activeProjectId) return null;
-    return this.sessionFor(capture);
+    // The WHOLE group, so a consolidated inspection keeps its other photographs.
+    // Any capture outside the active project is dropped rather than inspected,
+    // which is the same ownership rule the single-image path has always applied.
+    const captures = this.selectedCaptures();
+    const first = captures[0];
+    if (first === undefined || first.projectId !== this.activeProjectId) return null;
+    return this.sessionForGroup(captures);
   }
 
   /**
@@ -738,6 +867,9 @@ public ensureSelection(): Project {
       savedAt: new Date().toISOString(),
       activeProjectId: this.activeProjectId,
       activeCaptureId: this.activeCaptureId,
+      // The whole selection, so a consolidated inspection reopens intact rather
+      // than collapsing to its first photograph on restart.
+      activeCaptureIds: this.selectedCaptureIds(),
       projects: [...this.projects.values()].filter((p) => p.demo === false),
       captures,
       references,
@@ -765,6 +897,11 @@ public ensureSelection(): Project {
 
     const view = session.view();
     const reasoning = session.getReasoningOutcome();
+    // Per-image payloads for a consolidated inspection, so a restored inspection
+    // can still say WHICH photograph produced which observation. A single-image
+    // run writes the historical flat `payload` and no `payloads` field at all,
+    // which is exactly how a reader knows which shape it is holding.
+    const payloads = session.getPersistedPayloads();
     store.saveInspection({
       captureId,
       savedAt: new Date().toISOString(),
@@ -775,6 +912,7 @@ public ensureSelection(): Project {
       originalInferenceAt: view.originalInferenceAt,
       originalLatencyMs: view.originalLatencyMs,
       payload,
+      ...(payloads.length > 1 ? { payloads } : {}),
       reviews: session.getReviewRecords(),
       reasoning:
         reasoning === null
@@ -916,13 +1054,22 @@ public ensureSelection(): Project {
       restoredCaptures += 1;
     }
 
-    // Reopen on the capture the operator last had open, when it survived.
-    if (
-      state.activeCaptureId !== null &&
-      this.captures.has(state.activeCaptureId) &&
-      this.captures.get(state.activeCaptureId)?.projectId === this.activeProjectId
-    ) {
-      this.selectCapture(state.activeCaptureId);
+    // Reopen the inspection the operator last had open, when it survived.
+    // The whole GROUP, so a consolidated inspection comes back with all its
+    // photographs rather than collapsing to the first one.
+    const wantedGroup = (
+      state.activeCaptureIds !== undefined && state.activeCaptureIds.length > 0
+        ? state.activeCaptureIds
+        : state.activeCaptureId === null
+          ? []
+          : [state.activeCaptureId]
+    ).filter(
+      (id) => this.captures.has(id)
+        && this.captures.get(id)?.projectId === this.activeProjectId,
+    );
+
+    if (wantedGroup.length > 0) {
+      this.selectCaptureGroup(wantedGroup);
     } else if (this.activeProjectId !== null) {
       this.selectDefaultCapture(this.activeProjectId);
     }
