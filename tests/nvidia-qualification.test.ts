@@ -475,9 +475,12 @@ test('CASE E: the Inspect page leads with NVIDIA requirement: MET', async () => 
   const view = await session.run();
   const rendered = renderQualification(view);
 
-  assert.match(rendered.verdict, /^MET — /);
-  assert.match(rendered.verdict, /Nebius Token Factory/);
-  assert.match(rendered.verdict, /construction reasoning/);
+  // The verdict badge is the headline and reads MET on its own; the platform and
+  // the qualifying stage each get their own row so the reader never has to parse
+  // them out of a sentence.
+  assert.equal(rendered.verdict.trim(), 'MET');
+  assert.match(rendered.body, /Nebius Token Factory/);
+  assert.match(rendered.body, /construction reasoning/i);
 });
 
 test('CASE E: the non-NVIDIA vision model stays visible and subordinate', async () => {

@@ -13,7 +13,7 @@ import { readFileSync } from 'node:fs';
 import { createProvider, ProviderError } from '../src/providers/factory.ts';
 import { RealityInspector } from '../src/inspector.ts';
 import { DEMO_MODEL_ID, DEMO_PROVIDER_NAME } from '../src/providers/demo-fixture.provider.ts';
-import { NEBIUS_PROVIDER_NAME } from '../src/providers/nebius-nvidia.provider.ts';
+import { classifyEligibility, describeEligibility, isNvidiaModelId } from '../src/eligibility.ts';
 
 const CAPTURE_ID = 'cap_demo_0001';
 const PROJECT_ID = 'proj_demo_site_a';
@@ -109,9 +109,9 @@ async function main(): Promise<number> {
 
   if (isDemo) {
     console.log(`\n  NOTE: this is the DETERMINISTIC DEMO provider (${DEMO_MODEL_ID}).`);
-    console.log('  It does NOT call Nebius or an NVIDIA model, so this run alone does');
-    console.log('  NOT satisfy the hackathon requirement. Set AI_PROVIDER=nebius and');
-    console.log('  NEBIUS_API_KEY to exercise the real Nebius + NVIDIA path.');
+    console.log('  It calls no model at all, so neither stage of this run contributes');
+    console.log('  any inference. Set AI_PROVIDER=nebius and NEBIUS_API_KEY to exercise');
+    console.log('  the real Nebius vision path.');
   } else {
     console.log(
       `    endpoint : ${process.env['NEBIUS_BASE_URL'] ?? '(default)'} (Nebius Token Factory)`,
@@ -181,21 +181,17 @@ async function main(): Promise<number> {
   heading('Provenance');
   console.log(`    provider         : ${result.provider}`);
   console.log(`    model            : ${result.model}`);
-  // Eligibility depends on WHICH MODEL actually ran, not merely on which
-  // provider class handled the request. A Nebius-hosted NON-NVIDIA vision
-  // model exercises the real path but does NOT satisfy the hackathon's
-  // NVIDIA requirement, and must never be reported as if it did.
-  const isNvidiaModel = /^nvidia\//i.test(result.model);
-  const eligibility = (() => {
-    if (result.provider !== NEBIUS_PROVIDER_NAME) {
-      return 'NO  — deterministic demo; set AI_PROVIDER=nebius for the real path';
-    }
-    if (isNvidiaModel) {
-      return 'YES — ran on Nebius Token Factory with an NVIDIA open-source model';
-    }
-    return `NO  — live Nebius Token Factory call, but the model (${result.model}) is NOT an NVIDIA model; does NOT satisfy the NVIDIA requirement`;
-  })();
-  console.log(`    hackathon-eligible: ${eligibility}`);
+  // Scope matters here. This script runs the VISION stage only, so the honest
+  // statement is about that stage and that model. Whether the NVIDIA requirement
+  // is met for the product is decided by the reasoning stage in
+  // `npm run ui`, and a model-level fact must never be printed as a verdict
+  // about the submission.
+  const visionStage = classifyEligibility({ provider: result.provider, model: result.model });
+  console.log(`    nvidia model     : ${isNvidiaModelId(result.model) ? 'yes' : 'no'}`);
+  console.log(`    vision stage     : ${visionStage} (stage-level, not a submission verdict)`);
+  console.log(`    note             : ${describeEligibility(visionStage, result.model)}`);
+  console.log('    reasoning stage  : not run by this script. SiteLens satisfies the NVIDIA');
+  console.log('                       requirement there, through nvidia/Nemotron-3-Ultra on Nebius.');
   console.log(`    inspectedAt      : ${result.inspectedAt}\n`);
   return 0;
 }

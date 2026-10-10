@@ -259,6 +259,10 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       // The ordered photographs of the OPEN inspection. The client renders this
       // as one group rather than as N separate inspections.
       activeCaptureIds: store.selectedCaptureIds(),
+      // The ceiling on one inspection, from the constant that enforces it. The
+      // client labels the masthead with this rather than repeating the number,
+      // so the header can never claim a different maximum than the server.
+      maxInspectionImages: MAX_INSPECTION_IMAGES,
       // Photographs the last selection REFUSED as byte-identical duplicates.
       // Reported rather than dropped silently: "2 of 3 photographs inspected"
       // must never be shown as "3 photographs inspected".

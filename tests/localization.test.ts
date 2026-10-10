@@ -925,9 +925,13 @@ test('the localized surface carries lang and dir in the markup', () => {
   }
   assert.equal((INDEX_HTML.match(/class="bay[^"]*i18n-surface/g) ?? []).length, 3);
   assert.match(INDEX_HTML, /id="lang-select"/);
-  assert.match(INDEX_HTML, /id="lang-label"[^>]*for="lang-select"/);
-  // The control itself stays LTR even inside an RTL surface.
-  assert.match(INDEX_HTML, /<div class="langbar" dir="ltr">/);
+  // The label names the select through the wrapping label's `for`, and carries
+  // the catalog key so its text follows the chosen language.
+  assert.match(INDEX_HTML,
+    /<label class="lang-sel" for="lang-select"[^>]*>\s*<span class="lang-k" id="lang-label"[^>]*data-i18n="lang\.label"/);
+  // The control itself stays LTR. It is in the identity strip, which is never a
+  // localized surface, and it declares so explicitly rather than relying on it.
+  assert.match(INDEX_HTML, /<label class="lang-sel" for="lang-select" dir="ltr">/);
 });
 
 test('the client is still valid JavaScript after the catalog is injected', () => {

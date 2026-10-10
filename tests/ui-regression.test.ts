@@ -132,7 +132,13 @@ test('the client still parses after the fix', () => {
 });
 
 test('the evidence image is driven by a real capture id, never a placeholder', () => {
-  assert.match(APP_JS, /\/api\/capture-image\/' \+ encodeURIComponent\(p\.captureId\)/);
+  // A multi-photo inspection rests on several captures at once, so the frame on
+  // screen is whichever of the open group is selected. The guard is that the id
+  // is always a REAL member of that group, and never a literal standing in for
+  // one.
+  assert.match(APP_JS, /\/api\/capture-image\/' \+ encodeURIComponent\(shown\)/);
+  assert.match(APP_JS, /state\.captureIds\.includes\(state\.evidenceCaptureId\)/);
+  assert.match(APP_JS, /evidenceCaptureId !== null/);
   assert.doesNotMatch(APP_JS, /evidence-image'\)\.src = ['"]#/);
 });
 
@@ -194,4 +200,148 @@ test('orientation-3/4 captures are display-flipped and their boxes flip with the
   assert.match(APP_JS, /classList\.toggle\('img-flip180', /);
   assert.match(APP_JS, /flipBox180\(box, frameWidth, frameHeight\)/);
   assert.match(APP_CSS, /\.img-flip180\s*\{[^}]*rotate\(180deg\)/);
+});
+
+/* ------------------------------------------------------------------ *
+ * The evidence stage of a multi-photo inspection.
+ *
+ * An inspection can rest on several photographs at once, but one frame is on
+ * screen. These assert the frame is selectable and that boxes belong to the
+ * frame they are drawn on: a box read from another photograph would be a
+ * rectangle invented out of nothing where it lands.
+ * ------------------------------------------------------------------ */
+
+test('every photograph of a multi-photo inspection is reachable on the evidence stage', () => {
+  assert.match(INDEX_HTML, /id="photo-switcher"/, 'the photo switcher must exist');
+  assert.match(INDEX_HTML, /id="photo-switcher-tabs"/, 'the tab host must exist');
+  assert.match(APP_JS, /function renderPhotoSwitcher\(/, 'the switcher must be rendered');
+  assert.match(APP_JS, /function renderPhotoSwitcher[\s\S]*?switcher\.hidden = false/,
+    'the switcher must be shown when several photographs are open');
+  assert.match(APP_JS, /state\.captureIds\.length <= 1/,
+    'a single-photo inspection needs no switcher');
+});
+
+test('switching photograph re-renders the stage and the overlay together', () => {
+  // The image without the boxes would be a silent change of evidence.
+  assert.match(APP_JS, /safeRender\('stage', renderStage\);\s*\n\s*safeRender\('overlay', renderOverlay\);/,
+    'a photo tab click must re-render both the stage and the overlay');
+});
+
+test('evidence boxes are filtered to the photograph on screen', () => {
+  assert.match(APP_JS, /state\.captureIds\.length <= 1\s*\n\s*\|\| finding\.captureId === undefined\s*\n\s*\|\| finding\.captureId === state\.evidenceCaptureId/,
+    'boxes of another photograph must never be drawn onto this one');
+});
+
+test('the reviewer gate states the real reason and routes to the setup dialog', () => {
+  assert.match(INDEX_HTML, /id="reviewer-gate"/, 'the gate banner must exist');
+  assert.match(INDEX_HTML, /id="reviewer-gate-reason"/, 'the gate must carry a reason');
+  assert.match(APP_JS, /function renderReviewerGate\(/, 'the gate must be rendered');
+  assert.match(APP_JS, /\$\('reviewer-gate-btn'\)/, 'the gate button must be resolved');
+  assert.match(APP_JS, /gateBtn\.addEventListener\('click', \(\) => openReviewerModal\(\)\)/,
+    'the gate must be the route to the one action that resolves it');
+  // The banner must be driven by the project's real reviewer, never assumed.
+  assert.match(APP_JS, /state\.project\.reviewer/);
+  assert.match(APP_JS, /name\.trim\(\)\.length > 0/, 'a blank name must not open the gate');
+});
+
+test('the primary action is ink, so red stays reserved for destruction', () => {
+  // Inspect reality is the one primary action of the instrument; rendering it in
+  // the same red outline as Delete project made it read as a warning.
+  assert.match(INDEX_HTML, /<button[^>]*class="btn btn-primary"[^>]*id="run"/);
+  assert.match(APP_CSS, /\.btn-primary\s*\{[^}]*background:\s*var\(--ink\)/);
+});
+
+test('hidden bands cannot survive a class rule that sets display', () => {
+  // Several bands are flex or grid by class and toggled with the hidden
+  // attribute, which a later class rule of equal specificity would override.
+  assert.match(APP_CSS, /\[hidden\]\s*\{\s*display:\s*none\s*!important/);
+});
+
+test("the project's captures can be selected as a group", () => {
+  assert.match(INDEX_HTML, /id="select-all-captures"/, 'select-all must exist');
+  assert.match(INDEX_HTML, /id="clear-capture-selection"/, 'clear must exist');
+  assert.match(APP_JS, /async function selectAllCaptures\(/);
+  assert.match(APP_JS, /async function clearCaptureSelection\(/);
+  // Both go through the same server contract the per-photo controls use.
+  assert.match(APP_JS, /post\('\/api\/captures\/select', \{ captureIds: ids \}\)/);
+  assert.match(APP_JS, /post\('\/api\/captures\/select', \{ captureIds: \[first\.id\] \}\)/);
+});
+
+test('the identity fonts are actually delivered rather than assumed installed', () => {
+  assert.match(INDEX_HTML, /fonts\.googleapis\.com[\s\S]*?IBM\+Plex\+Sans/,
+    'the named sans font must be delivered, not only declared in the CSS stack');
+  // The fallback stays declared in the stylesheet, so an offline machine still
+  // resolves to a real family.
+  assert.match(APP_CSS, /--sans:\s*"IBM Plex Sans", "Segoe UI"/);
+});
+
+/* ------------------------------------------------------------------ *
+ * The masthead.
+ *
+ * The identity strip has to stay the same width whether one photograph is open
+ * or twelve. Listing the filenames put forty characters per photograph into a
+ * band that cannot grow, which pushed the reviewer and the project selector off
+ * the strip; the count is the fact that band has to carry.
+ * ------------------------------------------------------------------ */
+
+test('the masthead carries a count, never the file names', () => {
+  assert.match(APP_JS, /function renderCaptureSummary\(/, 'the capture summary must be rendered');
+  assert.doesNotMatch(
+    APP_JS,
+    /setText\('meta-capture', p\.captureLabel\)/,
+    'the header must not inline a capture label, which names one file at full length',
+  );
+  // The group label still exists for the reasoning prompt, where naming every
+  // photograph is a correctness invariant. That separation must survive.
+  assert.match(APP_JS, /qualificationPath/);
+});
+
+test('the capture ceiling comes from the server, not a number baked into the client', () => {
+  assert.match(APP_JS, /payload\.maxInspectionImages/,
+    'the client must read the ceiling from the server that enforces it');
+  assert.doesNotMatch(
+    APP_JS,
+    /maxInspectionImages\s*[:=]\s*12\b/,
+    'the ceiling must not be a literal in the client, or the two can disagree',
+  );
+  assert.match(APP_JS, /imgs\.countAtCap/, 'reaching the ceiling must be stated, not implied');
+});
+
+test('the masthead labels follow the language', () => {
+  for (const [attr, key] of [
+    ['meta.zone', 'data-i18n="meta.zone"'],
+    ['meta.capture', 'data-i18n="meta.capture"'],
+    ['meta.reviewer', 'data-i18n="meta.reviewer"'],
+    ['tab.capture', 'data-i18n="tab.capture"'],
+    ['tab.inspect', 'data-i18n="tab.inspect"'],
+    ['tab.evidence', 'data-i18n="tab.evidence"'],
+    ['tab.findings', 'data-i18n="tab.findings"'],
+    ['proj.label', 'data-i18n="proj.label"'],
+  ] as const) {
+    assert.ok(INDEX_HTML.includes(key), 'the masthead key ' + attr + ' must be in the markup');
+  }
+});
+
+test('the photo names are available without widening the masthead', () => {
+  assert.match(INDEX_HTML, /id="capture-disclosure"/, 'the count must open onto the names');
+  assert.match(INDEX_HTML, /id="meta-capture-list"/, 'the names must have somewhere to render');
+  // Absolutely positioned, so the strip above cannot be pushed wider.
+  assert.match(APP_CSS, /\.rig-disclose-list\s*\{[^}]*position:\s*absolute/);
+  assert.match(APP_CSS, /\.rig-disclose-list\s*\{[^}]*overflow-y:\s*auto/);
+});
+
+test('the NVIDIA requirement card states the verdict, the stages and the path', () => {
+  assert.match(INDEX_HTML, /id="qual-subtitle"/, 'the pipeline shape must be stated');
+  // The verdict is the badge alone; the platform and the qualifying stage are
+  // rows. A verdict that carried them in one sentence could not be scanned.
+  assert.match(APP_JS, /qual\.met/);
+  assert.match(APP_JS, /qual\.hybrid/);
+  assert.match(APP_JS, /qual\.row\.vision/);
+  assert.match(APP_JS, /qual\.row\.reasoning/);
+  assert.match(APP_JS, /qual\.row\.platform/);
+  // Only an explicit ELIGIBLE may read as the qualifying tone.
+  assert.match(APP_JS, /row\.cls === 'ELIGIBLE' \? 'ok'/);
+  assert.match(APP_CSS, /\.qual-tag-ok\b/);
+  assert.match(APP_CSS, /\.qual-tag-no\b/);
+  assert.match(APP_CSS, /\.qual-tag-unknown\b/);
 });

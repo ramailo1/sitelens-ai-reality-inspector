@@ -40,6 +40,14 @@ export const APP_CSS = `/* =====================================================
   --neutral:      #6E6960;
   --neutral-wash: rgba(110, 105, 96, .09);
 
+  /* Stage roles on the qualification card. A qualifying inference, a stage that
+     ran on a model the hackathon does not require, and the platform the call
+     went through are three different claims and are never given one colour. */
+  --info:         #2C6E9B;
+  --info-wash:    rgba(44, 110, 155, .11);
+  --stage:        #5B4A9E;
+  --stage-wash:   rgba(91, 74, 158, .11);
+
   --sans: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
@@ -51,6 +59,11 @@ export const APP_CSS = `/* =====================================================
 }
 
 * { box-sizing: border-box; }
+/* One rule, once. Elements toggled with the hidden attribute are laid out by
+   their own class rules (flex, grid), which would otherwise beat the attribute
+   and leave "hidden" bands on screen. Specificity cannot fix this reliably, so
+   the attribute wins outright. */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -106,7 +119,14 @@ body::before {
 
 .rig {
   position: relative;
-  z-index: 2;
+  /* Above every band below it. The project menu (.proj-menu) is absolutely
+     positioned INSIDE this element, so it can never paint above a sibling that
+     shares or beats this element's own stacking level: .rig is a stacking
+     context because it is positioned with a z-index, and the menu's own z-index
+     is confined inside it. .pipe used to be z-index 2 as well and comes later in
+     the document, so it painted over the open menu however high the menu's
+     z-index was. Raising the header fixes the cause rather than fighting it. */
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 24px;
@@ -146,6 +166,49 @@ body::before {
 .rig-meta-i { display: flex; align-items: baseline; gap: 6px; font-family: var(--mono); font-size: 10.5px; }
 .rig-meta-i b { color: var(--ink-4); letter-spacing: .1em; font-weight: 500; }
 .rig-meta-i span { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* The open-photograph count and the names behind it.
+   The summary is the whole closed state, so it must not widen with the list:
+   a masthead that grows with the selection pushes the reviewer and the project
+   selector off the strip. The list is absolutely positioned for the same
+   reason, and the header sits above the bands below it so it can paint over
+   them instead of being clipped by them. */
+.rig-disclose { position: relative; }
+.rig-summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px dotted var(--ink-3);
+}
+.rig-summary::-webkit-details-marker { display: none; }
+.rig-summary::marker { content: ""; }
+.rig-summary:hover { border-bottom-color: var(--ink); }
+.rig-summary:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.rig-disclose-h { color: var(--ink-4); font-size: 9.5px; }
+.rig-disclose-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  min-width: 260px;
+  max-width: 460px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+  background: var(--paper);
+  border: 1px solid var(--rule-2);
+  box-shadow: 0 6px 18px rgba(28, 27, 25, .18);
+}
+.rig-disclose-list li {
+  padding: 4px 10px;
+  font-size: 10.5px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
 
 .rig-nav { margin-left: auto; display: flex; }
 
@@ -211,7 +274,7 @@ body::before {
   font-size: 10.5px;
   flex-wrap: wrap;
 }
-.ident-k { color: var(--ink-4); letter-spacing: .1em; text-transform: uppercase; }
+.ident-k { color: var(--ink-3); letter-spacing: .1em; text-transform: uppercase; }
 .ident-v { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
 
 .ident-synth {
@@ -325,12 +388,27 @@ body::before {
 }
 .drop-title { margin: 0; font-family: var(--mono); font-size: 12px; font-weight: 600; }
 .drop-alt { margin: 6px 0; color: var(--ink-4); font-size: 11px; }
-.drop-hint { margin: 10px 0 0; color: var(--ink-4); font-family: var(--mono); font-size: 10.5px; }
+/* --ink-3, not --ink-4: this hint states the real accepted formats and size
+   limit, so it is information rather than decoration and has to clear AA. */
+.drop-hint { margin: 10px 0 0; color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; }
+
+/* Native dropdown chrome draws its own box and arrow, which fights the crafted
+   surface. The arrow is drawn here instead so the control keeps its affordance. */
+.field select, .exp-row select, .preset-item select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='6'%3E%3Cpath d='M1 1l3.5 3.5L8 1' fill='none' stroke='%2345423D' stroke-width='1.4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  padding-right: 26px;
+}
 
 .loaded[hidden] { display: none; }
 .loaded-acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 
 .fixtures { margin-top: 16px; }
+.fixtures-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.fixtures-head .fixtures-h { margin-bottom: 0; }
+.fixtures-acts { display: flex; gap: 6px; flex-wrap: wrap; }
 .fixtures-h {
   margin: 0 0 8px;
   font-family: var(--mono);
@@ -453,6 +531,11 @@ body::before {
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn-ghost { background: transparent; }
+/* The one PRIMARY action of a context. Solid ink, no outline: red is reserved
+   for attention and destruction, so the main action can no longer be mistaken
+   for a warning alongside the buttons that delete things. */
+.btn-primary { background: var(--ink); border-color: var(--ink); color: var(--paper); font-weight: 600; }
+.btn-primary:hover:not(:disabled) { background: var(--ink-2); border-color: var(--ink-2); color: var(--paper); }
 .btn-red { border-color: var(--red); color: var(--red); background: var(--red-wash); font-weight: 600; }
 .btn-red:hover:not(:disabled) { background: var(--red); color: var(--paper); }
 .btn-verify { border-color: var(--verify); color: var(--verify); background: var(--verify-wash); }
@@ -522,6 +605,41 @@ body::before {
 .stage-grid { display: grid; grid-template-columns: minmax(0, 1fr) 206px; gap: 18px; align-items: start; }
 .stage-l { min-width: 0; }
 .stage-r { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+
+/* The photographs of one inspection. An inspection can rest on several
+   photographs, and the evidence stage has to be able to show each one with its
+   own boxes: without this the operator can only ever see one frame of a group
+   and the rest of the evidence is unreachable. */
+.photo-switcher {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+}
+.photo-switcher-lbl {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.photo-switcher-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.photo-tab {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 4px 9px;
+  border: 1px solid var(--rule-2);
+  background: var(--paper-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.photo-tab:hover { background: var(--concrete); color: var(--ink); }
+.photo-tab.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+/* The sheet holds image coordinate space, not text: it must never mirror with
+   the paragraph, whatever direction the surrounding surface reads in. */
+.sheet { direction: ltr; }
 
 @media (max-width: 820px) { .stage-grid { grid-template-columns: minmax(0, 1fr); } }
 
@@ -865,6 +983,8 @@ body::before {
   box-shadow: 0 18px 48px rgba(28, 27, 25, .28);
 }
 .modal-h { margin: 0 0 14px; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+/* The modal's explanatory line, styled here instead of inline in the markup. */
+.modal-sub { margin: 0 0 12px; color: var(--ink-3); font-size: 11.5px; }
 .modal-body { margin: 0 0 16px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
 .modal-note { margin: 0 0 12px; font-family: var(--mono); font-size: 11px; color: var(--red); }
 .modal-acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
@@ -946,6 +1066,109 @@ body::before {
 }
 .preset-item .btn { padding: 3px 8px; }
 
+/* ==========================================================================
+   THE NVIDIA QUALIFICATION CARD
+   The verdict is the headline because it answers the question a judge actually
+   asks. The rows underneath are the evidence for it: each names the model that
+   really ran and says whether that row is the qualifying inference.
+   ========================================================================== */
+.qual {
+  margin-top: 12px;
+  border: 1px solid var(--rule-2);
+  border-radius: 4px;
+  background: var(--paper);
+  overflow: hidden;
+}
+.qual-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--neutral-wash);
+}
+.qual-k {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.qual-verdict {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--rule-2);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--ink-3);
+}
+.qual[data-requirement="MET"] .qual-verdict {
+  background: var(--verify-wash);
+  border-color: rgba(31, 111, 67, .38);
+  color: var(--verify);
+}
+.qual[data-requirement="PARTIAL"] .qual-verdict {
+  background: var(--review-wash);
+  border-color: rgba(154, 103, 0, .38);
+  color: var(--review);
+}
+.qual[data-requirement="NOT_MET"] .qual-verdict {
+  background: var(--reject-wash);
+  border-color: rgba(122, 31, 31, .38);
+  color: var(--reject);
+}
+.qual-sub {
+  margin: 12px 14px 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.qual-stages { margin: 0 14px; padding: 0; list-style: none; display: grid; gap: 7px; }
+.qual-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 11.5px;
+}
+.qual-row-k { min-width: 132px; font-weight: 600; color: var(--ink); }
+.qual-row-model {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink);
+  background: var(--neutral-wash);
+  padding: 2px 6px;
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+.qual-tag {
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.qual-tag-ok      { background: var(--verify-wash); border-color: rgba(31, 111, 67, .34); color: var(--verify); }
+.qual-tag-no      { background: var(--info-wash);   border-color: rgba(44, 110, 155, .34); color: var(--info); }
+.qual-tag-unknown { background: var(--neutral-wash); border-color: var(--rule-2); color: var(--neutral); }
+.qual-path {
+  margin: 12px 14px 14px;
+  padding-top: 11px;
+  border-top: 1px dashed var(--rule);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
 .foot {
   position: relative;
   z-index: 1;
@@ -962,6 +1185,36 @@ body::before {
 }
 .foot-thesis { color: var(--ink-2); font-weight: 600; letter-spacing: .02em; }
 .foot-r { margin-left: auto; }
+
+/* ==========================================================================
+   THE REVIEWER GATE
+   Sits above the pipeline on purpose, so it is the first thing read when the
+   workflow is unavailable rather than a message that only appears once
+   something is clicked. It states the real reason and it is the route to the
+   action that resolves it. The amber of setup, never the red of a failure: a
+   missing reviewer is an incomplete setup step, not a defect in the inspection.
+   ========================================================================== */
+.gate {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: var(--shell);
+  margin: 0 auto;
+  padding: 9px 20px;
+  border-bottom: 1px solid var(--rule-2);
+  background: var(--review-wash);
+}
+.gate-k {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--review);
+}
+.gate-b { flex: 1 1 240px; font-size: 11.5px; line-height: 1.5; color: var(--ink-2); }
 
 /* ==========================================================================
    THE PIPELINE STRIP
@@ -1309,16 +1562,37 @@ body::before {
    let a partial inspection read as a complete one.
    ========================================================================== */
 
-/* The language control stays LTR in every language: a selector listing
-   en / fr / ar / zh is read in code order, not in prose order. */
-.langbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; }
-.lang-k { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-4); }
-.lang-select {
-  font-family: var(--mono); font-size: 12px; color: var(--ink);
-  background: var(--paper); border: 1px solid var(--rule-2); padding: 4px 6px;
+/* The language control sits in the identity strip and stays LTR in every
+   language: a selector listing en / fr / ar / zh is read in code order, not in
+   prose order, and it is never inside a localized surface to begin with. */
+.lang-sel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  color: var(--ink-3);
+  font-size: 10px;
 }
-.lang-note { font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
-.lang-hint { font-size: 11.5px; color: var(--ink-3); margin: 6px 0 0; max-width: 78ch; }
+.lang-k {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  /* --ink-3, not --ink-4: the label names a control the operator has to find,
+     so it is information rather than decoration and has to clear AA. */
+  color: var(--ink-3);
+}
+.lang-sel select {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink);
+  background: var(--paper-2);
+  border: 1px solid var(--rule-2);
+  border-radius: 0;
+  padding: 3px 6px;
+}
+.lang-sel select:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
+.lang-note { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
 .i18n-surface[lang="zh-CN"] { line-height: 1.75; }
 .i18n-surface[lang="zh-CN"] .bay-h,
 .i18n-surface[lang="zh-CN"] .panel-h { letter-spacing: .04em; }

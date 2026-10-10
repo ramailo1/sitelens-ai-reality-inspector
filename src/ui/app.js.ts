@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The inspector client.
  *
  * Deliberately plain ES5-compatible DOM code: no framework, no bundler, no
@@ -55,7 +55,14 @@ const state = {
   captureIds: [],
   // Photographs the server refused as byte-identical duplicates of something
   // already open. Kept so the operator is told what happened to them.
-  duplicateCaptureIds: []
+  duplicateCaptureIds: [],
+  // Which photograph of the open group the evidence stage is showing. The
+  // inspection rests on all of them at once, but only one frame can be on
+  // screen, and the boxes must follow the frame that is.
+  evidenceCaptureId: null,
+  // The ceiling on one inspection, read from the server that enforces it, so
+  // the masthead can never claim a different maximum than the API.
+  maxInspectionImages: null
 };
 
 /**
@@ -98,15 +105,17 @@ function storeLanguage(code) {
 /**
  * Apply the language to the DOCUMENTED localized surface.
  *
- * Two generic hooks, so no field can quietly bypass localization:
+ * Four generic hooks, so no attribute can quietly bypass localization:
  *
  *   1. lang / dir on every .i18n-surface element.
  *   2. textContent for every element carrying a data-i18n key.
+ *   3. placeholder, aria-label, alt and title from their own data-i18n-* keys.
+ *   4. the language control's own label and note.
  *
- * The second hook is why the static headings follow the language: they are
- * declared once in the markup with a key, and this function rewrites them on
- * every switch. A heading added later inherits the behaviour automatically
- * instead of needing a per-field edit.
+ * The last three are why an aria-label, a placeholder or an image caption
+ * follows the language instead of staying English for a screen reader or a
+ * sighted reader alike: an unlocalized alt or aria-label is invisible in a
+ * screenshot and silent in a test, which is exactly how it survives.
  *
  * Only the result bays carry lang/dir. The masthead, the capture controls and
  * the project menu stay LTR on purpose: flipping the whole instrument would
@@ -130,6 +139,25 @@ function applyLanguage() {
     const key = node.getAttribute('data-i18n');
     if (key === null || key === undefined || key === '') continue;
     node.textContent = t(key);
+  }
+
+  // The other four homes for a translated string. Each is a separate selector
+  // because the attribute that carries the key is what tells the client which
+  // HTML attribute the value belongs in.
+  const ATTR_HOOKS = [
+    ['data-i18n-ph', 'placeholder'],
+    ['data-i18n-aria', 'aria-label'],
+    ['data-i18n-alt', 'alt'],
+    ['data-i18n-title', 'title'],
+  ];
+  for (const [attr, target] of ATTR_HOOKS) {
+    const nodes = document.querySelectorAll('[' + attr + ']');
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const key = node.getAttribute(attr);
+      if (key === null || key === undefined || key === '') continue;
+      node.setAttribute(target, t(key));
+    }
   }
 
   const label = $('lang-label');
@@ -218,6 +246,9 @@ function applyWorkspace(payload) {
     state.dataset = payload.dataset;
   }
   state.captures = payload.captures || [];
+  state.maxInspectionImages = typeof payload.maxInspectionImages === 'number'
+    ? payload.maxInspectionImages
+    : state.maxInspectionImages;
   // The server is authoritative about which photographs are open, including the
   // grouped order. Falls back to the single id so an older payload still works.
   state.captureIds = Array.isArray(payload.activeCaptureIds) && payload.activeCaptureIds.length > 0
@@ -228,6 +259,13 @@ function applyWorkspace(payload) {
   state.view = payload.view || null;
   state.activeId = null;
   state.openIds.clear();
+  // The open group changed, so the frame the evidence stage was showing may no
+  // longer belong to it. renderStage repairs this on the next pass; dropping the
+  // stale id here keeps that repair from showing a box on the wrong photograph
+  // in the one render between the change and the repair.
+  if (state.evidenceCaptureId !== null && !state.captureIds.includes(state.evidenceCaptureId)) {
+    state.evidenceCaptureId = null;
+  }
 }
 
 /** Human label for a capture source. Three cases, never collapsed into two. */
@@ -348,7 +386,7 @@ function renderReference() {
       active.textContent = 'No reference selected.';
     } else {
       active.textContent =
-        reference.name + ' — ' + reference.zone + ' — ' + reference.itemCount +
+        reference.name + ' â€” ' + reference.zone + ' â€” ' + reference.itemCount +
         ' expected element' + (reference.itemCount === 1 ? '' : 's') +
         (reference.edited ? ' (edited)' : '');
     }
@@ -392,7 +430,7 @@ function renderDataset() {
   const empty = $('dataset-empty');
 
   if (summary === null || summary === undefined) {
-    note.textContent = 'Checking for a local dataset…';
+    note.textContent = 'Checking for a local datasetâ€¦';
     $('dataset-count').textContent = '-';
     empty.hidden = false;
     empty.textContent = '';
@@ -400,7 +438,7 @@ function renderDataset() {
   }
 
   // The workspace summary carries a precomputed count; the full /api/dataset
-  // index carries the entries array instead. Both are truthful — read either.
+  // index carries the entries array instead. Both are truthful â€” read either.
   const imageCount = summary.count !== undefined && summary.count !== null
     ? summary.count
     : (summary.entries ? summary.entries.length : 0);
@@ -440,7 +478,7 @@ function renderDataset() {
     tile.appendChild(top);
 
     tile.appendChild(el('span', 'tile-title', entry.title));
-    tile.appendChild(el('span', 'tile-meta', entry.width + '×' + entry.height + ' · ' + bytes(entry.byteLength)));
+    tile.appendChild(el('span', 'tile-meta', entry.width + 'Ã—' + entry.height + ' Â· ' + bytes(entry.byteLength)));
     if (entry.geometryNormalized) {
       tile.appendChild(el('span', 'tile-rot', 'EXIF ' + entry.exifOrientation + ' normalized'));
     }
@@ -472,14 +510,14 @@ async function importDatasetImage(id) {
   state.importing = id;
   renderDataset();
   setLamp('working', 'Importing dataset image ' + id);
-  notify('Importing dataset image ' + id + '…');
+  notify('Importing dataset image ' + id + 'â€¦');
   const errorNode = $('dataset-error');
   errorNode.hidden = true;
 
   try {
     applyWorkspace(await post('/api/dataset/import', { id: id }));
     renderWorkspace();
-    setLamp('ready', 'Real capture loaded — inspect when ready');
+    setLamp('ready', 'Real capture loaded â€” inspect when ready');
     setStatus(
       'Dataset image ' + id + ' is now a capture of ' + (state.project ? state.project.name : 'this project')
       + '. It is a genuine photograph, labelled LOCAL DATASET. Inspect it when ready.',
@@ -616,7 +654,7 @@ function paintedArea(image) {
 /**
  * Point-reflect a pixel box through the frame: the exact mapping a 180-degree
  * display rotation demands. Extracted so the axis mapping is executable and
- * testable rather than folklore — the same reason transformBox exists upstream.
+ * testable rather than folklore â€” the same reason transformBox exists upstream.
  */
 function flipBox180(box, frameWidth, frameHeight) {
   return {
@@ -645,7 +683,14 @@ function renderOverlay() {
   const area = paintedArea(image);
   if (area === null) return;
 
-  const findings = view.inspectionFindings || [];
+  const findings = (view.inspectionFindings || []).filter((finding) => {
+    // A photograph that is not the one on screen must not draw its boxes onto
+    // it: a box read from another frame would be a rectangle invented out of
+    // nothing where it lands.
+    return state.captureIds.length <= 1
+      || finding.captureId === undefined
+      || finding.captureId === state.evidenceCaptureId;
+  });
 
   // A display flipped 180 degrees must carry its boxes with it. Boxes arrive in
   // the normalized (stored-pixel) space the model read; the flip is a display
@@ -691,7 +736,7 @@ function formatReviewerObj(rev) {
   if (!rev || !rev.name || !rev.name.trim()) return null;
   const name = rev.name.trim();
   const role = rev.role && rev.role.trim() ? rev.role.trim() : null;
-  return role ? name + ' · ' + role : name;
+  return role ? name + ' Â· ' + role : name;
 }
 
 function renderReviewer() {
@@ -754,6 +799,46 @@ async function submitReviewerModal(event) {
   }
 }
 
+/**
+ * What the open inspection consists of, in the masthead.
+ *
+ * A COUNT, never the file names. Forty characters of filename cannot be
+ * compared at a glance and grow without bound: twelve of them would push the
+ * reviewer and the project selector off the strip. The count is what the
+ * identity has to carry -- what was inspected -- and it is the same width for
+ * one photograph and for twelve.
+ *
+ * At the ceiling the count says so, because "12 photographs" otherwise reads
+ * as a choice the operator made rather than the maximum the API enforces. The
+ * names stay in the Capture bay's own strip, where they can be read properly.
+ */
+function renderCaptureSummary() {
+  const open = state.captureIds;
+  const node = $('meta-capture');
+  if (!node) return;
+
+  if (open.length === 0) {
+    node.textContent = state.view === null ? '-' : t('imgs.countZero');
+    clear($('meta-capture-list'));
+    return;
+  }
+
+  const cap = state.maxInspectionImages;
+  const atCap = typeof cap === 'number' && open.length >= cap;
+  node.textContent = fillText(t(atCap ? 'imgs.countAtCap' : 'imgs.count'), {
+    count: open.length,
+    max: typeof cap === 'number' ? cap : '',
+  });
+
+  const list = $('meta-capture-list');
+  clear(list);
+  open.forEach((id) => {
+    const capture = state.captures.filter((c) => c.id === id)[0];
+    const item = el('li', null, capture === undefined ? id : capture.label);
+    list.appendChild(item);
+  });
+}
+
 function renderHeader() {
   renderReviewer();
   const view = state.view;
@@ -763,7 +848,7 @@ function renderHeader() {
   // The masthead names the project once, in the project selector; repeating it
   // in the meta strip doubled the same words ten centimetres apart.
   setText('meta-zone', view.expected ? view.expected.zone : '-');
-  setText('meta-capture', p.captureLabel);
+  renderCaptureSummary();
   if (state.pipeline === null || state.pipeline === undefined) {
     setText('hdr-model', p.model);
     setText('hdr-reasoner', '-');
@@ -790,7 +875,7 @@ function renderHeader() {
     });
   }
   if (origin === 'FRESH' && view.provenance.inferenceExecuted) {
-    setText('hdr-provenance', view.provenance.provider + ' — ' + t('header.liveInference'));
+    setText('hdr-provenance', view.provenance.provider + ' â€” ' + t('header.liveInference'));
   }
 }
 
@@ -1128,7 +1213,7 @@ function renderPipeline() {
               ms: p.latencyMs,
             }));
 
-  // 02 COMPARE — ours, in code. Never attributed to a model.
+  // 02 COMPARE â€” ours, in code. Never attributed to a model.
   const matched = view.comparison.filter((r2) => r2.status === 'MATCH').length;
   const attention = view.comparison.filter((r2) => r2.status === 'ATTENTION').length;
   const undetermined = view.comparison.filter((r2) => r2.status === 'UNDETERMINED').length;
@@ -1147,7 +1232,7 @@ function renderPipeline() {
     set('pipe-reason-model', r.model);
     set('pipe-reason-note',
       t('certainty.' + r.reasoning.certainty)
-      + (r.provenance && r.provenance.degenerate ? ' — ' + t('pipe.degenerate') : ''));
+      + (r.provenance && r.provenance.degenerate ? ' â€” ' + t('pipe.degenerate') : ''));
   } else {
     step3.dataset.state = 'fail';
     set('pipe-reason-model', r.model === 'none' ? '-' : r.model);
@@ -1292,7 +1377,7 @@ function renderFindings() {
 
     // Evidence states exactly what the image supports, and no more. A finding
     // the model saw but did not localise is FULL-FRAME evidence: real image,
-    // real reading, no rectangle — and it is never given an invented one. A
+    // real reading, no rectangle â€” and it is never given an invented one. A
     // finding with no visual reading at all says so rather than borrowing the
     // image's authority.
     const evidenceNote = f === null ? null : f.evidenceNote;
@@ -1423,56 +1508,101 @@ function renderQualification() {
   host.hidden = false;
   host.dataset.requirement = e.nvidiaRequirement;
 
-  const verdict = e.nvidiaRequirement === 'MET'
-    ? 'MET'
-    : e.nvidiaRequirement === 'PARTIAL'
-      ? 'PARTIAL'
-      : t('qual.notMet');
-  // The verdict, the platform and the qualifying stage. The platform and model
-  // names are technical and stay as they are; the surrounding words do not.
-  $('qual-verdict').textContent = verdict + ' — ' + (e.qualifyingStage === null
-    ? t('qual.noQualifying')
-    : e.platform + fillText(t('qual.qualifyingStage'), {
-        stage: e.qualifyingStage === 'REASONING' ? t('qual.stageReasoning') : t('qual.stageVision'),
-      }));
-  // The end-to-end path sentence is regenerated in the selected language from
-  // the same canonical classification, rather than shipped as English prose.
-  $('qual-path').textContent = l10n !== null && l10n.qualification !== null
-    ? l10n.qualification.path
-    : e.qualificationPath;
+  // The verdict is the headline because it answers the question a judge
+  // actually asks. It is deliberately only the verdict: the platform and the
+  // qualifying stage each get their own row below, so a reader never has to
+  // parse them out of a sentence to find out which stage actually qualified.
+  const verdict = $('qual-verdict');
+  if (verdict !== null) {
+    verdict.textContent = e.nvidiaRequirement === 'MET'
+      ? t('qual.met')
+      : e.nvidiaRequirement === 'PARTIAL' ? t('qual.partial') : t('qual.notMet');
+  }
+
+  // Which shape the pipeline took. A hybrid run - an NVIDIA reasoning stage
+  // behind a non-NVIDIA vision model - is a different claim from a fully NVIDIA
+  // one, and the reader should not have to infer which from the rows underneath.
+  const subtitle = $('qual-subtitle');
+  if (subtitle !== null) {
+    subtitle.textContent = e.vision !== 'ELIGIBLE' && e.reasoning === 'ELIGIBLE'
+      ? t('qual.hybrid')
+      : t('qual.pipeline');
+  }
 
   if (list === null) return;
-  for (let i = 0; i < e.stages.length; i++) {
-    const stage = e.stages[i];
-    const l10nStage = l10n !== null && l10n.qualification !== null
-      ? l10n.qualification.stages[i] || null
-      : null;
-    const row = el('li', 'qual-stage');
-    row.dataset.stage = stage.stage;
-    row.dataset.classification = stage.classification;
 
-    const head = el('div', 'qual-stage-h');
-    head.appendChild(el('span', 'qual-stage-n', stage.stage === 'VISION'
-      ? t('rail.inspection')
-      : t('panel.stageReasoningHeading')));
-    head.appendChild(el('span', 'qual-stage-role', l10nStage === null ? stage.role : l10nStage.role));
-    row.appendChild(head);
+  // The localized projection carries the same roles and notes in the selected
+  // language. Absent, the canonical English prose is used unchanged: the model
+  // ids and the classification never depend on it.
+  const stageRole = (index, fallback) => {
+    if (l10n !== null && l10n.qualification !== null) {
+      const row = l10n.qualification.stages[index];
+      if (row !== undefined && row !== null) return row.role;
+    }
+    return fallback;
+  };
 
-    const model = el('p', 'qual-stage-model');
-    model.appendChild(document.createTextNode(stage.model));
-    model.appendChild(el('span', 'qual-nvidia', stage.isNvidiaModel
-      ? t('qual.nvidiaModel')
-      : t('qual.notNvidiaModel')));
-    row.appendChild(model);
+  const rows = [
+    {
+      key: 'vision',
+      model: view.provenance.model,
+      cls: e.vision,
+      role: stageRole(0, e.stages.length > 0 ? e.stages[0].role : null),
+    },
+    {
+      key: 'reasoning',
+      model: view.reasoning !== null && view.reasoning !== undefined
+        ? view.reasoning.model
+        : null,
+      cls: e.reasoning,
+      role: stageRole(1, e.stages.length > 1 ? e.stages[1].role : null),
+    },
+    {
+      key: 'platform',
+      model: e.platform,
+      cls: e.platform === null || e.platform === undefined ? null : 'ELIGIBLE',
+      role: null,
+    },
+  ];
 
-    const detail = el('p', 'qual-stage-note');
-    detail.appendChild(el('b', null, (stage.stage === 'VISION' ? t('qual.visionHead') : t('qual.reasoningHead')) + ' '));
-    detail.appendChild(document.createTextNode(
-      t('elig.' + stage.classification) + '. ' + (l10nStage === null ? stage.note : l10nStage.note)));
-    row.appendChild(detail);
+  for (const row of rows) {
+    const item = el('li', 'qual-row');
+    item.appendChild(el('span', 'qual-row-k', t('qual.row.' + row.key)));
+    item.appendChild(el('code', 'qual-row-model',
+      row.model === null || row.model === undefined || row.model === ''
+        ? t('qual.unavailable')
+        : String(row.model)));
 
-    list.appendChild(row);
+    // Fail-closed: only an explicit ELIGIBLE carries the positive tone, and an
+    // UNKNOWN never borrows the tone of a stage that was actually judged.
+    const tone = row.cls === 'ELIGIBLE' ? 'ok' : row.cls === 'NOT_ELIGIBLE' ? 'no' : 'unknown';
+    let tagText = t('qual.tag.' + row.key);
+    if (row.key === 'platform') {
+      tagText = row.cls === 'ELIGIBLE' ? t('qual.tag.platform') : t('qual.tag.platform.not');
+    } else if (row.role !== null && row.role !== undefined && row.role !== '') {
+      tagText = fillText(t('qual.tag.' + row.key + (row.cls === 'ELIGIBLE' ? '' : '.not')), {
+        role: row.role,
+      });
+    }
+    item.appendChild(el('span', 'qual-tag qual-tag-' + tone, tagText));
+    list.appendChild(item);
   }
+
+  // The end-to-end path, stated once, for whoever is reading the page as proof.
+  const path = $('qual-path');
+  if (path !== null) path.textContent = e.qualificationPath;
+}
+
+/**
+ * The colour class for a stage's classification.
+ *
+ * Fail-closed: only an explicit ELIGIBLE reads as the positive tone, and an
+ * UNKNOWN reads differently from a NOT_ELIGIBLE rather than sharing its colour.
+ */
+function tagTone(cls) {
+  if (cls === 'ELIGIBLE') return 'ok';
+  if (cls === 'NOT_ELIGIBLE') return 'no';
+  return 'unknown';
 }
 
 /** Provenance and eligibility: which engine actually ran, always. */
@@ -1714,7 +1844,14 @@ function renderStage() {
   const view = state.view;
   if (view === null) return;
   const p = view.provenance;
-  const src = '/api/capture-image/' + encodeURIComponent(p.captureId);
+  // The photograph on screen is the selected one when the open inspection has
+  // several, and the provenance photograph otherwise.
+  const shown = state.captureIds.length > 1 && state.evidenceCaptureId !== null
+    && state.captureIds.includes(state.evidenceCaptureId)
+    ? state.evidenceCaptureId
+    : p.captureId;
+  if (state.captureIds.length > 1) state.evidenceCaptureId = shown;
+  const src = '/api/capture-image/' + encodeURIComponent(shown);
   const image = $('evidence-image');
   if (image.dataset.src !== src) {
     image.dataset.src = src;
@@ -1722,14 +1859,18 @@ function renderStage() {
   }
   // Keep the evidence stage in the same display orientation as the capture
   // stage, so the operator never compares two different rotations of a site.
-  const capture = state.captures.filter((c) => c.id === p.captureId)[0];
+  const capture = state.captures.filter((c) => c.id === shown)[0];
   const flip = capture !== undefined
     ? displayNeedsFlip(capture.exifOrientation)
     : displayNeedsFlip(view.geometry !== undefined ? view.geometry.exifOrientation : 1);
   image.classList.toggle('img-flip180', flip);
+  const label = capture === undefined ? p.captureLabel : capture.label;
+  const basis = state.captureIds.length > 1
+    ? ' (' + fillText(t('imgs.evidenceBasedOn'), { count: state.captureIds.length }) + ')'
+    : '';
   $('stage-cap').textContent =
-    p.captureLabel + ' - ' + p.imageWidth + 'x' + p.imageHeight + ' - ' + bytes(p.byteLength)
-    + ' - ' + p.mediaType;
+    label + ' - ' + p.imageWidth + 'x' + p.imageHeight + ' - ' + bytes(p.byteLength)
+    + ' - ' + p.mediaType + basis;
 }
 
 /**
@@ -1756,6 +1897,8 @@ function safeRender(name, fn) {
 function renderAll() {
   applyLanguage();
   safeRender('imgs', renderImages);
+  safeRender('gate', renderReviewerGate);
+  safeRender('captureSummary', renderCaptureSummary);
   safeRender('header', renderHeader);
   safeRender('pipeline', renderPipeline);
   safeRender('rail', renderRail);
@@ -1767,13 +1910,74 @@ function renderAll() {
   safeRender('provenance', renderProvenance);
   safeRender('observations', renderObservations);
   safeRender('stage', renderStage);
+  safeRender('switcher', renderPhotoSwitcher);
   safeRender('overlay', renderOverlay);
+}
+
+/**
+ * The reviewer gate.
+ *
+ * A finding can only be moved out of UNVERIFIED by a named person, so until
+ * the project names one the human half of the workflow is genuinely closed.
+ * The banner is placed above the pipeline because a workflow that cannot
+ * complete has to say so before the operator invests in it.
+ */
+function renderReviewerGate() {
+  const banner = $('reviewer-gate');
+  if (!banner) return;
+  const reviewer = state.project === null ? null : state.project.reviewer;
+  const named = reviewer !== null && reviewer !== undefined
+    && typeof reviewer.name === 'string' && reviewer.name.trim().length > 0;
+  banner.hidden = named;
+  $('reviewer-gate-reason').textContent = t('gate.reason');
+}
+
+/**
+ * Which photograph of the open inspection the evidence stage shows.
+ *
+ * An inspection can rest on several photographs at once, and each carries its
+ * own evidence boxes. Only one frame can be on screen, so this selects the
+ * frame and the overlay follows it. A single-photo inspection needs no
+ * switcher: it would be a tab named after the only thing that could be on
+ * screen.
+ */
+function renderPhotoSwitcher() {
+  const switcher = $('photo-switcher');
+  if (!switcher) return;
+  const view = state.view;
+  const open = state.captureIds;
+  if (view === null || open.length <= 1) {
+    switcher.hidden = true;
+    return;
+  }
+  if (state.evidenceCaptureId === null || !open.includes(state.evidenceCaptureId)) {
+    state.evidenceCaptureId = view.provenance.captureId;
+  }
+  const host = $('photo-switcher-tabs');
+  host.textContent = '';
+  open.forEach((id) => {
+    const capture = state.captures.filter((c) => c.id === id)[0];
+    const label = capture === undefined ? id : capture.label;
+    const tab = el('button', 'photo-tab' + (id === state.evidenceCaptureId ? ' active' : ''), label);
+    tab.type = 'button';
+    tab.setAttribute('aria-pressed', id === state.evidenceCaptureId ? 'true' : 'false');
+    tab.addEventListener('click', () => {
+      state.evidenceCaptureId = id;
+      safeRender('stage', renderStage);
+      safeRender('overlay', renderOverlay);
+    });
+    host.appendChild(tab);
+  });
+  switcher.hidden = false;
 }
 
 function renderFixtures() {
   const host = $('fixture-list');
   clear(host);
   $('capture-empty').hidden = state.captures.length > 0 || state.project === null;
+  // Bulk actions over a single row would be no-ops, so they wait until there is
+  // a group to act on.
+  $('fixtures-acts').hidden = state.captures.length <= 1;
 
   state.captures.forEach((capture) => {
     const row = el('li', 'capture-row');
@@ -1797,7 +2001,7 @@ function renderFixtures() {
     button.addEventListener('click', () => loadCapture(capture.id));
     row.appendChild(button);
 
-    const del = el('button', 'capture-del', '×');
+    const del = el('button', 'capture-del', 'Ã—');
     del.type = 'button';
     del.setAttribute('aria-label', 'Delete capture ' + capture.label);
     del.addEventListener('click', () => confirmDeleteCapture(capture));
@@ -1851,7 +2055,7 @@ function renderImages() {
     meta.appendChild(el('span', 'img-status img-status-' + statusKey.replace('imgs.status.', ''), t(statusKey)));
     item.appendChild(meta);
 
-    const drop = el('button', 'img-drop', '×');
+    const drop = el('button', 'img-drop', 'Ã—');
     drop.type = 'button';
     drop.setAttribute('aria-label', fillText(t('imgs.dropOne'), { label: capture !== undefined ? capture.label : id }));
     drop.addEventListener('click', () => removeCaptureFromGroup(id));
@@ -1868,6 +2072,51 @@ async function removeCaptureFromGroup(captureId) {
   if (remaining.length === 0) return;
   try {
     applyWorkspace(await post('/api/captures/select', { captureIds: remaining }));
+    renderAll();
+    setLamp('ready', t('imgs.ready'));
+  } catch (error) {
+    notify(error.message, 'bad');
+  }
+}
+
+/**
+ * Open every capture of the project as ONE inspection.
+ *
+ * The server already accepts a whole group in one selection, so this is the
+ * same call the per-photo controls make, once. Selecting all is not the same as
+ * inspecting all: the group is stated before the operator commits to a run.
+ */
+async function selectAllCaptures() {
+  if (state.captures.length === 0) return;
+  const ids = state.captures.map((capture) => capture.id);
+  if (ids.length === state.captureIds.length && ids.every((id) => state.captureIds.includes(id))) {
+    notify(t('imgs.allOpen'), 'good');
+    return;
+  }
+  try {
+    applyWorkspace(await post('/api/captures/select', { captureIds: ids }));
+    state.evidenceCaptureId = null;
+    renderAll();
+    setLamp('ready', t('imgs.ready'));
+  } catch (error) {
+    notify(error.message, 'bad');
+  }
+}
+
+/**
+ * Fall back to a single photograph.
+ *
+ * It narrows to the first capture rather than to nothing, because a capture bay
+ * with no open photograph has no inspection to run and no caption to show, which
+ * reads as a broken screen instead of a cleared selection.
+ */
+async function clearCaptureSelection() {
+  const first = state.captures[0];
+  if (first === undefined) return;
+  if (state.captureIds.length === 1 && state.captureIds[0] === first.id) return;
+  try {
+    applyWorkspace(await post('/api/captures/select', { captureIds: [first.id] }));
+    state.evidenceCaptureId = null;
     renderAll();
     setLamp('ready', t('imgs.ready'));
   } catch (error) {
@@ -1900,13 +2149,13 @@ function showLoaded(label) {
  * pixels untouched), so the browser paints exactly the pixels the model saw and
  * every coordinate lives in one space. For most re-oriented files that is the
  * whole fix: the five dataset images tagged orientation 6 ('007', '009', '015',
- * '017', '021') carry pixels that are ALREADY upright — their tag was stale, so
+ * '017', '021') carry pixels that are ALREADY upright â€” their tag was stale, so
  * displaying the stored pixels as-is is what makes them upright.
  *
  * Orientation 3 is the measured exception (dataset '004' and '027'): their tags
  * were accurate and the stored pixels really are 180 degrees from the scene, so
- * tag normalization alone leaves them upside down. The display — and only the
- * display — is rotated back here, and renderOverlay maps every evidence box
+ * tag normalization alone leaves them upside down. The display â€” and only the
+ * display â€” is rotated back here, and renderOverlay maps every evidence box
  * through the same 180-degree flip, so a genuine box stays attached to the
  * correct physical region. No byte is re-encoded and the model's coordinate
  * space is untouched: the model still reads the same normalized bytes it is
@@ -2600,6 +2849,8 @@ function wire() {
   $('reviewer-change-btn').addEventListener('click', () => openReviewerModal());
   const hdrRevBtn = $('hdr-reviewer-btn');
   if (hdrRevBtn) hdrRevBtn.addEventListener('click', () => openReviewerModal());
+  const gateBtn = $('reviewer-gate-btn');
+  if (gateBtn) gateBtn.addEventListener('click', () => openReviewerModal());
   $('del-cancel').addEventListener('click', () => { state.pendingDelete = null; $('del-modal').close(); });
   $('del-confirm').addEventListener('click', commitDelete);
   document.addEventListener('keydown', (event) => {
@@ -2612,6 +2863,10 @@ function wire() {
   });
 
   $('run').addEventListener('click', runInspection);
+  const selectAllBtn = $('select-all-captures');
+  if (selectAllBtn) selectAllBtn.addEventListener('click', selectAllCaptures);
+  const clearSelBtn = $('clear-capture-selection');
+  if (clearSelBtn) clearSelBtn.addEventListener('click', clearCaptureSelection);
   $('pick').addEventListener('click', (event) => {
     event.stopPropagation();
     $('file').click();
@@ -2718,7 +2973,7 @@ async function boot() {
         ? 'Restored the last inspection of this capture. Inspect again for a fresh reading.'
         : state.captures.length > 0
           ? (hasDataset
-              ? 'Choose a capture, import a real dataset photograph below, or drop your own — then inspect.'
+              ? 'Choose a capture, import a real dataset photograph below, or drop your own â€” then inspect.'
               : 'Choose a capture or drop a site photograph, then inspect.')
           : 'No captures in this project yet. Import a local dataset image or drop a photograph.',
       null
