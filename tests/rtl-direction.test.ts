@@ -394,4 +394,9 @@ test('UI assets and localization catalogs contain no UTF-8 mojibake sequences an
     assert.match(UI_STRINGS[code]['priority.basis.comparison'], /\{pct\}\s*%/, `${code} priority.basis.comparison must include %`);
     assert.match(UI_STRINGS[code]['priority.basis.visual'], /\{pct\}\s*%/, `${code} priority.basis.visual must include %`);
   }
+  assert.equal(UI_STRINGS.fr['run.readyLamp'], 'CONSTATS PRÊTS — en attente de revue humaine');
+  assert.doesNotMatch(UI_STRINGS.fr['run.readyLamp'], /CONSTATATS|PRÎTS/);
+  assert.equal(UI_STRINGS.fr['qual.hybrid'], 'Pipeline d’inférence hybride');
+  assert.equal(UI_STRINGS.fr['qual.pipeline'], 'Pipeline d’inférence');
+  assert.equal(UI_STRINGS.fr['qual.row.platform'], 'Plateforme d’inférence');
 });
