@@ -416,3 +416,40 @@ test('the NVIDIA requirement card states the verdict, the stages and the path', 
   assert.match(APP_CSS, /\.qual-tag-no\b/);
   assert.match(APP_CSS, /\.qual-tag-unknown\b/);
 });
+
+/* ------------------------------------------------------------------ *
+ * Narrow-viewport layout.
+ *
+ * The masthead is a wrapping flex row, so its LAST line can still be wider
+ * than a phone. The workflow nav holds four tabs at a fixed intrinsic width
+ * (382px) and is pushed to the inline end, so it wrapped onto its own row and
+ * overhung a 390px viewport by 12px: measured in a real browser as
+ * document.scrollWidth 402 against a 390px window, i.e. a horizontal scrollbar
+ * with the 04 Findings step partly off-screen. These assert the header line is
+ * allowed to use the full row at phone widths.
+ * ------------------------------------------------------------------ */
+
+test('the workflow nav may use the full header row at phone widths', () => {
+  // The media block contains several rules, so match up to each selector rather
+  // than assuming .rig-nav is the first declaration in the block.
+  const narrow = APP_CSS.match(/@media \(max-width: 820px\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(narrow, 'the 820px breakpoint must exist');
+  const block = narrow[1] as string;
+  // Without flex-basis 100% the nav keeps its intrinsic 382px width and, being
+  // pushed to the inline end, overhangs a 390px viewport.
+  assert.match(block, /\.rig-nav\s*\{[^}]*flex:\s*1 1 100%/,
+    'the nav must be allowed to take the whole header row below 820px');
+  // A nav wider than its row has to be able to break, or the tabs clip instead.
+  assert.match(block, /\.rig-nav\s*\{[^}]*flex-wrap:\s*wrap/,
+    'the tabs must be able to wrap rather than overflow');
+});
+
+test('the tab gutters shrink at phone widths so four steps fit', () => {
+  const narrow = APP_CSS.match(/@media \(max-width: 820px\)\s*\{([\s\S]*?)\n\}/);
+  assert.ok(narrow, 'the 820px breakpoint must exist');
+  const block = narrow[1] as string;
+  assert.match(block, /\.step\s*\{[^}]*padding-inline:\s*0 10px/,
+    'the per-tab padding must shrink below 820px');
+  assert.match(block, /\.step\s*\{[^}]*margin-inline-end:\s*10px/,
+    'the per-tab trailing margin must shrink below 820px');
+});

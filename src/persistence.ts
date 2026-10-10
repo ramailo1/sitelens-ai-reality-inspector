@@ -70,12 +70,15 @@ export interface PersistedInspection {
   readonly payloads?: readonly {
     readonly captureId: string;
     readonly captureLabel: string;
+    readonly observationIds?: readonly string[] | undefined;
     readonly payload: {
       readonly observations: readonly unknown[];
       readonly elements: readonly unknown[];
       readonly findings: readonly unknown[];
     };
   }[] | undefined;
+  /** Original observation ids aligned with the primary payload's observations. */
+  readonly observationIds?: readonly string[] | undefined;
   /** Human decisions, keyed by the finding's stable content key. */
   readonly reviews: readonly {
     readonly key: string;
@@ -84,6 +87,32 @@ export interface PersistedInspection {
     readonly reviewedAt: string;
     readonly note: string | null;
   }[];
+  /** Human decisions on raw AI observations, keyed by observation id and stable content key. */
+  readonly observationReviews?: readonly {
+    readonly observationId: string;
+    readonly key: string;
+    readonly status: string;
+    readonly reviewer: string;
+    readonly reviewedAt: string;
+    readonly note: string | null;
+  }[] | undefined;
+  /** Human-verified actionable findings in the session ledger, including triage state. */
+  readonly ledgerFindings?: readonly {
+    readonly id: string;
+    readonly sourceObservationId: string;
+    readonly captureId: string;
+    readonly projectId: string | null;
+    readonly zoneId: string | null;
+    readonly category: string;
+    readonly summary: string;
+    readonly evidenceDescription: string;
+    readonly suggestedAction: string;
+    readonly severity: string;
+    readonly raisedBy: string;
+    readonly raisedAt: string;
+    readonly state: string;
+    readonly target: string;
+  }[] | undefined;
   /** Reasoning provenance, so a restored result is not credited to a model that did not run. */
   readonly reasoning: {
     readonly status: string;
@@ -310,9 +339,9 @@ export class WorkspacePersistence {
   }
 
   public inspectionFile(captureId: string): string {
-    // Capture ids are generated internally; the fallback keeps a hostile id from
-    // escaping the directory regardless.
-    const safe = /^[A-Za-z0-9_-]+$/.test(captureId) ? captureId : 'unknown';
+    // Capture ids and group keys (`grp_id1+id2`) are generated internally; the
+    // fallback keeps a hostile id from escaping the directory regardless.
+    const safe = /^[A-Za-z0-9_+-]+$/.test(captureId) ? captureId : 'unknown';
     return join(this.inspectionsDir, `${safe}.json`);
   }
 
@@ -349,9 +378,18 @@ export class WorkspacePersistence {
       ...(Array.isArray(record['payloads'])
         ? { payloads: record['payloads'] as PersistedInspection['payloads'] }
         : {}),
+      ...(Array.isArray(record['observationIds'])
+        ? { observationIds: record['observationIds'] as PersistedInspection['observationIds'] }
+        : {}),
       reviews: Array.isArray(record['reviews'])
         ? (record['reviews'] as PersistedInspection['reviews'])
         : [],
+      ...(Array.isArray(record['observationReviews'])
+        ? { observationReviews: record['observationReviews'] as PersistedInspection['observationReviews'] }
+        : {}),
+      ...(Array.isArray(record['ledgerFindings'])
+        ? { ledgerFindings: record['ledgerFindings'] as PersistedInspection['ledgerFindings'] }
+        : {}),
       reasoning:
         typeof record['reasoning'] === 'object' && record['reasoning'] !== null
           ? (record['reasoning'] as PersistedInspection['reasoning'])

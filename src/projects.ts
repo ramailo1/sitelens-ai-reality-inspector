@@ -370,9 +370,17 @@ export class ProjectStore {
    * project with no captures stays empty on purpose rather than borrowing
    * another project's image.
    */
+  private isCaptureInspected(captureId: string): boolean {
+    if (this.sessions.get(captureId)?.inspected() === true) return true;
+    if (this.persistence !== null && !this.hydrated.has(captureId)) {
+      return this.persistence.loadInspection(captureId) !== null;
+    }
+    return false;
+  }
+
   public selectDefaultCapture(projectId: string): string | null {
     const captures = this.capturesOf(projectId);
-    const inspected = captures.filter((c) => this.sessions.get(c.id)?.inspected() === true);
+    const inspected = captures.filter((c) => this.isCaptureInspected(c.id));
     const pool = inspected.length > 0 ? inspected : captures;
     const last = pool.length > 0 ? pool[pool.length - 1] : undefined;
     this.activeCaptureId = last === undefined ? null : last.id;
@@ -429,13 +437,22 @@ export class ProjectStore {
   }
 
   /**
-   * Drop everything durable that belongs to ONE capture.
+   * Drop everything durable and in-memory that belongs to ONE capture.
    *
-   * Uploaded bytes and the persisted inspection record both go, so deleting a
-   * capture actually deletes its image and its human verifications rather than
-   * leaving them on disk where a restart would resurrect them.
+   * Uploaded bytes, the persisted inspection record, and any multi-image group
+   * session containing this capture all go, so deleting a capture actually
+   * deletes its image and its human verifications rather than leaving them on
+   * disk where a restart would resurrect them.
    */
   private releaseCaptureState(capture: ProjectCapture): void {
+    this.hydrated.delete(capture.id);
+    for (const [key, session] of this.sessions.entries()) {
+      if (key === capture.id || session.imageIds.includes(capture.id)) {
+        this.sessions.delete(key);
+        this.hydrated.delete(key);
+        this.persistence?.deleteInspection(key);
+      }
+    }
     const store = this.persistence;
     if (store === null) return;
     store.deleteInspection(capture.id);
@@ -522,11 +539,15 @@ export class ProjectStore {
       // The deleted capture's result went with it, so the fallback follows the
       // same rule as entering a project: prefer something already inspected.
       const remaining = this.capturesOf(owned.value.projectId);
-      const inspected = remaining.filter((c) => this.sessions.get(c.id)?.inspected() === true);
+      const inspected = remaining.filter((c) => this.isCaptureInspected(c.id));
       const pool = inspected.length > 0 ? inspected : remaining;
       const last = pool.length > 0 ? pool[pool.length - 1] : undefined;
       this.activeCaptureId = last === undefined ? null : last.id;
       this.activeCaptureIds = last === undefined ? [] : [last.id];
+      if (last !== undefined) {
+        const session = this.sessionFor(last);
+        this.hydrateFromPersistence(last, session);
+      }
     }
     this.duplicateCaptureIds = this.duplicateCaptureIds.filter((id) => alive.has(id));
     this.persist();
@@ -587,8 +608,11 @@ export class ProjectStore {
   /** Push a project's reference into its sessions, dropping results it invalidates. */
   private markStale(projectId: string): void {
     const reference = this.referenceFor(projectId);
-    for (const capture of this.capturesOf(projectId)) {
-      this.sessions.get(capture.id)?.adoptReference(reference.state);
+    const projectCaptureIds = new Set(this.capturesOf(projectId).map((c) => c.id));
+    for (const session of this.sessions.values()) {
+      if (session.imageIds.some((id) => projectCaptureIds.has(id))) {
+        session.adoptReference(reference.state);
+      }
     }
   }
 
@@ -919,13 +943,21 @@ public ensureSelection(): Project {
     });
   }
 
-  /** Persist one capture's inspection result and human decisions. */
-  public persistInspection(captureId: string): void {
+  /**
+   * Persist one capture's inspection result and human decisions.
+   *
+   * Returns `true` when persistence is disabled (in-memory mode) or when the
+   * inspection record was durably written to disk. Returns `false` when
+   * persistence is enabled and the disk write failed or no persistable payload
+   * exists.
+   */
+  public persistInspection(captureId: string): boolean {
     const store = this.persistence;
     const session = this.sessions.get(captureId);
-    if (store === null || session === undefined) return;
+    if (store === null) return true;
+    if (session === undefined) return false;
     const payload = session.getPersistedPayload();
-    if (payload === null) return;
+    if (payload === null) return false;
 
     const view = session.view();
     const reasoning = session.getReasoningOutcome();
@@ -934,7 +966,10 @@ public ensureSelection(): Project {
     // run writes the historical flat `payload` and no `payloads` field at all,
     // which is exactly how a reader knows which shape it is holding.
     const payloads = session.getPersistedPayloads();
-    store.saveInspection({
+    const observationIds = session.getPersistedObservationIds();
+    const observationReviews = session.getObservationReviewRecords();
+    const ledgerFindings = session.getLedgerFindings();
+    return store.saveInspection({
       captureId,
       savedAt: new Date().toISOString(),
       inspectedAt: view.provenance.inspectedAt,
@@ -943,9 +978,12 @@ public ensureSelection(): Project {
       inferenceOrigin: view.inferenceOrigin,
       originalInferenceAt: view.originalInferenceAt,
       originalLatencyMs: view.originalLatencyMs,
+      observationIds,
       payload,
       ...(payloads.length > 1 ? { payloads } : {}),
       reviews: session.getReviewRecords(),
+      observationReviews,
+      ledgerFindings,
       reasoning:
         reasoning === null
           ? null

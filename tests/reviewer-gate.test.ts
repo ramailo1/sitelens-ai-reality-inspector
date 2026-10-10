@@ -268,14 +268,40 @@ test('naming a reviewer reopens every gated route', async () => {
     assert.equal(settled.verificationStatus, 'VERIFIED');
     assert.match(settled.review.reviewer, /Takou Rah/);
 
-    const upload = await call.raw('POST', '/api/upload?name=site.png&type=image/png', PNG, 'application/octet-stream');
-    assert.equal(upload.status, 200, 'an upload must work once the gate is open');
+    // finding-state operates on the finding LEDGER, which only holds findings
+    // raised from a human-verified OBSERVATION. Verifying one is what makes the
+    // id real: passing an inspection-finding id instead used to return 200 for a
+    // silent no-op, which is exactly the false confirmation the route now
+    // refuses. This is done BEFORE the upload below, because uploading selects a
+    // different capture and the observation would no longer belong to the open
+    // inspection. The gate being open is still what this test proves.
+    const observation = run.body.observations[0];
+    assert.ok(observation, 'the run must produce an observation to verify');
+    const raised = await call.json('POST', '/api/review', {
+      observationId: observation.id,
+      decision: 'VERIFIED',
+    });
+    assert.equal(raised.status, 200, 'an observation review must work once the gate is open');
+    // Read the ledger from the session the route just mutated, so the id used
+    // below is one the ledger genuinely holds.
+    const ledgerFinding = (await call.json('GET', '/api/session')).body.findings[0];
+    assert.ok(ledgerFinding, 'verifying an observation must raise a ledger finding');
 
+    // Read on the session that raised it, before the upload below switches the
+    // active capture to a different (uninspected) session.
     const state = await call.json('POST', '/api/finding-state', {
-      findingId: finding.id,
+      findingId: ledgerFinding.id,
       state: 'ACKNOWLEDGED',
     });
     assert.equal(state.status, 200, 'changing a finding state must work once the gate is open');
+    assert.equal(
+      state.body.findings.find((f: any) => f.id === ledgerFinding.id).state,
+      'ACKNOWLEDGED',
+      'the state must actually change, not merely be answered with a 200',
+    );
+
+    const upload = await call.raw('POST', '/api/upload?name=site.png&type=image/png', PNG, 'application/octet-stream');
+    assert.equal(upload.status, 200, 'an upload must work once the gate is open');
   });
 });
 

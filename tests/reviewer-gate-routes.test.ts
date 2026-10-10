@@ -240,10 +240,27 @@ test('with a reviewer configured, every gated route passes the gate', async () =
     });
     assert.equal(settle.status, 200, 'review-finding passes the gate and records');
 
+    // finding-state operates on the finding LEDGER, which only holds findings
+    // raised from a human-verified OBSERVATION. Verifying one is what makes the
+    // id real; an inspection-finding id used to draw a 200 for a silent no-op.
+    const raised = await h.call('POST', '/api/review', {
+      observationId: run.body.observations[0].id, decision: 'VERIFIED',
+    });
+    assert.equal(raised.status, 200, 'review passes the gate and records');
+    // The ledger is read from the session the route just mutated, rather than
+    // from the review payload, so the id used below is one the ledger holds.
+    const ledgerFinding = (await h.call('GET', '/api/session')).body.findings[0];
+    assert.ok(ledgerFinding, 'verifying an observation must raise a ledger finding');
+
     const state = await h.call('POST', '/api/finding-state', {
-      findingId: finding.id, state: 'ACKNOWLEDGED',
+      findingId: ledgerFinding.id, state: 'ACKNOWLEDGED',
     });
     assert.equal(state.status, 200, 'finding-state passes the gate and records');
+    assert.equal(
+      state.body.findings.find((f: any) => f.id === ledgerFinding.id).state,
+      'ACKNOWLEDGED',
+      'the state must actually change, not merely be answered with a 200',
+    );
 
     // Dataset import reaches its own validation, which is a different refusal.
     const imp = await h.call('POST', '/api/dataset/import', { id: '001-some-image' });

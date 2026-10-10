@@ -386,6 +386,7 @@ export interface RestoredInspection {
   readonly inspectedAt: string;
   readonly provider: string;
   readonly model: string;
+  readonly observationIds?: readonly string[] | undefined;
   readonly payload: {
     readonly observations: readonly unknown[];
     readonly elements: readonly unknown[];
@@ -402,6 +403,7 @@ export interface RestoredInspection {
   readonly payloads?: readonly {
     readonly captureId: string;
     readonly captureLabel: string;
+    readonly observationIds?: readonly string[] | undefined;
     readonly payload: {
       readonly observations: readonly unknown[];
       readonly elements: readonly unknown[];
@@ -415,6 +417,30 @@ export interface RestoredInspection {
     readonly reviewedAt: string;
     readonly note: string | null;
   }[];
+  readonly observationReviews?: readonly {
+    readonly observationId: string;
+    readonly key?: string;
+    readonly status: string;
+    readonly reviewer: string;
+    readonly reviewedAt: string;
+    readonly note: string | null;
+  }[] | undefined;
+  readonly ledgerFindings?: readonly {
+    readonly id: string;
+    readonly sourceObservationId: string;
+    readonly captureId: string;
+    readonly projectId: string | null;
+    readonly zoneId: string | null;
+    readonly category: string;
+    readonly summary: string;
+    readonly evidenceDescription: string;
+    readonly suggestedAction: string;
+    readonly severity: string;
+    readonly raisedBy: string;
+    readonly raisedAt: string;
+    readonly state: string;
+    readonly target: string;
+  }[] | undefined;
 }
 
 /**
@@ -703,13 +729,17 @@ export class InspectionSession {
   adoptReference(expected: ExpectedState): void {
     this.expected = expected;
     this.outcome = null;
+    this.imageOutcomes = [];
+    this.currentFindings = [];
     this.reasoning = null;
     this.reviewsByKey.clear();
+    this.ledger.clear();
   }
 
   /** Run the model. Safe to call repeatedly; the last run is what is rendered. */
   async run(options: { readonly useCache?: boolean } = {}): Promise<SessionView> {
     this.startedAt = Date.now();
+    this.ledger.clear();
     // The deterministic fixture is never served from cache: it costs nothing,
     // and a "cached" label on synthetic data would be actively misleading.
     const useCache = options.useCache === true && this.provider.name !== 'demo-fixture';
@@ -976,6 +1006,7 @@ export class InspectionSession {
   getPersistedPayloads(): readonly {
     readonly captureId: string;
     readonly captureLabel: string;
+    readonly observationIds: readonly string[];
     readonly payload: {
       observations: readonly unknown[];
       elements: readonly unknown[];
@@ -987,6 +1018,7 @@ export class InspectionSession {
     return this.imageOutcomes.map((image) => ({
       captureId: image.captureId,
       captureLabel: image.captureLabel,
+      observationIds: image.observations.map((o) => o.id),
       payload: {
         observations: image.observations.map(toCacheableObservation),
         elements: image.elements,
@@ -1011,6 +1043,12 @@ export class InspectionSession {
     return first === undefined ? null : first.payload;
   }
 
+  /** Observation IDs for the first image's payload, for single-image persistence. */
+  getPersistedObservationIds(): readonly string[] {
+    const first = this.getPersistedPayloads()[0];
+    return first === undefined ? [] : first.observationIds;
+  }
+
   /** Review records, for persistence. */
   getReviewRecords(): readonly {
     key: string; status: string; reviewer: string; reviewedAt: string; note: string | null;
@@ -1022,6 +1060,111 @@ export class InspectionSession {
       reviewedAt: review.reviewedAt,
       note: review.note,
     }));
+  }
+
+  /** Observation review records, for persistence. */
+  getObservationReviewRecords(): readonly {
+    observationId: string;
+    key: string;
+    status: string;
+    reviewer: string;
+    reviewedAt: string;
+    note: string | null;
+  }[] {
+    const outcome = this.outcome;
+    if (outcome === null || outcome.status === 'FAILED' || outcome.status === 'PENDING') return [];
+    const records: {
+      observationId: string;
+      key: string;
+      status: string;
+      reviewer: string;
+      reviewedAt: string;
+      note: string | null;
+    }[] = [];
+    for (const snapshot of outcome.result.observations) {
+      const live = this.inspector.getObservation(snapshot.id) ?? snapshot;
+      if (live.review !== null && live.verificationStatus !== 'UNVERIFIED') {
+        records.push({
+          observationId: live.id,
+          key: `${live.captureId}|${live.category}|${live.observation.trim().toLowerCase()}`,
+          status: live.verificationStatus,
+          reviewer: live.review.reviewer,
+          reviewedAt: live.review.reviewedAt,
+          note: live.review.note,
+        });
+      }
+    }
+    return records;
+  }
+
+  /** Ledger findings raised from verified observations, for persistence. */
+  getLedgerFindings(): readonly Finding[] {
+    return this.ledger.all();
+  }
+
+  /**
+   * Snapshot all mutable review and ledger state before a review operation so
+   * the session can roll back cleanly if durable persistence fails.
+   */
+  public snapshotReviewState(): {
+    readonly reviewsByKey: ReadonlyMap<string, FindingReview>;
+    readonly ledgerFindings: readonly Finding[];
+    readonly observationReviews: ReadonlyMap<
+      string,
+      {
+        readonly status: 'VERIFIED' | 'REJECTED' | 'NEEDS_REVIEW';
+        readonly reviewer: string;
+        readonly reviewedAt: string;
+        readonly note: string | null;
+      } | null
+    >;
+  } {
+    const observationReviews = new Map<
+      string,
+      {
+        readonly status: 'VERIFIED' | 'REJECTED' | 'NEEDS_REVIEW';
+        readonly reviewer: string;
+        readonly reviewedAt: string;
+        readonly note: string | null;
+      } | null
+    >();
+    const outcome = this.outcome;
+    if (outcome !== null && outcome.status !== 'FAILED' && outcome.status !== 'PENDING') {
+      for (const obs of outcome.result.observations) {
+        const live = this.inspector.getObservation(obs.id) ?? obs;
+        const status = live.verificationStatus;
+        observationReviews.set(
+          obs.id,
+          live.review === null ||
+            (status !== 'VERIFIED' && status !== 'REJECTED' && status !== 'NEEDS_REVIEW')
+            ? null
+            : {
+                status,
+                reviewer: live.review.reviewer,
+                reviewedAt: live.review.reviewedAt,
+                note: live.review.note,
+              },
+        );
+      }
+    }
+    return {
+      reviewsByKey: new Map(this.reviewsByKey),
+      ledgerFindings: this.ledger.all().map((f) => ({ ...f })),
+      observationReviews,
+    };
+  }
+
+  /** Restore review and ledger state captured by `snapshotReviewState()`. */
+  public rollbackReviewState(snapshot: ReturnType<InspectionSession['snapshotReviewState']>): void {
+    this.reviewsByKey.clear();
+    for (const [key, value] of snapshot.reviewsByKey.entries()) {
+      this.reviewsByKey.set(key, { ...value });
+    }
+    this.ledger.replaceAll(snapshot.ledgerFindings);
+    for (const [obsId, review] of snapshot.observationReviews.entries()) {
+      this.inspector.setObservationReviewState(obsId, review);
+    }
+    this.view();
   }
 
   /** Reapply persisted human decisions by their stable content key. */
@@ -1044,6 +1187,96 @@ export class InspectionSession {
     }
   }
 
+  /** Reapply persisted human decisions on observations belonging to this session. */
+  restoreObservationReviews(
+    records: readonly {
+      readonly observationId: string;
+      readonly key?: string;
+      readonly status: string;
+      readonly reviewer: string;
+      readonly reviewedAt: string;
+      readonly note: string | null;
+    }[],
+  ): void {
+    const outcome = this.outcome;
+    if (outcome === null || outcome.status === 'FAILED' || outcome.status === 'PENDING') return;
+    for (const record of records) {
+      if (record.status !== 'VERIFIED' && record.status !== 'REJECTED' && record.status !== 'NEEDS_REVIEW') {
+        continue;
+      }
+      if (typeof record.reviewer !== 'string' || record.reviewer.trim().length === 0) continue;
+      let targetId: string | null = this.hasObservation(record.observationId)
+        ? record.observationId
+        : null;
+      if (targetId === null && typeof record.key === 'string' && record.key.length > 0) {
+        const matched = outcome.result.observations.find(
+          (o) => `${o.captureId}|${o.category}|${o.observation.trim().toLowerCase()}` === record.key,
+        );
+        if (matched !== undefined) targetId = matched.id;
+      }
+      if (targetId === null) continue;
+      this.inspector.setObservationReviewState(targetId, {
+        status: record.status,
+        reviewer: record.reviewer.trim(),
+        reviewedAt: record.reviewedAt,
+        note: record.note,
+      });
+    }
+  }
+
+  /** Reapply persisted ledger findings raised from verified observations in this session. */
+  restoreLedgerFindings(
+    records: readonly {
+      readonly id: string;
+      readonly sourceObservationId: string;
+      readonly captureId: string;
+      readonly projectId: string | null;
+      readonly zoneId: string | null;
+      readonly category: string;
+      readonly summary: string;
+      readonly evidenceDescription: string;
+      readonly suggestedAction: string;
+      readonly severity: string;
+      readonly raisedBy: string;
+      readonly raisedAt: string;
+      readonly state: string;
+      readonly target: string;
+    }[],
+  ): void {
+    this.ledger.clear();
+    const outcome = this.outcome;
+    if (outcome === null || outcome.status === 'FAILED' || outcome.status === 'PENDING') return;
+
+    const recordByObs = new Map(
+      records
+        .filter(
+          (r) =>
+            typeof r.id === 'string' &&
+            r.id.length > 0 &&
+            (r.state === 'OPEN' || r.state === 'ACKNOWLEDGED' || r.state === 'CLOSED'),
+        )
+        .map((r) => [r.sourceObservationId, r] as const),
+    );
+
+    for (const snapshot of outcome.result.observations) {
+      const live = this.inspector.getObservation(snapshot.id) ?? snapshot;
+      if (live.verificationStatus !== 'VERIFIED' || live.review === null) continue;
+      const built = findingFrom(live);
+      if (!built.ok) continue;
+      const persisted = recordByObs.get(live.id);
+      if (persisted !== undefined) {
+        this.ledger.add({
+          ...built.finding,
+          id: persisted.id,
+          state: persisted.state as Finding['state'],
+          raisedAt: persisted.raisedAt,
+        });
+      } else {
+        this.ledger.add(built.finding);
+      }
+    }
+  }
+
   /**
    * Record a human decision.
    *
@@ -1057,6 +1290,9 @@ export class InspectionSession {
     readonly reviewer: string;
     readonly note?: string | null;
   }): SessionView {
+    if (!this.hasObservation(input.observationId)) {
+      return this.view();
+    }
     const updated = this.inspector.reviewObservation({
       observationId: input.observationId,
       decision: input.decision,
@@ -1064,12 +1300,66 @@ export class InspectionSession {
       note: input.note ?? null,
     });
 
-    if (updated !== null && input.decision === 'VERIFIED') {
-      const result = findingFrom(updated);
-      if (result.ok) this.ledger.add(result.finding);
+    if (updated !== null) {
+      if (input.decision === 'VERIFIED') {
+        const existing = this.ledger.findByObservation(updated.id);
+        const result = findingFrom(updated);
+        if (result.ok) {
+          this.ledger.add(
+            existing === null
+              ? result.finding
+              : {
+                  ...result.finding,
+                  id: existing.id,
+                  state: existing.state,
+                  raisedAt: existing.raisedAt,
+                },
+          );
+        }
+      } else {
+        this.ledger.removeByObservation(updated.id);
+      }
     }
 
     return this.view();
+  }
+
+  /**
+   * Resolve the inspection finding a caller means by this id.
+   *
+   * Recomputed from the live view so a stale `currentFindings` cache from a
+   * superseded run or cleared reference can never satisfy a lookup.
+   */
+  private resolveInspectionFinding(findingId: string): FindingView | null {
+    const rendered = this.view().inspectionFindings.find((f) => f.id === findingId);
+    return rendered === undefined ? null : rendered;
+  }
+
+  /**
+   * Whether this inspection currently holds a finding with this id.
+   *
+   * Exists so a route can REFUSE a decision against an id that is not here,
+   * rather than answering 200 for a no-op. A silent no-op is indistinguishable
+   * from a saved review to the client, which is exactly the false confirmation
+   * this product refuses to produce.
+   */
+  public hasInspectionFinding(findingId: string): boolean {
+    return this.resolveInspectionFinding(findingId) !== null;
+  }
+
+  /**
+   * Whether this inspection currently holds an observation with this id.
+   *
+   * Same contract as hasInspectionFinding: the caller learns that the id is not
+   * reviewable here instead of being told the review succeeded. Checks only the
+   * active inspection outcome, never superseded runs left in the inspector store.
+   */
+  public hasObservation(observationId: string): boolean {
+    const outcome = this.outcome;
+    if (outcome === null || outcome.status === 'FAILED' || outcome.status === 'PENDING') {
+      return false;
+    }
+    return outcome.result.observations.some((o) => o.id === observationId);
   }
 
   /**
@@ -1090,8 +1380,8 @@ export class InspectionSession {
     }
     // Find the finding by the id the UI currently holds, then remember the
     // decision under its stable key so it survives the next re-render.
-    const current = this.currentFindings.find((f) => f.id === input.findingId);
-    if (current === undefined) return this.view();
+    const current = this.resolveInspectionFinding(input.findingId);
+    if (current === null) return this.view();
 
     this.reviewsByKey.set(
       `${current.origin}|${current.comparisonId ?? ''}|${current.title.trim().toLowerCase()}`,
@@ -1131,9 +1421,23 @@ export class InspectionSession {
     // multi-image) or SEVERAL, one per photograph. Both are read; the per-image
     // payloads are rebuilt separately so each observation keeps the capture it
     // came from, then merged into one consolidated result.
-    const sources = record.payloads !== undefined && record.payloads.length > 0
+    const sources: readonly {
+      readonly captureId: string;
+      readonly captureLabel: string;
+      readonly observationIds?: readonly string[] | undefined;
+      readonly payload: {
+        readonly observations: readonly unknown[];
+        readonly elements: readonly unknown[];
+        readonly findings: readonly unknown[];
+      };
+    }[] = record.payloads !== undefined && record.payloads.length > 0
       ? record.payloads
-      : [{ captureId: this.capture.id, captureLabel: this.capture.label, payload: record.payload }];
+      : [{
+          captureId: this.capture.id,
+          captureLabel: this.capture.label,
+          observationIds: record.observationIds,
+          payload: record.payload,
+        }];
 
     const rebuilt: InspectionResult[] = [];
     const outcomes: ImageOutcome[] = [];
@@ -1162,6 +1466,7 @@ export class InspectionSession {
           projectId: this.projectId,
           zoneId: this.zoneId,
           expectedSummary: expectedSummaryFor(this.expected),
+          observationIds: source.observationIds,
         },
       );
       rebuilt.push(rebuiltOne);
@@ -1197,6 +1502,8 @@ export class InspectionSession {
     if (Number.isNaN(this.startedAt)) this.startedAt = Date.parse(record.savedAt);
 
     this.restoreReviews(record.reviews);
+    this.restoreObservationReviews(record.observationReviews ?? []);
+    this.restoreLedgerFindings(record.ledgerFindings ?? []);
     return true;
   }
 
@@ -1561,6 +1868,18 @@ export class InspectionSession {
   setFindingState(id: string, state: 'OPEN' | 'ACKNOWLEDGED' | 'CLOSED'): SessionView {
     this.ledger.setState(id, state);
     return this.view();
+  }
+
+  /**
+   * Whether this session's finding ledger holds a finding with this id.
+   *
+   * The ledger is a SEPARATE product from the inspection findings above: it
+   * holds findings raised from a human-verified OBSERVATION. Checking it here is
+   * what lets a route tell the caller that the id it named is not a real finding
+   * instead of reporting a state change that never happened.
+   */
+  public hasLedgerFinding(findingId: string): boolean {
+    return this.ledger.get(findingId) !== null;
   }
 
   /**

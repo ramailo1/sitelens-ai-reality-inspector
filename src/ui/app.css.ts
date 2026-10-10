@@ -368,6 +368,19 @@ body::before {
   .rig-meta { display: none; }
 }
 
+/* Narrow viewports: the header is a wrapping flex row, so its LAST line can
+   still be wider than the screen. The workflow nav holds four tabs at a fixed
+   intrinsic width (382px) and, with margin-inline-start:auto pushing it to the
+   inline end, it lands on its own row and overflows a 390px viewport by 12px.
+   Allowing it to take the full row and letting the tabs share the space keeps
+   every step reachable instead of pushing the strip off-screen. */
+@media (max-width: 820px) {
+  .rig { gap: 12px; padding: 0 12px; }
+  .rig-nav { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; }
+  .step { padding-inline: 0 10px; margin-inline-end: 10px; }
+  .rig-state { flex: 1 1 100%; }
+}
+
 .drop {
   border: 1px dashed var(--rule-2);
   background: var(--paper-2);

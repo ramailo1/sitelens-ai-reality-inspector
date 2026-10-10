@@ -877,8 +877,24 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       // empty inspection never becomes the record a restart restores. Keyed by
       // the group key, so a consolidated inspection persists under the identity
       // it will be restored with.
-      store.persistInspection(groupKey(store.selectedCaptures()));
-      sendJson(res, 200, view);
+      const persisted = store.persistInspection(groupKey(store.selectedCaptures()));
+      // The model already ran and its result is real, so refusing here would
+      // throw away evidence the operator paid for. What must not happen is
+      // answering 200 as though it were durable: a run whose write was attempted
+      // and lost has to say so, exactly as the review routes do. A run that
+      // produced nothing usable has nothing to write, which is the expected
+      // "false" and is reported by `outcome` rather than as a storage fault.
+      const writeAttempted =
+        view.outcome !== 'FAILED' && view.outcome !== 'PENDING';
+      sendJson(res, 200, persisted || !writeAttempted ? view : {
+        ...view,
+        persistence: {
+          written: false,
+          message:
+            'This inspection ran and its findings are shown, but it could not be written to '
+            + 'durable storage, so it will not be there after a restart.',
+        },
+      });
       return;
     }
 
@@ -948,7 +964,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       sendJson(res, 200, { capture: captureSummary(stored), ...workspace() });
       return;
     }
-if (req.method === 'POST' && path === '/api/review') {
+    if (req.method === 'POST' && path === '/api/review') {
       // The project must already name a reviewer. A reviewer string supplied in
       // this request body does NOT open the gate: it would let any caller
       // attribute a decision to a name the project never recorded, which is the
@@ -976,12 +992,7 @@ if (req.method === 'POST' && path === '/api/review') {
         sendJson(res, 400, { error: 'decision must be VERIFIED, REJECTED or NEEDS_REVIEW' });
         return;
       }
-      let reviewerName: string | null = null;
-      if (typeof payload.reviewer === 'string' && payload.reviewer.trim().length > 0) {
-        reviewerName = payload.reviewer.trim();
-      } else {
-        reviewerName = formatReviewer(store.activeProject()?.reviewer);
-      }
+      const reviewerName = formatReviewer(store.activeProject()?.reviewer);
       if (reviewerName === null) {
         sendJson(res, 400, {
           error: 'REVIEWER_NOT_CONFIGURED',
@@ -989,17 +1000,41 @@ if (req.method === 'POST' && path === '/api/review') {
         });
         return;
       }
-      const reviewed = requireSession().review({
-          observationId,
-          decision,
-          reviewer: reviewerName,
-          note: typeof note === 'string' ? note : null,
+      // Resolve the session BEFORE deciding, so an id that is not part of this
+      // inspection is refused rather than answered 200. A no-op review and a
+      // saved review return the same payload, so a 200 here would tell the
+      // operator their decision was recorded when nothing was.
+      const reviewSession = requireSession();
+      if (!reviewSession.hasObservation(observationId)) {
+        sendJson(res, 404, {
+          error: 'UNKNOWN_OBSERVATION',
+          message:
+            'That observation is not part of the open inspection, so no human decision was '
+            + 'recorded. Re-run the inspection and review the finding it lists.',
         });
+        return;
+      }
+      const snapshot = reviewSession.snapshotReviewState();
+      const reviewed = reviewSession.review({
+        observationId,
+        decision,
+        reviewer: reviewerName,
+        note: typeof note === 'string' ? note : null,
+      });
       // A human decision is the most valuable thing in the product, so it is
       // written through immediately rather than waiting for the next run.
       // Keyed by the group, so a consolidated inspection's reviews are stored against
-    // the same identity the inspection restores under.
-    store.persistInspection(groupKey(store.selectedCaptures()));
+      // the same identity the inspection restores under.
+      const persisted = store.persistInspection(groupKey(store.selectedCaptures()));
+      if (!persisted) {
+        reviewSession.rollbackReviewState(snapshot);
+        sendJson(res, 500, {
+          error: 'PERSISTENCE_FAILED',
+          message:
+            'The review decision could not be written to durable storage, so it was not recorded.',
+        });
+        return;
+      }
       sendJson(res, 200, reviewed);
       return;
     }
@@ -1029,12 +1064,7 @@ if (req.method === 'POST' && path === '/api/review') {
         sendJson(res, 400, { error: 'decision must be VERIFIED, REJECTED or NEEDS_REVIEW' });
         return;
       }
-      let reviewerName: string | null = null;
-      if (typeof payload.reviewer === 'string' && payload.reviewer.trim().length > 0) {
-        reviewerName = payload.reviewer.trim();
-      } else {
-        reviewerName = formatReviewer(store.activeProject()?.reviewer);
-      }
+      const reviewerName = formatReviewer(store.activeProject()?.reviewer);
       if (reviewerName === null) {
         sendJson(res, 400, {
           error: 'REVIEWER_NOT_CONFIGURED',
@@ -1042,13 +1072,35 @@ if (req.method === 'POST' && path === '/api/review') {
         });
         return;
       }
-      const settled = requireSession().reviewFinding({
-          findingId,
-          decision,
-          reviewer: reviewerName,
-          note: typeof note === 'string' ? note : null,
+      // Same trust boundary as /api/review: an id this inspection does not hold
+      // is refused instead of returning the unchanged view as if it had settled.
+      const settleSession = requireSession();
+      if (!settleSession.hasInspectionFinding(findingId)) {
+        sendJson(res, 404, {
+          error: 'UNKNOWN_FINDING',
+          message:
+            'That finding is not part of the open inspection, so no human decision was recorded. '
+            + 'Re-run the inspection and review the finding it lists.',
         });
-      store.persistInspection(groupKey(store.selectedCaptures()));
+        return;
+      }
+      const snapshot = settleSession.snapshotReviewState();
+      const settled = settleSession.reviewFinding({
+        findingId,
+        decision,
+        reviewer: reviewerName,
+        note: typeof note === 'string' ? note : null,
+      });
+      const persisted = store.persistInspection(groupKey(store.selectedCaptures()));
+      if (!persisted) {
+        settleSession.rollbackReviewState(snapshot);
+        sendJson(res, 500, {
+          error: 'PERSISTENCE_FAILED',
+          message:
+            'The review decision could not be written to durable storage, so it was not recorded.',
+        });
+        return;
+      }
       sendJson(res, 200, settled);
       return;
     }
@@ -1066,7 +1118,7 @@ if (req.method === 'POST' && path === '/api/review') {
         return;
       }
       const { findingId, state } = payload;
-      if (typeof findingId !== 'string') {
+      if (typeof findingId !== 'string' || findingId.length === 0) {
         sendJson(res, 400, { error: 'findingId is required' });
         return;
       }
@@ -1074,7 +1126,33 @@ if (req.method === 'POST' && path === '/api/review') {
         sendJson(res, 400, { error: 'state must be OPEN, ACKNOWLEDGED or CLOSED' });
         return;
       }
-      sendJson(res, 200, requireSession().setFindingState(findingId, state));
+      // A state change is a recorded human triage decision, so an id the ledger
+      // does not hold must be refused. setFindingState() cannot report failure,
+      // and returning the unchanged view under 200 would claim the finding had
+      // been acknowledged when nothing moved.
+      const stateSession = requireSession();
+      if (!stateSession.hasLedgerFinding(findingId)) {
+        sendJson(res, 404, {
+          error: 'UNKNOWN_FINDING',
+          message:
+            'That finding is not in this project, so its state was not changed. '
+            + 'Only a human-verified finding can be acknowledged or closed.',
+        });
+        return;
+      }
+      const snapshot = stateSession.snapshotReviewState();
+      const updated = stateSession.setFindingState(findingId, state);
+      const persisted = store.persistInspection(groupKey(store.selectedCaptures()));
+      if (!persisted) {
+        stateSession.rollbackReviewState(snapshot);
+        sendJson(res, 500, {
+          error: 'PERSISTENCE_FAILED',
+          message:
+            'The finding state could not be written to durable storage, so it was not changed.',
+        });
+        return;
+      }
+      sendJson(res, 200, updated);
       return;
     }
     if (req.method === 'GET' && (path === '/' || path === '/index.html')) {
@@ -1126,7 +1204,10 @@ export async function startInspectionServer(port = 4317): Promise<void> {
   }
   const reasoner = createReasoner(process.env);
   const persistFlag = (process.env['SITELENS_PERSIST'] ?? 'on').trim().toLowerCase();
-  const persistence = persistFlag === 'off' || persistFlag === '0' ? null : new WorkspacePersistence();
+  const persistence =
+    persistFlag === 'off' || persistFlag === '0' || persistFlag === 'false' || persistFlag === 'no'
+      ? null
+      : new WorkspacePersistence();
   const dataset = readDatasetIndex();
 
   // Live presentation translation reuses the reasoning endpoint and

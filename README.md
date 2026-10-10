@@ -15,7 +15,7 @@ Built for the **Nebius × NVIDIA Global AI Hackathon**.
 
 ```bash
 npm install          # zero runtime dependencies
-npm test             # 583 tests passing
+npm test             # 614 tests passing
 npm run typecheck    # strict tsc, 0 errors
 
 # Option A: Real inference on Nebius Token Factory (MiniCPM-V + Nemotron):
@@ -166,7 +166,7 @@ docs/
   DEMO.md                  Hero demo script, walkthrough, and recording checklist
   HACKATHON-SUBMISSION.md  Formatted submission package for judges
   DEVPOST-SUBMISSION.md    Condensed submission mirror for Devpost
-tests/                     Node.js native test suite (583 tests across 32 suites)
+tests/                     Node.js native test suite (614 tests across 33 suites)
 ```
 
 ---
@@ -176,7 +176,7 @@ tests/                     Node.js native test suite (583 tests across 32 suites
 Run the full automated test suite:
 
 ```bash
-npm test             # 583 tests passing
+npm test             # 614 tests passing
 npm run typecheck    # 0 TypeScript errors
 ```
 

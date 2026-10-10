@@ -230,6 +230,19 @@ export class ObservationStore {
     this.rows.set(id, updated);
     return updated;
   }
+
+  /** Restore or roll back an observation's review state directly. */
+  public setReviewState(id: string, review: ObservationReview | null): AIObservation | null {
+    const existing = this.rows.get(id);
+    if (!existing) return null;
+    const updated: AIObservation = {
+      ...existing,
+      verificationStatus: review === null ? 'UNVERIFIED' : review.status,
+      review,
+    };
+    this.rows.set(id, updated);
+    return updated;
+  }
 }
 
 export class RealityInspector {
@@ -280,7 +293,7 @@ export class RealityInspector {
    */
   private buildFromPayload(
     raw: RawProviderResult,
-    options: InspectOptions,
+    options: InspectOptions & { readonly observationIds?: readonly string[] | undefined },
   ): InspectionResult {
     const observations: AIObservation[] = [];
     const rejected: { issues: readonly ValidationIssue[] }[] = [];
@@ -320,8 +333,11 @@ export class RealityInspector {
       }
 
       const value = validated.value;
+      const restoredId = options.observationIds?.[observations.length];
       const observation: AIObservation = {
-        id: this.idFactory(),
+        id: typeof restoredId === 'string' && restoredId.trim().length > 0
+          ? restoredId.trim()
+          : this.idFactory(),
         captureId: options.image.captureId,
         // Falls back to the id when a caller supplies no label, so an observation
         // is never unattributable. Never invented prose: the id is a real id.
@@ -442,7 +458,7 @@ export class RealityInspector {
    */
   rebuildFromPayload(
     raw: RawProviderResult,
-    options: InspectOptions,
+    options: InspectOptions & { readonly observationIds?: readonly string[] | undefined },
   ): InspectionResult {
     return { ...this.buildFromPayload(raw, options), inferenceOrigin: 'CACHED' };
   }
@@ -495,6 +511,13 @@ export class RealityInspector {
       reviewedAt: this.now().toISOString(),
       note: input.note ?? null,
     });
+  }
+
+  public setObservationReviewState(
+    observationId: string,
+    review: ObservationReview | null,
+  ): AIObservation | null {
+    return this.store.setReviewState(observationId, review);
   }
 
   public getObservation(id: string): AIObservation | null {

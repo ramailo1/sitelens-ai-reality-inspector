@@ -61,7 +61,7 @@ REALITY IMAGE ➔ [1] MiniCPM-V (SEE) ➔ [2] compare.ts (COMPARE) ➔ [3] Nemot
 
 ### Technology Stack
 * **Language & Runtime**: TypeScript, Node.js (≥ 22.6, zero runtime dependencies, native type-stripping).
-* **Testing**: Node.js native test runner (583 tests passing across 32 test suites, 0 TypeScript errors) + Playwright Chromium browser verification across all 4 locales and desktop/mobile viewports.
+* **Testing**: Node.js native test runner (614 tests passing across 33 test suites, 0 TypeScript errors) + Playwright Chromium browser verification across all 4 locales and desktop/mobile viewports.
 * **Persistence**: Atomic JSON storage under `data/`.
 
 ### NVIDIA Contribution

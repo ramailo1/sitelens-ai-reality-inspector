@@ -171,4 +171,32 @@ export class FindingLedger {
     this.rows.set(id, updated);
     return updated;
   }
+
+  /** Look up an existing ledger finding raised from a specific observation. */
+  public findByObservation(sourceObservationId: string): Finding | null {
+    for (const row of this.rows.values()) {
+      if (row.sourceObservationId === sourceObservationId) return row;
+    }
+    return null;
+  }
+
+  /** Drop any ledger finding raised from an observation that is no longer VERIFIED. */
+  public removeByObservation(sourceObservationId: string): void {
+    for (const [id, row] of this.rows.entries()) {
+      if (row.sourceObservationId === sourceObservationId) {
+        this.rows.delete(id);
+      }
+    }
+  }
+
+  public clear(): void {
+    this.rows.clear();
+  }
+
+  public replaceAll(findings: readonly Finding[]): void {
+    this.rows.clear();
+    for (const finding of findings) {
+      this.rows.set(finding.id, finding);
+    }
+  }
 }
