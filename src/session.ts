@@ -40,6 +40,8 @@ import type { Finding } from './findings.ts';
 import { localizeInspectionAll } from './localized-inspection.ts';
 import type { LocalizedInspection } from './localized-inspection.ts';
 import type { InspectionLanguage } from './localization.ts';
+import { buildModelTranslationMap, collectModelProse, translateModelTextsLive } from './model-translation.ts';
+import type { ModelTranslationResult, ModelTranslator } from './model-translation.ts';
 import { readImageDimensions, readImageGeometry, toPixelBox } from './image-metadata.ts';
 import { compareExpectedState } from './compare.ts';
 import type { ComparisonRow } from './types/inspection.ts';
@@ -311,6 +313,18 @@ export interface SessionView {
    * ran, which models ran it, or whether it qualifies.
    */
   readonly localized: Readonly<Record<InspectionLanguage, LocalizedInspection>>;
+  /**
+   * Presentation-layer translations of model-authored English prose.
+   *
+   * Keyed by the EXACT English source string. Each entry carries fr/ar/zh
+   * display texts plus per-language `translated` flags. Computed from
+   * canonical facts, shipped in the same payload so the language switch stays
+   * a local read, and never written back into the canonical fields. A changed
+   * source misses the map and falls back to the original.
+   */
+  readonly modelTranslations: Readonly<
+    Record<string, Readonly<Record<InspectionLanguage, ModelTranslationResult>>>
+  >;
   /** Geometry facts about the capture, including any EXIF normalization. */
   readonly geometry: {
     readonly storedWidth: number | null;
@@ -482,6 +496,8 @@ export class InspectionSession {
   // type-stripping loader does not support parameter properties.
   private readonly provider: AIProvider;
   private readonly reasoner: Reasoner;
+  /** Presentation translator for novel model prose. Null keeps memory-only. */
+  private readonly translator: ModelTranslator | null;
   /**
    * Every photograph in this inspection.
    *
@@ -531,6 +547,12 @@ export class InspectionSession {
       readonly reasoner?: Reasoner;
       readonly projectName?: string | null;
       /**
+       * Presentation-layer translator for novel model prose. Null means the
+       * offline memory serves alone with honest fallback. Never a vision or
+       * reasoning re-inference: it translates finished strings once per run.
+       */
+      readonly translator?: ModelTranslator | null;
+      /**
        * The remaining photographs of a consolidated inspection.
        *
        * Accepted as an array rather than a second positional parameter so every
@@ -545,6 +567,7 @@ export class InspectionSession {
       kind: 'DISABLED',
       message: 'No construction-reasoning model is attached to this session.',
     });
+    this.translator = options?.translator ?? null;
     // De-duplicated by identity so a repeated capture cannot be analysed twice.
     const seen = new Set<string>();
     const all: DemoCapture[] = [];
@@ -779,7 +802,71 @@ export class InspectionSession {
     } else {
       this.reasoning = null;
     }
+    // Presentation translations for whatever novel prose this run produced.
+    // Runs before the view is built so the payload ships them; never fails or
+    // slows the inspection itself beyond the bounded translation calls.
+    await this.translateModelProse();
     return this.view();
+  }
+
+  /**
+   * Translate novel model-authored prose for display, once per run.
+   *
+   * Skipped for the synthetic fixture (which must never spend budget or gain
+   * live text that implies real inference) and whenever no translator is
+   * configured. Failures resolve to honest fallback inside the helper; a throw
+   * here would be a presentation fault taking down an inspection, so the call
+   * is additionally guarded and can never reject the run.
+   */
+  private async translateModelProse(): Promise<void> {
+    const translator = this.translator;
+    if (translator === null || this.provider.name === 'demo-fixture') return;
+    const sources = this.collectRunModelProse();
+    if (sources.length === 0) return;
+    try {
+      await translateModelTextsLive(sources, translator);
+    } catch {
+      // Honest fallback is already the per-entry outcome; there is nothing to
+      // report that would not itself be invented presentation state.
+    }
+  }
+
+  /**
+   * The canonical prose of the just-finished run, as exact source strings.
+   *
+   * Read from the outcome result and reasoning outcome - the same validated
+   * strings the view later renders - so translation keys can never drift from
+   * what is on screen. Translated text is never written back here.
+   */
+  private collectRunModelProse(): readonly string[] {
+    const outcome = this.outcome;
+    const result = outcome !== null && 'result' in outcome ? outcome.result : null;
+    if (result === null) return [];
+    return collectModelProse({
+      detections: (result.elements ?? []).map((d) => ({ evidence: d.evidence })),
+      observations: result.observations.map((o) => ({
+        observation: o.observation,
+        evidenceDescription: o.evidence.description,
+      })),
+      findings: (result.modelFindings ?? []).map((f) => ({
+        origin: f.origin,
+        title: f.title,
+        observation: f.observation,
+        reason: f.reason,
+        evidence: f.evidence,
+        recommendation: f.recommendation,
+        location: f.location,
+      })),
+      reasoning: this.reasoning !== null && this.reasoning.status === 'AVAILABLE'
+        ? {
+          summary: this.reasoning.reasoning.summary,
+          whatMatters: this.reasoning.reasoning.whatMatters,
+          rationale: this.reasoning.reasoning.rationale,
+          recommendation: this.reasoning.reasoning.recommendation,
+          verification: this.reasoning.reasoning.verification,
+        }
+        : null,
+    });
   }
 
   /**
@@ -1370,6 +1457,38 @@ export class InspectionSession {
       rejectionIssues,
     };
 
+    // Presentation-layer translations of model-authored English. Collected
+    // from canonical facts, resolved through the offline memory, and shipped
+    // alongside the view so the language switch stays a local read. Never
+    // written back into the canonical fields.
+    const modelTranslations = buildModelTranslationMap(
+      collectModelProse({
+        detections: detections.map((d) => ({ evidence: d.evidence })),
+        observations: observations.map((o) => ({
+          observation: o.observation,
+          evidenceDescription: o.evidenceDescription,
+        })),
+        findings: inspectionFindings.map((f) => ({
+          origin: f.origin,
+          title: f.title,
+          observation: f.observation,
+          reason: f.reason,
+          evidence: f.evidence,
+          recommendation: f.recommendation,
+          location: f.location,
+        })),
+        reasoning: reasoningView.status === 'AVAILABLE' && reasoningView.reasoning !== null
+          ? {
+              summary: reasoningView.reasoning.summary,
+              whatMatters: reasoningView.reasoning.whatMatters,
+              rationale: reasoningView.reasoning.rationale,
+              recommendation: reasoningView.reasoning.recommendation,
+              verification: reasoningView.reasoning.verification,
+            }
+          : null,
+      })
+    );
+
     return {
       outcome: outcome?.status ?? 'PENDING',
       provenance,
@@ -1425,6 +1544,7 @@ export class InspectionSession {
           platform: pipelineEligibility.platform,
         },
       }),
+      modelTranslations,
       geometry: {
         storedWidth: geometry?.stored.width ?? null,
         storedHeight: geometry?.stored.height ?? null,

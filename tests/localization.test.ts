@@ -796,7 +796,9 @@ function languageHarness(stored: string | null) {
   const storage = new Map<string, string>();
   if (stored !== null) storage.set('sitelens.inspectionLanguage', stored);
 
+  const root = stubNode('html');
   const document = {
+    documentElement: root,
     createElement: (tag: string) => stubNode(tag),
     createTextNode: (text: string) => {
       const n = stubNode('#text');
@@ -854,6 +856,7 @@ function languageHarness(stored: string | null) {
   return {
     nodes,
     surfaces,
+    root,
     storage,
     apiCalls,
     renderedCount: () => rendered,
@@ -931,7 +934,13 @@ test('the localized surface carries lang and dir in the markup', () => {
     /<label class="lang-sel" for="lang-select"[^>]*>\s*<span class="lang-k" id="lang-label"[^>]*data-i18n="lang\.label"/);
   // The control itself stays LTR. It is in the identity strip, which is never a
   // localized surface, and it declares so explicitly rather than relying on it.
-  assert.match(INDEX_HTML, /<label class="lang-sel" for="lang-select" dir="ltr">/);
+  // Extra attributes (tooltip) are allowed; the three invariants are for, dir
+  // and the LTR declaration.
+  assert.match(INDEX_HTML, /<label class="lang-sel" for="lang-select"[^>]*dir="ltr"[^>]*>/);
+  // The presentation-only hint lives as a tooltip, not as visible header text,
+  // so the identity strip stays compact.
+  assert.match(INDEX_HTML, /<label class="lang-sel"[^>]*data-i18n-title="lang\.hint"/);
+  assert.doesNotMatch(INDEX_HTML, /id="lang-note"/);
 });
 
 test('the client is still valid JavaScript after the catalog is injected', () => {

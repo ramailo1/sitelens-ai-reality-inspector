@@ -21,6 +21,8 @@ import { INDEX_HTML, APP_CSS, APP_JS } from './ui-assets.ts';
 import { cleanItems, presetToState } from './expected-state.ts';
 import type { Preset } from './expected-state.ts';
 import { inspectionCache } from './cache.ts';
+import { createTranslatorFromEnv } from './model-translation.ts';
+import type { ModelTranslator } from './model-translation.ts';
 import { WorkspacePersistence } from './persistence.ts';
 import { importDatasetCapture, readDatasetIndex } from './dataset.ts';
 import type { ExpectedState } from './types/inspection.ts';
@@ -179,6 +181,12 @@ export interface ServerOptions {
   readonly persistence?: WorkspacePersistence | null;
   /** Stage-2 reasoning model. Omit and stage 2 is reported as switched off. */
   readonly reasoner?: ReturnType<typeof createReasoner> | null;
+  /**
+   * Presentation translator for novel model prose. Omit (or null) and only
+   * the offline memory serves, with honest fallback. Production startup
+   * builds one from the process environment; tests pass their own or none.
+   */
+  readonly translator?: ModelTranslator | null;
 }
 /**
  * Resolve an explicit expected-state payload from the browser.
@@ -228,6 +236,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
     zoneId: options.zoneId,
     persistence,
     reasoner,
+    translator: options.translator ?? null,
   });
 
   // ORDER MATTERS, and getting it backwards destroys durable state.
@@ -807,6 +816,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       // exists to prevent, and refusing afterwards would leave them already made.
       requireReviewer();
       const raw = await readJsonBody(req);
+      let ranExplicitSelection = false;
       if (raw.trim().length > 0) {
         try {
           const parsed = JSON.parse(raw) as { captureId?: unknown; captureIds?: unknown; cache?: unknown };
@@ -837,9 +847,23 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
               });
               return;
             }
+            ranExplicitSelection = true;
           }
         } catch {
           sendJson(res, 400, { error: 'invalid JSON body' });
+          return;
+        }
+      }
+      // A run with no explicit ids targets the current selection. That
+      // selection must be intact: silently dropping a deleted or foreign
+      // photograph and inspecting the remainder would substitute a different
+      // inspection for the one the operator chose. Refuse instead, before any
+      // provider call, with the same state error an explicit stale id receives.
+      if (!ranExplicitSelection) {
+        const wanted = store.selectedCaptureIds();
+        const valid = store.selectedCaptures();
+        if (wanted.length > 0 && valid.length !== wanted.length) {
+          sendJson(res, 404, { error: 'UNKNOWN_CAPTURE', message: 'That capture no longer exists.' });
           return;
         }
       }
@@ -1105,9 +1129,17 @@ export async function startInspectionServer(port = 4317): Promise<void> {
   const persistence = persistFlag === 'off' || persistFlag === '0' ? null : new WorkspacePersistence();
   const dataset = readDatasetIndex();
 
+  // Live presentation translation reuses the reasoning endpoint and
+  // credential (or stays honestly unavailable when they are not configured).
+  const translator = createTranslatorFromEnv(process.env);
+  if (translator === null) {
+    console.log('  translation: offline memory only (no reasoning credential configured)');
+  }
+
   const handle = createInspectionServer({
     provider,
     reasoner,
+    translator,
     persistence,
     zoneId: process.env['DEMO_ZONE_ID'] ?? 'zone_level_02',
     initialCaptureId: process.env['DEMO_CAPTURE'] ?? null,

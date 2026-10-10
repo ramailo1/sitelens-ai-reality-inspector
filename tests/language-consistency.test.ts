@@ -257,12 +257,14 @@ function seedElements(): Map<string, SNode> {
 function renderSurface(
   view: unknown,
   lang: 'en' | 'fr' | 'ar' | 'zh',
-): { leaves: string[]; apiCalls: string[]; lang: string } {
+): { leaves: string[]; apiCalls: string[]; lang: string; rootLang: string | null; rootDir: string | null } {
   const ids = seedElements();
   const surfaces = [node('section'), node('section'), node('section')];
   const apiCalls: string[] = [];
 
+  const root = node('html');
   const document = {
+    documentElement: root,
     createElement: (tag: string) => node(tag),
     createTextNode: (text: string) => {
       const n = node('#text');
@@ -370,7 +372,13 @@ function renderSurface(
   const leaves: string[] = [];
   for (const n of ids.values()) leaves.push(...n.visible());
   for (const s of surfaces) leaves.push(...s.visible());
-  return { leaves, apiCalls, lang };
+  return {
+    leaves,
+    apiCalls,
+    lang,
+    rootLang: root.getAttribute('lang'),
+    rootDir: root.getAttribute('dir'),
+  };
 }
 
 /* ------------------------------------------------------------------ *
@@ -553,7 +561,14 @@ test('the localized panels really did change language', async () => {
   assert.match(fr, /Inférence terminée/, 'inspect intro');
   assert.match(fr, /Éléments détectés/, 'provenance row');
   assert.match(fr, /CONSTATATION IA/, 'finding action');
-  assert.match(fr, /Rédigé par le modèle en anglais/, 'untranslated-prose marker');
+  // Model-authored prose now carries a localized presentation with a way back
+  // to the authoritative original. The test fixture sentences are all in the
+  // offline memory, so French shows the translation badge and View-original
+  // control rather than the untranslated-prose marker.
+  assert.match(fr, /Traduit de l.*anglais/, 'translated-prose badge');
+  assert.match(fr, /Voir l.*original/, 'view-original control');
+  assert.match(fr, /Le coulage des poteaux est en cours/, 'translated observation');
+  assert.match(fr, /Fouille ouverte au bord du cadre/, 'translated AI finding title');
   assert.match(fr, /poteaux en moins comptés que prévu/, 'comparison deviation');
   assert.match(fr, /À REVOIR/, 'status tag');
 });

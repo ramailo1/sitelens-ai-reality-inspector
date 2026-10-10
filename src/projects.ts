@@ -25,6 +25,7 @@ import { InspectionSession } from './session.ts';
 import { validateReasoning } from './reasoning.ts';
 import type { ReasoningFailureKind } from './reasoning.ts';
 import { PresetStore, cloneExpectedState, presetToState } from './expected-state.ts';
+import type { ModelTranslator } from './model-translation.ts';
 import { DEFAULT_EXPECTED_PRESET_ID } from './expected-state.ts';
 import type { ExpectedState } from './types/inspection.ts';
 import { partitionDuplicates } from './multi-image.ts';
@@ -162,6 +163,7 @@ function cleanLocation(raw: unknown): ProjectResult<string> {
 export class ProjectStore {
   private readonly provider: AIProvider;
   private readonly reasoner: Reasoner;
+  private readonly translator: ModelTranslator | null;
   private readonly zoneId: string | null;
   private readonly projects = new Map<string, Project>();
   private readonly captures = new Map<string, ProjectCapture>();
@@ -195,6 +197,8 @@ export class ProjectStore {
     readonly presets?: PresetStore;
     /** The stage-2 reasoning model. Absent means reasoning is explicitly off. */
     readonly reasoner?: Reasoner;
+    /** Presentation translator for novel model prose. Absent keeps memory-only. */
+    readonly translator?: ModelTranslator | null;
     /** Durable state. Omit for the in-memory demonstration surface. */
     readonly persistence?: WorkspacePersistence | null;
   }) {
@@ -202,6 +206,7 @@ export class ProjectStore {
     this.zoneId = options.zoneId;
     this.presets = options.presets ?? new PresetStore();
     this.persistence = options.persistence ?? null;
+    this.translator = options.translator ?? null;
     this.reasoner = options.reasoner ?? new UnavailableReasoner({
       kind: 'DISABLED',
       message:
@@ -285,9 +290,14 @@ export class ProjectStore {
     this.projects.set(project.id, project);
     this.referenceFor(project.id);
     // A new project becomes active immediately and starts genuinely empty: it
-    // inherits no captures and no reference from any other project.
+    // inherits no captures and no reference from any other project. The
+    // multi-image group is cleared with the primary: carrying the previous
+    // project's open photographs into an empty project would fail the next
+    // inspection as NOT_OWNED while the UI claims they are open.
     this.activeProjectId = project.id;
     this.activeCaptureId = null;
+    this.activeCaptureIds = [];
+    this.duplicateCaptureIds = [];
     this.persist();
     return { ok: true, value: project };
   }
@@ -405,7 +415,14 @@ export class ProjectStore {
     if (this.activeProjectId === projectId) {
       this.activeProjectId = this.list()[0]?.id ?? null;
       if (this.activeProjectId !== null) this.selectDefaultCapture(this.activeProjectId);
-      else this.activeCaptureId = null;
+      else {
+        // No surviving project: nothing may stay selected, including the
+        // multi-image group. A stale group id would otherwise outlive every
+        // capture it names and fail the next inspection as UNKNOWN_CAPTURE.
+        this.activeCaptureId = null;
+        this.activeCaptureIds = [];
+        this.duplicateCaptureIds = [];
+      }
     }
     this.persist();
     return { ok: true, value: { deleted: project, activeProjectId: this.activeProjectId } };
@@ -489,7 +506,19 @@ export class ProjectStore {
     this.sessions.delete(captureId);
     this.releaseCaptureState(owned.value);
 
-    if (this.activeCaptureId === captureId) {
+    // Reconcile the multi-image group: it must never name a capture that no
+    // longer exists, or the next inspection fails as UNKNOWN_CAPTURE while the
+    // masthead still claims the deleted photograph is open. The surviving
+    // members stay selected in order; only when the whole group is gone does
+    // the selection fall back, preferring something already inspected.
+    const alive = new Set(this.capturesOf(owned.value.projectId).map((c) => c.id));
+    const survived = this.activeCaptureIds.filter((id) => alive.has(id));
+    if (survived.length > 0) {
+      this.activeCaptureIds = survived;
+      if (this.activeCaptureId === null || !alive.has(this.activeCaptureId)) {
+        this.activeCaptureId = survived[0] as string;
+      }
+    } else {
       // The deleted capture's result went with it, so the fallback follows the
       // same rule as entering a project: prefer something already inspected.
       const remaining = this.capturesOf(owned.value.projectId);
@@ -497,7 +526,9 @@ export class ProjectStore {
       const pool = inspected.length > 0 ? inspected : remaining;
       const last = pool.length > 0 ? pool[pool.length - 1] : undefined;
       this.activeCaptureId = last === undefined ? null : last.id;
+      this.activeCaptureIds = last === undefined ? [] : [last.id];
     }
+    this.duplicateCaptureIds = this.duplicateCaptureIds.filter((id) => alive.has(id));
     this.persist();
     return { ok: true, value: { deleted: owned.value, activeCaptureId: this.activeCaptureId } };
   }
@@ -596,6 +627,7 @@ export class ProjectStore {
       this.expectedFor(first.projectId),
       {
         reasoner: this.reasoner,
+        translator: this.translator,
         // The project NAME is context for the reasoning stage, and the name is
         // operator-entered rather than observed, so the prompt says so explicitly.
         projectName: this.projects.get(first.projectId)?.name ?? null,

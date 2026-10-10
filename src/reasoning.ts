@@ -282,6 +282,74 @@ export function isDegenerateReasoning(
   return novel < 12;
 }
 
+/**
+ * A headline claim that restates a planned-state note as an observed conclusion.
+ *
+ * Only ever raised for the two claim-like fields (`summary`, `whatMatters`):
+ * the rationale, recommendation and verification may legitimately discuss the
+ * plan when directing physical checks, so they are not examined.
+ */
+export interface ExpectedNoteEcho {
+  /** Which headline field carries the echo. */
+  readonly field: 'summary' | 'whatMatters';
+  /** The operator note that was restated. */
+  readonly note: string;
+  /** The element the note belongs to. */
+  readonly element: string;
+  /** The comparison status the echo contradicts. Never MATCH when raised. */
+  readonly status: string;
+}
+
+/**
+ * Whether headline reasoning launders an expected-state note into apparent fact.
+ *
+ * The mechanism this exists for: the reference declares `SLAB PRESENT
+ * (operator note: "substantially complete")`, the comparison row stays
+ * UNDETERMINED because one photograph cannot settle it, and the model answers
+ * "the slab is substantially complete" - presenting the plan as the reading.
+ * Checked word-set against the note (same tokenization as the degeneracy
+ * check): every significant word of the note must appear in one headline
+ * field. A note contributing fewer than two significant words (a grid
+ * reference such as "grid C1-C12") can never trigger, because identifiers may
+ * legitimately recur; two or more shared content words in a single headline
+ * sentence is a restatement, not a coincidence.
+ *
+ * Fail-closed input to validation, never a repair: the caller discards the
+ * reasoning and the deterministic comparison stands on its own.
+ */
+export function echoesExpectedNote(
+  reasoning: ConstructionReasoning,
+  expected: ExpectedState,
+  rows: readonly ComparisonRow[],
+): ExpectedNoteEcho | null {
+  const statusByExpectedId = new Map<string, string>();
+  for (const row of rows) statusByExpectedId.set(row.expectedId, row.status);
+
+  const significant = (text: string): string[] => {
+    const seen = new Set<string>();
+    for (const word of text.toLowerCase().split(/[^a-z0-9]+/)) {
+      if (word.length > 3) seen.add(word);
+    }
+    return [...seen];
+  };
+
+  for (const item of expected.items) {
+    const status = statusByExpectedId.get(item.id);
+    if (status === undefined || status === 'MATCH') continue;
+    const words = significant(item.note);
+    if (words.length < 2) continue;
+    const summary = reasoning.summary.toLowerCase();
+    const whatMatters = reasoning.whatMatters.toLowerCase();
+    if (words.every((word) => summary.includes(word))) {
+      return { field: 'summary', note: item.note, element: item.element, status };
+    }
+    if (words.every((word) => whatMatters.includes(word))) {
+      return { field: 'whatMatters', note: item.note, element: item.element, status };
+    }
+  }
+  return null;
+}
+
 /** The structured record handed to the reasoning model. */
 export interface ReasoningContextInput {
   readonly projectName: string | null;
@@ -349,7 +417,12 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
   }
   for (const item of input.expected.items) {
     const count = item.expectation === 'COUNT' ? ` = ${item.expectedCount}` : '';
-    lines.push(`- ${elementLabel(item.element)} ${item.expectation}${count}${item.note ? ` (${item.note})` : ''}`);
+    // The note is an operator declaration of what was PLANNED, quoted as such so
+    // the model cannot mistake it for something the photograph shows. A bare
+    // parenthetical ("slab PRESENT (substantially complete)") used to read as an
+    // observed conclusion, and a model echoing it back laundered the plan into
+    // apparent fact - including for rows the comparison left UNDETERMINED.
+    lines.push(`- ${elementLabel(item.element)} ${item.expectation}${count}${item.note ? ` (operator note: "${item.note}")` : ''}`);
   }
   lines.push('');
 

@@ -25,6 +25,7 @@ import type {
 } from '../reasoning.ts';
 import {
   buildReasoningContext,
+  echoesExpectedNote,
   isDegenerateReasoning,
   validateReasoning,
   visualClaimText,
@@ -64,6 +65,11 @@ export function buildReasoningPrompt(): string {
     '- Never describe an individual person. Refer to positions, tasks or plant only.',
     '- If a deterministic comparison status is UNDETERMINED, you MUST preserve that. Say what',
     '  is missing and what would resolve it. Do not upgrade an unknown into a problem.',
+    '- A parenthetical "operator note" in the expected state declares what was PLANNED, never',
+    '  what the photograph shows. Never present such a note as an observed conclusion: do not',
+    '  write that an element "is substantially complete", "is finished" or "is in place" unless',
+    '  the VISIBLE ELEMENTS, the VISUAL OBSERVATIONS or a MATCH comparison row establishes it.',
+    '  Completeness claims with no visible evidence are exactly the fabrication this system refuses.',
     '- Never state or imply that work is approved, rejected, compliant, certified or safe.',
     '- Where the expected state has no item for something visible, say so plainly; that is a',
     '  limitation of the reference, not a defect on site.',
@@ -234,6 +240,31 @@ export class NemotronReasoner implements Reasoner {
     }
 
     const reasoning: ConstructionReasoning = validated.value;
+
+    // A headline that restates a planned-state note as an observed conclusion
+    // is laundered evidence, even when the JSON shape is perfect. The
+    // deterministic row underneath stays exactly as computed; only the prose
+    // that contradicts it is discarded, never repaired.
+    const echo = echoesExpectedNote(reasoning, input.expected, input.rows);
+    if (echo !== null) {
+      return {
+        status: 'UNAVAILABLE',
+        kind: 'REJECTED_BY_VALIDATION',
+        message:
+          'The reasoning response failed schema validation and was discarded rather than repaired.',
+        detail: redactSecrets(truncate(content, 300), this.env),
+        validationIssues: [
+          {
+            field: echo.field,
+            message:
+              `restates the planned-state note "${echo.note}" for ${echo.element} as a conclusion `
+              + `while the deterministic comparison row is ${echo.status}; a note declares what was `
+              + 'planned, never what the photograph shows',
+          },
+        ],
+      };
+    }
+
     return {
       status: 'AVAILABLE',
       reasoning,

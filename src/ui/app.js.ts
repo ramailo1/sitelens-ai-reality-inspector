@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The inspector client.
  *
  * Deliberately plain ES5-compatible DOM code: no framework, no bundler, no
@@ -64,7 +64,13 @@ const state = {
   // the masthead can never claim a different maximum than the API.
   maxInspectionImages: null,
   // The gate the server actually enforces, read from the workspace payload.
-  reviewerGate: null
+  reviewerGate: null,
+  // Which model-prose cards are showing the authoritative original English
+  // instead of the localized presentation. Keys are stable ids like
+  // 'obs:<id>', 'fnd:<id>:<field>' or 'reason:<field>'. Cleared on language
+  // change so the switch consistently shows the translation again.
+  trOriginal: new Set(),
+  lastRunSecs: null
 };
 
 /**
@@ -105,10 +111,14 @@ function storeLanguage(code) {
 }
 
 /**
- * Apply the language to the DOCUMENTED localized surface.
+ * Apply the language to the document and the DOCUMENTED localized surface.
  *
- * Four generic hooks, so no attribute can quietly bypass localization:
+ * Five generic hooks, so no attribute can quietly bypass localization:
  *
+ *   0. lang / dir on the document element itself, so menus, navigation,
+ *      dialogs and every other chrome outside the result bays follow the
+ *      selected language immediately, with no reload and regardless of the
+ *      browser's own default language.
  *   1. lang / dir on every .i18n-surface element.
  *   2. textContent for every element carrying a data-i18n key.
  *   3. placeholder, aria-label, alt and title from their own data-i18n-* keys.
@@ -119,14 +129,19 @@ function storeLanguage(code) {
  * sighted reader alike: an unlocalized alt or aria-label is invisible in a
  * screenshot and silent in a test, which is exactly how it survives.
  *
- * Only the result bays carry lang/dir. The masthead, the capture controls and
- * the project menu stay LTR on purpose: flipping the whole instrument would
- * invert the pipeline strip and the geometry overlay for no benefit.
+ * The document direction comes from the same vocabulary entry as the surfaces,
+ * so the two can never disagree: Arabic is the only right-to-left language,
+ * and Chinese stays left-to-right like English and French. The evidence
+ * overlay geometry is computed in pixels and is never mirrored by this.
  */
 function applyLanguage() {
   const option = I18N.languages.filter((l) => l.code === state.lang)[0];
   const dir = option === undefined ? 'ltr' : option.dir;
   const bcp47 = option === undefined ? I18N.defaultLanguage : option.bcp47;
+  if (document.documentElement) {
+    document.documentElement.setAttribute('lang', bcp47);
+    document.documentElement.setAttribute('dir', dir);
+  }
   const surfaces = document.querySelectorAll('.i18n-surface');
   for (let i = 0; i < surfaces.length; i++) {
     surfaces[i].setAttribute('lang', bcp47);
@@ -164,8 +179,10 @@ function applyLanguage() {
 
   const label = $('lang-label');
   if (label) label.textContent = t('lang.label');
-  const note = $('lang-note');
-  if (note) note.textContent = t('lang.hint');
+  // The presentation-only hint lives as a title tooltip on the language
+  // control (data-i18n-title="lang.hint" in the markup, applied through the
+  // generic ATTR_HOOKS above), not as visible header text. The identity strip
+  // stays compact at desktop and narrow widths.
 }
 
 /** The localized projection of the current inspection, or null. */
@@ -175,6 +192,56 @@ function localized() {
   const all = view.localized;
   if (all === null || all === undefined) return null;
   return all[state.lang] || all[I18N.defaultLanguage] || null;
+}
+
+/**
+ * Presentation-layer lookup for model-authored English prose.
+ *
+ * Reads the pre-shipped modelTranslations map (keyed by EXACT source text)
+ * that arrived with the inspection payload. Pure read: never mutates the
+ * canonical view, never fetches, never re-runs inference. English always
+ * resolves to the original; unknown text falls back to the original with
+ * translated false, never an invented string.
+ */
+function modelTx(source) {
+  const fallback = { text: source, translated: false };
+  if (state.lang === 'en') return fallback;
+  const view = state.view;
+  if (view === null || view === undefined) return fallback;
+  const map = view.modelTranslations;
+  if (map === null || map === undefined) return fallback;
+  const entry = map[source];
+  if (entry === null || entry === undefined) return fallback;
+  const perLang = entry[state.lang] || entry[I18N.defaultLanguage];
+  if (perLang === null || perLang === undefined) return fallback;
+  if (typeof perLang.text !== 'string' || perLang.text.trim().length === 0) return fallback;
+  return { text: perLang.translated ? perLang.text : source, translated: !!perLang.translated };
+}
+
+/** Whether this card/field is currently showing the authoritative original. */
+function showingOriginal(key) {
+  return state.trOriginal.has(key);
+}
+
+function setShowingOriginal(key, show) {
+  if (show) state.trOriginal.add(key);
+  else state.trOriginal.delete(key);
+}
+
+/**
+ * A small toggle button between a localized presentation and its
+ * authoritative original. Labels are localized; the original English itself
+ * is never altered.
+ */
+function trToggle(key, isShowingOriginal) {
+  const btn = el('button', 'tr-toggle', isShowingOriginal ? t('tr.viewTranslation') : t('tr.viewOriginal'));
+  btn.type = 'button';
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    setShowingOriginal(key, !isShowingOriginal);
+    renderAll();
+  });
+  return btn;
 }
 
 const TAB_ORDER = ['capture', 'inspect', 'evidence', 'findings'];
@@ -266,6 +333,7 @@ function applyWorkspace(payload) {
   state.currentCaptureId = payload.activeCaptureId || null;
   state.duplicateCaptureIds = Array.isArray(payload.duplicateCaptureIds) ? payload.duplicateCaptureIds.slice() : [];
   state.view = payload.view || null;
+  state.lastRunSecs = null;
   state.activeId = null;
   state.openIds.clear();
   // The open group changed, so the frame the evidence stage was showing may no
@@ -395,7 +463,7 @@ function renderReference() {
       active.textContent = 'No reference selected.';
     } else {
       active.textContent =
-        reference.name + ' â€” ' + reference.zone + ' â€” ' + reference.itemCount +
+        reference.name + ' — ' + reference.zone + ' — ' + reference.itemCount +
         ' expected element' + (reference.itemCount === 1 ? '' : 's') +
         (reference.edited ? ' (edited)' : '');
     }
@@ -439,7 +507,7 @@ function renderDataset() {
   const empty = $('dataset-empty');
 
   if (summary === null || summary === undefined) {
-    note.textContent = 'Checking for a local datasetâ€¦';
+    note.textContent = 'Checking for a local dataset…';
     $('dataset-count').textContent = '-';
     empty.hidden = false;
     empty.textContent = '';
@@ -447,7 +515,7 @@ function renderDataset() {
   }
 
   // The workspace summary carries a precomputed count; the full /api/dataset
-  // index carries the entries array instead. Both are truthful â€” read either.
+  // index carries the entries array instead. Both are truthful — read either.
   const imageCount = summary.count !== undefined && summary.count !== null
     ? summary.count
     : (summary.entries ? summary.entries.length : 0);
@@ -487,7 +555,7 @@ function renderDataset() {
     tile.appendChild(top);
 
     tile.appendChild(el('span', 'tile-title', entry.title));
-    tile.appendChild(el('span', 'tile-meta', entry.width + 'Ã—' + entry.height + ' Â· ' + bytes(entry.byteLength)));
+    tile.appendChild(el('span', 'tile-meta', entry.width + '×' + entry.height + ' · ' + bytes(entry.byteLength)));
     if (entry.geometryNormalized) {
       tile.appendChild(el('span', 'tile-rot', 'EXIF ' + entry.exifOrientation + ' normalized'));
     }
@@ -519,14 +587,14 @@ async function importDatasetImage(id) {
   state.importing = id;
   renderDataset();
   setLamp('working', 'Importing dataset image ' + id);
-  notify('Importing dataset image ' + id + 'â€¦');
+  notify('Importing dataset image ' + id + '…');
   const errorNode = $('dataset-error');
   errorNode.hidden = true;
 
   try {
     applyWorkspace(await post('/api/dataset/import', { id: id }));
     renderWorkspace();
-    setLamp('ready', 'Real capture loaded â€” inspect when ready');
+    setLamp('ready', 'Real capture loaded — inspect when ready');
     setStatus(
       'Dataset image ' + id + ' is now a capture of ' + (state.project ? state.project.name : 'this project')
       + '. It is a genuine photograph, labelled LOCAL DATASET. Inspect it when ready.',
@@ -663,7 +731,7 @@ function paintedArea(image) {
 /**
  * Point-reflect a pixel box through the frame: the exact mapping a 180-degree
  * display rotation demands. Extracted so the axis mapping is executable and
- * testable rather than folklore â€” the same reason transformBox exists upstream.
+ * testable rather than folklore — the same reason transformBox exists upstream.
  */
 function flipBox180(box, frameWidth, frameHeight) {
   return {
@@ -745,7 +813,7 @@ function formatReviewerObj(rev) {
   if (!rev || !rev.name || !rev.name.trim()) return null;
   const name = rev.name.trim();
   const role = rev.role && rev.role.trim() ? rev.role.trim() : null;
-  return role ? name + ' Â· ' + role : name;
+  return role ? name + ' · ' + role : name;
 }
 
 function renderReviewer() {
@@ -884,7 +952,7 @@ function renderHeader() {
     });
   }
   if (origin === 'FRESH' && view.provenance.inferenceExecuted) {
-    setText('hdr-provenance', view.provenance.provider + ' â€” ' + t('header.liveInference'));
+    setText('hdr-provenance', view.provenance.provider + ' — ' + t('header.liveInference'));
   }
 }
 
@@ -947,8 +1015,10 @@ function renderBrief() {
     if (line.indexOf(leadPrefix) === 0) node.dataset.lead = 'true';
     host.appendChild(node);
   }
-  const highest = l10n === null ? view.brief.highestPriority : l10n.brief.highestPriority;
-  if (highest !== null) {
+  const highestRaw = l10n === null ? view.brief.highestPriority : l10n.brief.highestPriority;
+  if (highestRaw !== null) {
+    const txHighest = state.lang !== 'en' ? modelTx(highestRaw) : { text: highestRaw, translated: false };
+    const highest = txHighest.translated ? txHighest.text : highestRaw;
     host.appendChild(el('p', 'brief-line', fillText(t('brief.highestPriority'), { title: highest })));
   }
   setText('brief-verdict', l10n === null ? view.brief.overall.replace(/_/g, ' ') : l10n.brief.overallLabel);
@@ -985,11 +1055,13 @@ function renderPriorities() {
 
   view.priorities.forEach((priority, index) => {
     const localizedPriority = list === null ? null : (list[index] || null);
+    const rawTitle = localizedPriority === null ? priority.title : localizedPriority.title;
+    const txTitle = state.lang !== 'en' ? modelTx(rawTitle) : { text: rawTitle, translated: false };
     const item = el('li', 'prio');
     item.dataset.attention = priority.attention;
     item.appendChild(el('span', 'prio-n', String(priority.rank).padStart(2, '0')));
     const body = el('div');
-    body.appendChild(el('p', 'prio-t', localizedPriority === null ? priority.title : localizedPriority.title));
+    body.appendChild(el('p', 'prio-t', txTitle.translated ? txTitle.text : rawTitle));
     body.appendChild(el('p', 'prio-b', localizedPriority === null ? priority.basis : localizedPriority.basis));
     item.appendChild(body);
     item.addEventListener('click', () => openFinding(priority.findingId));
@@ -1091,19 +1163,42 @@ function renderReasoning() {
     stage.dataset.status = 'AVAILABLE';
     $('reason-stage').textContent = t('reason.stageLabel');
     $('reason-model').textContent = r.model;
-    $('reason-lede').textContent = reasoning.summary;
+    // Presentation-layer translation of Nemotron's English. The original is
+    // authoritative; the display follows the selected language when the
+    // offline memory holds that sentence, otherwise it falls back honestly.
+    const txSummary = modelTx(reasoning.summary);
+    const txWhat = modelTx(reasoning.whatMatters);
+    const txRat = modelTx(reasoning.rationale);
+    const txRec = modelTx(reasoning.recommendation);
+    const txVer = modelTx(reasoning.verification);
+    const anyTranslated = txSummary.translated || txWhat.translated
+      || txRat.translated || txRec.translated || txVer.translated;
+    const showOrigReason = showingOriginal('reason');
+    const pick = (orig, tx) => (state.lang !== 'en' && tx.translated && !showOrigReason ? tx.text : orig);
+    $('reason-lede').textContent = pick(reasoning.summary, txSummary);
 
-    // The reasoning prose is Nemotron's own English. The LABELS around it are
-    // localized; the sentences are not translated, because inventing a
-    // translation of a construction-safety claim is not something this product
-    // will do quietly.
     const rows = [
-      [t('reasoning.summary'), reasoning.whatMatters],
-      [t('reasoning.rationale'), reasoning.rationale],
-      [t('reasoning.recommendation'), reasoning.recommendation],
-      [t('reasoning.verification'), reasoning.verification],
+      [t('reasoning.summary'), pick(reasoning.whatMatters, txWhat)],
+      [t('reasoning.rationale'), pick(reasoning.rationale, txRat)],
+      [t('reasoning.recommendation'), pick(reasoning.recommendation, txRec)],
+      [t('reasoning.verification'), pick(reasoning.verification, txVer)],
     ];
     for (const [label, value] of rows) appendDetail(host, label, label, value);
+
+    // Translation honesty bar: what is shown, and a way back to the original.
+    if (state.lang !== 'en') {
+      const bar = el('div', 'tr-bar');
+      if (anyTranslated && !showOrigReason) {
+        bar.appendChild(el('span', 'tr-badge', t('tr.translatedBadge')));
+        bar.appendChild(trToggle('reason', false));
+      } else if (anyTranslated && showOrigReason) {
+        bar.appendChild(el('span', 'tr-badge', t('lang.sourceEnglish')));
+        bar.appendChild(trToggle('reason', true));
+      } else {
+        bar.appendChild(el('span', 'tr-fallback', t('tr.fallbackNote')));
+      }
+      host.appendChild(bar);
+    }
 
     const certainty = el('div', 'reason-certainty');
     certainty.appendChild(el('span', 'reason-certainty-k', t('reasoning.certainty')));
@@ -1147,7 +1242,7 @@ function renderReasoning() {
   const fail = $('reason-fail');
   fail.hidden = false;
   clear(fail);
-  fail.appendChild(el('p', 'reason-fail-h', 'CONSTRUCTION REASONING UNAVAILABLE'));
+  fail.appendChild(el('p', 'reason-fail-h', t('reason.unavailableHead')));
   if (r.failureKind !== null) {
     fail.appendChild(el('p', 'reason-fail-kind', r.failureKind.replace(/_/g, ' ')));
   }
@@ -1238,7 +1333,7 @@ function renderPipeline() {
               ms: p.latencyMs,
             }));
 
-  // 02 COMPARE â€” ours, in code. Never attributed to a model.
+  // 02 COMPARE — ours, in code. Never attributed to a model.
   const matched = view.comparison.filter((r2) => r2.status === 'MATCH').length;
   const attention = view.comparison.filter((r2) => r2.status === 'ATTENTION').length;
   const undetermined = view.comparison.filter((r2) => r2.status === 'UNDETERMINED').length;
@@ -1257,7 +1352,7 @@ function renderPipeline() {
     set('pipe-reason-model', r.model);
     set('pipe-reason-note',
       t('certainty.' + r.reasoning.certainty)
-      + (r.provenance && r.provenance.degenerate ? ' â€” ' + t('pipe.degenerate') : ''));
+      + (r.provenance && r.provenance.degenerate ? ' — ' + t('pipe.degenerate') : ''));
   } else {
     step3.dataset.state = 'fail';
     set('pipe-reason-model', r.model === 'none' ? '-' : r.model);
@@ -1341,7 +1436,17 @@ function renderFindings() {
     head.setAttribute('role', 'button');
     head.setAttribute('tabindex', '0');
     head.appendChild(el('span', 'fc-id', String(index + 1).padStart(2, '0')));
-    head.appendChild(el('span', 'fc-title', f === null ? finding.title : f.title));
+    // AI-origin titles are model English; show the localized presentation when
+    // the memory holds it, with a way back to the authoritative original.
+    const fndKey = 'fnd:' + finding.id;
+    const fndShowOrig = showingOriginal(fndKey);
+    const isAiFinding = finding.origin !== 'COMPARISON';
+    const txTitle = isAiFinding ? modelTx(finding.title) : { text: '', translated: false };
+    head.appendChild(el('span', 'fc-title',
+      f === null ? finding.title
+        : isAiFinding && state.lang !== 'en' && txTitle.translated && !fndShowOrig ? txTitle.text
+        : isAiFinding && state.lang !== 'en' && fndShowOrig ? finding.title
+        : f.title));
 
     const tail = el('div', 'fc-tail');
     tail.appendChild(el('span', 'tag tag-ai', f === null
@@ -1370,12 +1475,25 @@ function renderFindings() {
     card.appendChild(head);
 
     const body = el('div', 'fc-body');
-    appendDetail(body, 'what', t('finding.what'), f === null ? finding.observation : f.what);
-    const where = f === null ? finding.location : f.where;
-    appendDetail(body, 'where', t('finding.where'), where !== null
-      ? where + (finding.element !== null ? ' (' + t('element.' + finding.element) + ')' : '')
+    // For AI-origin findings the WHAT/WHERE/WHY/EVIDENCE/ACTION are model
+    // English; show the memory translation when available, original otherwise.
+    const pickFnd = (orig) => {
+      if (!isAiFinding || state.lang === 'en') return orig;
+      const tx = modelTx(orig);
+      if (!tx.translated) return orig;
+      return fndShowOrig ? orig : tx.text;
+    };
+    const aiWhat = isAiFinding ? pickFnd(finding.observation) : (f === null ? finding.observation : f.what);
+    const aiWhy = isAiFinding ? pickFnd(finding.reason) : (f === null ? finding.reason : f.reason);
+    const aiEvidence = isAiFinding ? pickFnd(finding.evidence) : (f === null ? finding.evidence : f.evidence);
+    const aiAction = isAiFinding ? pickFnd(finding.recommendation) : (f === null ? finding.recommendation : f.recommendation);
+    const aiLocationRaw = f === null ? finding.location : (isAiFinding ? finding.location : f.where);
+    const aiLocation = isAiFinding && aiLocationRaw !== null ? pickFnd(aiLocationRaw) : (f === null ? finding.location : f.where);
+    appendDetail(body, 'what', t('finding.what'), aiWhat);
+    appendDetail(body, 'where', t('finding.where'), aiLocation !== null
+      ? aiLocation + (finding.element !== null ? ' (' + t('element.' + finding.element) + ')' : '')
       : null);
-    appendDetail(body, 'why', t('finding.why'), f === null ? finding.reason : f.reason);
+    appendDetail(body, 'why', t('finding.why'), aiWhy);
     appendDetail(body, 'expected', t('finding.expected'), f === null ? finding.expected : f.expected);
     appendDetail(body, 'difference', t('finding.difference'), f === null ? finding.difference : f.difference);
 
@@ -1397,12 +1515,12 @@ function renderFindings() {
     confidenceRow.appendChild(cd);
     body.appendChild(confidenceRow);
 
-    appendDetail(body, 'action', t('finding.action'), f === null ? finding.recommendation : f.recommendation);
-    appendDetail(body, 'evidence', t('finding.evidence'), f === null ? finding.evidence : f.evidence);
+    appendDetail(body, 'action', t('finding.action'), aiAction);
+    appendDetail(body, 'evidence', t('finding.evidence'), aiEvidence);
 
     // Evidence states exactly what the image supports, and no more. A finding
     // the model saw but did not localise is FULL-FRAME evidence: real image,
-    // real reading, no rectangle â€” and it is never given an invented one. A
+    // real reading, no rectangle — and it is never given an invented one. A
     // finding with no visual reading at all says so rather than borrowing the
     // image's authority.
     const evidenceNote = f === null ? null : f.evidenceNote;
@@ -1414,10 +1532,25 @@ function renderFindings() {
       body.appendChild(note);
     }
 
-    // A finding whose narrative came from a model is LABELLED as untranslated
-    // English. The words are the model's; pretending otherwise would be a lie
-    // about where the text came from.
-    if (f !== null && !f.translated) {
+    // Translation honesty for model-authored findings. A translated finding
+    // names its translation and offers the authoritative original; an
+    // untranslated one says so and never invents text.
+    if (f !== null && !f.translated && isAiFinding && state.lang !== 'en') {
+      const txs = [modelTx(finding.title), modelTx(finding.observation),
+        modelTx(finding.reason), modelTx(finding.evidence), modelTx(finding.recommendation)];
+      const anyTx = txs.some((x) => x.translated);
+      const bar = el('p', 'fc-source');
+      if (anyTx && !fndShowOrig) {
+        bar.appendChild(el('span', null, t('tr.translatedBadge') + ' '));
+        bar.appendChild(trToggle(fndKey, false));
+      } else if (anyTx && fndShowOrig) {
+        bar.appendChild(el('span', null, t('lang.sourceEnglish') + ' '));
+        bar.appendChild(trToggle(fndKey, true));
+      } else {
+        bar.appendChild(el('span', null, t('tr.fallbackNote')));
+      }
+      body.appendChild(bar);
+    } else if (f !== null && !f.translated) {
       const note = el('p', 'fc-source');
       note.appendChild(el('span', null, t('lang.sourceEnglish')));
       body.appendChild(note);
@@ -1593,10 +1726,17 @@ function renderQualification() {
   for (const row of rows) {
     const item = el('li', 'qual-row');
     item.appendChild(el('span', 'qual-row-k', t('qual.row.' + row.key)));
-    item.appendChild(el('code', 'qual-row-model',
+    // A model id or platform name is a technical Latin run: isolated so the
+    // bidirectional algorithm cannot reorder it inside Arabic text. The
+    // localized "unavailable" fallback is prose and is left to flow.
+    const modelNode = el('code', 'qual-row-model',
       row.model === null || row.model === undefined || row.model === ''
         ? t('qual.unavailable')
-        : String(row.model)));
+        : String(row.model));
+    if (row.model !== null && row.model !== undefined && row.model !== '') {
+      modelNode.setAttribute('data-latin', '');
+    }
+    item.appendChild(modelNode);
 
     // Fail-closed: only an explicit ELIGIBLE carries the positive tone, and an
     // UNKNOWN never borrows the tone of a stage that was actually judged.
@@ -1812,14 +1952,39 @@ function renderObservations() {
       })));
     row.appendChild(conf);
 
-    // The observation text and the evidence description are MiniCPM's own
-    // English. They are not translated; the label on this surface says so.
-    row.appendChild(el('p', 'obs-text', observation.observation));
-    row.appendChild(el('p', 'fc-source', t('lang.sourceEnglish')));
+    // MiniCPM's English with a localized presentation when the memory holds
+    // it. The original stays authoritative and reachable via View original.
+    const obsKey = 'obs:' + observation.id;
+    const obsShowOrig = showingOriginal(obsKey);
+    const txObs = modelTx(observation.observation);
+    const txEv = modelTx(observation.evidenceDescription);
+    const obsAnyTx = txObs.translated || txEv.translated;
+    const obsText = state.lang !== 'en' && obsAnyTx && !obsShowOrig
+      ? (txObs.translated ? txObs.text : observation.observation)
+      : observation.observation;
+    const evText = state.lang !== 'en' && obsAnyTx && !obsShowOrig
+      ? (txEv.translated ? txEv.text : observation.evidenceDescription)
+      : observation.evidenceDescription;
+    row.appendChild(el('p', 'obs-text', obsText));
+    if (state.lang !== 'en' && obsAnyTx && !obsShowOrig) {
+      const src = el('p', 'fc-source');
+      src.appendChild(el('span', null, t('tr.translatedBadge') + ' '));
+      src.appendChild(trToggle(obsKey, false));
+      row.appendChild(src);
+    } else if (state.lang !== 'en' && obsAnyTx && obsShowOrig) {
+      const src = el('p', 'fc-source');
+      src.appendChild(el('span', null, t('lang.sourceEnglish') + ' '));
+      src.appendChild(trToggle(obsKey, true));
+      row.appendChild(src);
+    } else if (state.lang !== 'en') {
+      row.appendChild(el('p', 'fc-source', t('tr.fallbackNote')));
+    } else {
+      row.appendChild(el('p', 'fc-source', t('lang.sourceEnglish')));
+    }
 
     const evidence = el('p', 'obs-ev');
     evidence.appendChild(el('b', null, t('finding.evidence') + ' '));
-    evidence.appendChild(document.createTextNode(observation.evidenceDescription));
+    evidence.appendChild(document.createTextNode(evText));
     if (!observation.localized) {
       evidence.appendChild(el('span', 'obs-ev-full', ' ' + t('obs.fullFrame')));
     }
@@ -1946,6 +2111,78 @@ function renderAll() {
   safeRender('stage', renderStage);
   safeRender('switcher', renderPhotoSwitcher);
   safeRender('overlay', renderOverlay);
+  safeRender('outcome', renderRunOutcome);
+}
+
+/**
+ * Re-localize the lamp, status bar, and notice banner after a completed run so
+ * applyLanguage() in renderAll() does not overwrite them with idle copy and
+ * switching languages translates the run summary in place.
+ */
+function renderRunOutcome() {
+  const view = state.view;
+  if (view === null || view.outcome !== 'COMPLETED' || state.lastRunSecs === null) return;
+  const origin = view.inferenceOrigin;
+  const how = origin === 'CACHED'
+    ? t('origin.cached')
+    : origin === 'DEMO_FIXTURE'
+      ? t('origin.fixture')
+      : t('origin.fresh');
+  const secs = state.lastRunSecs;
+  const failedImages = Array.isArray(view.images)
+    ? view.images.filter((image) => image.status === 'FAILED')
+    : [];
+  const analysedImages = Array.isArray(view.images)
+    ? view.images.filter((image) => image.status !== 'FAILED')
+    : [];
+  setLamp(
+    failedImages.length > 0 ? 'problem' : 'done',
+    failedImages.length > 0 ? t('run.partialLamp') : t('run.readyLamp'),
+  );
+  setStatus(
+    fillText(t('run.done'), { how, secs, findings: view.inspectionFindings.length }),
+    'good',
+  );
+  if (failedImages.length > 0) {
+    notify(fillText(t('run.partial'), {
+      analysed: analysedImages.length,
+      failed: failedImages.length,
+      names: failedImages.map((image) => image.captureLabel).join(', '),
+    }), 'bad');
+  }
+  const reasoning = view.reasoning;
+  const overallText = state.lang === 'en'
+    ? view.brief.overall.replace(/_/g, ' ')
+    : t('overall.' + view.brief.overall);
+  if (reasoning !== undefined && reasoning !== null) {
+    if (reasoning.status === 'AVAILABLE') {
+      const certaintyText = state.lang === 'en'
+        ? reasoning.reasoning.certainty.replace(/_/g, ' ').toLowerCase()
+        : t('certainty.' + reasoning.reasoning.certainty);
+      notify(
+        fillText(t('run.withReasoning'), {
+          how,
+          overall: overallText,
+          certainty: certaintyText,
+        }),
+        failedImages.length > 0 ? 'bad' : 'good',
+      );
+    } else {
+      notify(
+        fillText(t('run.noReasoning'), {
+          how,
+          overall: overallText,
+          kind: reasoning.failureKind || 'not run',
+        }),
+        failedImages.length > 0 ? 'bad' : 'good',
+      );
+    }
+  } else {
+    notify(
+      fillText(t('run.plainDone'), { how, overall: overallText }),
+      failedImages.length > 0 ? 'bad' : 'good',
+    );
+  }
 }
 
 /**
@@ -2063,7 +2300,7 @@ function renderFixtures() {
     button.addEventListener('click', () => loadCapture(capture.id));
     row.appendChild(button);
 
-    const del = el('button', 'capture-del', 'Ã—');
+    const del = el('button', 'capture-del', '×');
     del.type = 'button';
     del.setAttribute('aria-label', 'Delete capture ' + capture.label);
     del.addEventListener('click', () => confirmDeleteCapture(capture));
@@ -2117,7 +2354,7 @@ function renderImages() {
     meta.appendChild(el('span', 'img-status img-status-' + statusKey.replace('imgs.status.', ''), t(statusKey)));
     item.appendChild(meta);
 
-    const drop = el('button', 'img-drop', 'Ã—');
+    const drop = el('button', 'img-drop', '×');
     drop.type = 'button';
     drop.setAttribute('aria-label', fillText(t('imgs.dropOne'), { label: capture !== undefined ? capture.label : id }));
     drop.addEventListener('click', () => removeCaptureFromGroup(id));
@@ -2211,13 +2448,13 @@ function showLoaded(label) {
  * pixels untouched), so the browser paints exactly the pixels the model saw and
  * every coordinate lives in one space. For most re-oriented files that is the
  * whole fix: the five dataset images tagged orientation 6 ('007', '009', '015',
- * '017', '021') carry pixels that are ALREADY upright â€” their tag was stale, so
+ * '017', '021') carry pixels that are ALREADY upright — their tag was stale, so
  * displaying the stored pixels as-is is what makes them upright.
  *
  * Orientation 3 is the measured exception (dataset '004' and '027'): their tags
  * were accurate and the stored pixels really are 180 degrees from the scene, so
- * tag normalization alone leaves them upside down. The display â€” and only the
- * display â€” is rotated back here, and renderOverlay maps every evidence box
+ * tag normalization alone leaves them upside down. The display — and only the
+ * display — is rotated back here, and renderOverlay maps every evidence box
  * through the same 180-degree flip, so a genuine box stays attached to the
  * correct physical region. No byte is re-encoded and the model's coordinate
  * space is untouched: the model still reads the same normalized bytes it is
@@ -2400,6 +2637,7 @@ async function runInspection() {
     if (view.outcome === 'COMPLETED') {
       const origin = view.inferenceOrigin;
       const took = Math.round((Date.now() - startedAt) / 1000);
+      state.lastRunSecs = took;
       // State the provenance of the result explicitly. "Complete" alone would
       // be ambiguous between a live call, a cache hit and a fixture.
       const how = origin === 'CACHED'
@@ -2409,7 +2647,7 @@ async function runInspection() {
           : t('origin.fresh');
       setLamp('done', t('run.readyLamp'));
       setStatus(
-        fillText(t('run.done'), { how, secs: Math.round((Date.now() - startedAt) / 1000), findings: view.inspectionFindings.length }),
+        fillText(t('run.done'), { how, secs: took, findings: view.inspectionFindings.length }),
         'good',
       );
 
@@ -2467,6 +2705,7 @@ async function runInspection() {
         state.openIds.add(state.activeId);
       }
     } else {
+      state.lastRunSecs = null;
       // Distinguish WHY it failed. A provider outage, a malformed model answer
       // and an empty-but-valid answer are three different operational problems.
       setLamp('problem', 'Inspection did not complete');
@@ -2490,6 +2729,25 @@ async function runInspection() {
       setStatus(t('gate.reason'), 'bad');
       notify(t('gate.reason'), 'bad');
       openReviewerModal();
+      return;
+    }
+    // A stale or foreign capture selection is application state, not a model
+    // failure: the run never reached a provider, so it must not read as one.
+    // Show the server's own words and refresh the workspace, which carries the
+    // reconciled selection, instead of leaving the deleted photograph open.
+    if (error.code === 'UNKNOWN_CAPTURE' || error.code === 'NOT_OWNED'
+      || error.code === 'UNKNOWN_PROJECT' || error.code === 'NO_ACTIVE_PROJECT'
+      || error.code === 'TOO_MANY_IMAGES' || error.code === 'no capture selected'
+      || error.code === 'captureId is required') {
+      setLamp('problem', 'Capture unavailable');
+      setStatus(error.message, 'bad');
+      notify(error.message, 'bad');
+      try {
+        applyWorkspace(await api('/api/workspace'));
+        renderAll();
+      } catch (refreshError) {
+        notify(refreshError.message, 'bad');
+      }
       return;
     }
     setLamp('problem', 'Inspection failed');
@@ -2894,6 +3152,9 @@ function wireLanguage() {
     // half-translated surface.
     state.lang = match === undefined ? I18N.defaultLanguage : match.code;
     storeLanguage(state.lang);
+    // A new language shows its translation again, not a stale per-card
+    // "show original" choice from the previous one.
+    state.trOriginal.clear();
     // Presentation only: no request, deliberately.
     renderAll();
   });
@@ -3056,7 +3317,7 @@ async function boot() {
         ? 'Restored the last inspection of this capture. Inspect again for a fresh reading.'
         : state.captures.length > 0
           ? (hasDataset
-              ? 'Choose a capture, import a real dataset photograph below, or drop your own â€” then inspect.'
+              ? 'Choose a capture, import a real dataset photograph below, or drop your own — then inspect.'
               : 'Choose a capture or drop a site photograph, then inspect.')
           : 'No captures in this project yet. Import a local dataset image or drop a photograph.',
       null

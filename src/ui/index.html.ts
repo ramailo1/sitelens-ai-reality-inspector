@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The inspector markup.
  *
  * One screen, four workflow bays. The masthead carries the session identity
@@ -106,8 +106,8 @@ export const INDEX_HTML = `<!doctype html>
 </header>
 
 <div class="ident">
-  <span class="ident-k" data-i18n="meta.vision">Vision</span><span class="ident-v" id="hdr-model">-</span>
-  <span class="ident-k" data-i18n="meta.reasoning">Reasoning</span><span class="ident-v" id="hdr-reasoner">-</span>
+  <span class="ident-k" data-i18n="meta.vision">Vision</span><span class="ident-v" id="hdr-model" data-latin>-</span>
+  <span class="ident-k" data-i18n="meta.reasoning">Reasoning</span><span class="ident-v" id="hdr-reasoner" data-latin>-</span>
   <span class="ident-k" data-i18n="meta.source">Source</span><span class="ident-v" id="hdr-provenance">-</span>
   <span class="ident-synth" id="hdr-synth" hidden>DEMO FIXTURE - NOT AI INFERENCE</span>
   <span class="ident-cache" id="hdr-cache" hidden>CACHED AI RESULT</span>
@@ -129,10 +129,9 @@ export const INDEX_HTML = `<!doctype html>
     was chosen for. The options are generated from the server vocabulary in
     wireLanguage(), so the list and the catalog cannot drift.
   -->
-  <label class="lang-sel" for="lang-select" dir="ltr">
+  <label class="lang-sel" for="lang-select" dir="ltr" data-i18n-title="lang.hint" title="Presentation only. The inspection, its evidence and its provenance are unchanged.">
     <span class="lang-k" id="lang-label" data-i18n="lang.label">Inspection language</span>
     <select id="lang-select" aria-label="Inspection language"></select>
-    <span class="lang-note" id="lang-note"></span>
   </label>
 </div>
 
@@ -159,7 +158,7 @@ export const INDEX_HTML = `<!doctype html>
     <li class="pipe-step" id="pipe-1">
       <span class="pipe-n">01</span>
       <span class="pipe-k">SEE</span>
-      <span class="pipe-model" id="pipe-vision-model">-</span>
+      <span class="pipe-model" id="pipe-vision-model" data-latin>-</span>
       <span class="pipe-note" id="pipe-vision-note">not run yet</span>
     </li>
     <li class="pipe-step" id="pipe-2">
@@ -171,7 +170,7 @@ export const INDEX_HTML = `<!doctype html>
     <li class="pipe-step" id="pipe-3">
       <span class="pipe-n">03</span>
       <span class="pipe-k">UNDERSTAND</span>
-      <span class="pipe-model" id="pipe-reason-model">-</span>
+      <span class="pipe-model" id="pipe-reason-model" data-latin>-</span>
       <span class="pipe-note" id="pipe-reason-note">not run yet</span>
     </li>
     <li class="pipe-step" id="pipe-4">
@@ -280,7 +279,7 @@ export const INDEX_HTML = `<!doctype html>
             <p class="drop-title">Drop captures here</p>
             <p class="drop-alt">or</p>
             <button type="button" class="btn btn-ghost" id="pick">Choose photos (multi-select)</button>
-            <p class="drop-hint">PNG or JPEG, up to 12 MB each â€” select one or multiple files</p>
+            <p class="drop-hint">PNG or JPEG, up to 12 MB each — select one or multiple files</p>
           </div>
         </div>
 
@@ -315,7 +314,7 @@ export const INDEX_HTML = `<!doctype html>
           </div>
           <details class="storage">
             <summary>Storage &amp; persistence</summary>
-            <p class="storage-note" id="storage-note">Storage: checkingâ€¦</p>
+            <p class="storage-note" id="storage-note">Storage: checking…</p>
           </details>
         </div>
 
@@ -351,7 +350,7 @@ export const INDEX_HTML = `<!doctype html>
             <h3 class="dataset-h" id="dataset-h">Local dataset</h3>
             <span class="tag" id="dataset-count">-</span>
           </div>
-          <p class="dataset-note" id="dataset-note">Checking for a local datasetâ€¦</p>
+          <p class="dataset-note" id="dataset-note">Checking for a local dataset…</p>
           <div class="dataset-grid" id="dataset-grid"></div>
           <p class="dataset-empty" id="dataset-empty" hidden></p>
           <p class="note note-bad" id="dataset-error" role="alert" hidden></p>
@@ -563,7 +562,7 @@ export const INDEX_HTML = `<!doctype html>
       <div class="reason-head">
         <h3 class="reason-h" id="reason-h" data-i18n="panel.stageReasoningHeading">Construction reasoning</h3>
         <span class="tag" id="reason-stage" data-i18n="panel.stageReasoningNotRun">NOT RUN</span>
-        <span class="reason-model" id="reason-model">-</span>
+        <span class="reason-model" id="reason-model" data-latin>-</span>
       </div>
       <p class="reason-lede" id="reason-lede" data-i18n="reasoning.notRun">
         Run the inspection to have Nemotron reason about what the evidence does

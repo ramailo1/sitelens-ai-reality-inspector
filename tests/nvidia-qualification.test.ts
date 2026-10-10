@@ -358,9 +358,12 @@ interface StubNode {
   hidden: boolean;
   dataset: Record<string, string>;
   children: StubNode[];
+  attrs: Record<string, string>;
   appendChild(child: StubNode): StubNode;
   removeChild(child: StubNode): void;
   get firstChild(): StubNode | null;
+  setAttribute(n: string, v: string): void;
+  getAttribute(n: string): string | null;
   text(): string;
 }
 
@@ -374,7 +377,10 @@ function stubDocument(): { document: unknown; nodes: Map<string, StubNode> } {
       textContent: '',
       hidden: false,
       dataset: {},
+      attrs: {} as Record<string, string>,
       children: [],
+      setAttribute(k: string, v: string) { (this.attrs as Record<string, string>)[k] = v; },
+      getAttribute(k: string) { return (this.attrs as Record<string, string>)[k] ?? null; },
       appendChild(child: StubNode) {
         this.children.push(child);
         return child;

@@ -96,7 +96,7 @@ body::before {
 
 .skip {
   position: absolute;
-  left: -9999px;
+  inset-inline-start: -9999px;
   top: 0;
   z-index: 90;
   padding: 10px 18px;
@@ -104,7 +104,7 @@ body::before {
   color: var(--paper);
   font-weight: 600;
 }
-.skip:focus { left: 0; }
+.skip:focus { inset-inline-start: 0; }
 
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
@@ -190,7 +190,7 @@ body::before {
 .rig-disclose-list {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  inset-inline-start: 0;
   z-index: 40;
   min-width: 260px;
   max-width: 460px;
@@ -210,7 +210,7 @@ body::before {
   overflow-wrap: anywhere;
 }
 
-.rig-nav { margin-left: auto; display: flex; }
+.rig-nav { margin-inline-start: auto; display: flex; }
 
 /* Workflow steps are tabs: exactly one is selected and exactly one panel shows.
    The selected state is carried by a colour AND a rule, never colour alone. */
@@ -221,8 +221,9 @@ body::before {
   background: none;
   border: 0;
   border-bottom: 2px solid transparent;
-  padding: 0 15px 0 0;
-  margin-right: 15px;
+  padding-block: 0;
+  padding-inline: 0 15px;
+  margin-inline-end: 15px;
   cursor: pointer;
   color: var(--ink-4);
   font-family: var(--sans);
@@ -278,7 +279,7 @@ body::before {
 .ident-v { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
 
 .ident-synth {
-  margin-left: auto;
+  margin-inline-start: auto;
   padding: 3px 9px;
   background: var(--review-wash);
   border: 1px solid var(--review);
@@ -291,7 +292,7 @@ body::before {
 /* A cached AI answer is real but not fresh, so it is badged separately from a
    live call. Never shown alongside the synthetic-fixture badge. */
 .ident-cache {
-  margin-left: auto;
+  margin-inline-start: auto;
   padding: 3px 9px;
   background: var(--neutral-wash);
   border: 1px solid var(--ink-3);
@@ -300,13 +301,13 @@ body::before {
   font-weight: 600;
 }
 .ident-cache[hidden] { display: none; }
-.ident-synth:not([hidden]) + .ident-cache { margin-left: 10px; }
+.ident-synth:not([hidden]) + .ident-cache { margin-inline-start: 10px; }
 
 .cache-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: 14px;
+  margin-inline-start: 14px;
   color: var(--ink-3);
   cursor: pointer;
   letter-spacing: .04em;
@@ -398,9 +399,15 @@ body::before {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='6'%3E%3Cpath d='M1 1l3.5 3.5L8 1' fill='none' stroke='%2345423D' stroke-width='1.4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
+  /* The chevron is genuinely directional affordance: it sits at the inline
+     end of the control in both directions. background-position has no logical
+     form, so the RTL mirror is stated explicitly below with the other mirrors. */
   background-position: right 9px center;
-  padding-right: 26px;
+  padding-inline-end: 26px;
 }
+html[dir="rtl"] .field select,
+html[dir="rtl"] .exp-row select,
+html[dir="rtl"] .preset-item select { background-position: left 9px center; }
 
 .loaded[hidden] { display: none; }
 .loaded-acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
@@ -433,7 +440,7 @@ body::before {
   letter-spacing: .1em;
   text-transform: uppercase;
 }
-.panel-head .tag { margin-left: auto; }
+.panel-head .tag { margin-inline-start: auto; }
 .panel-sub { margin: 0 0 12px; color: var(--ink-3); font-size: 12px; max-width: 70ch; }
 .panel-acts { margin-top: 12px; display: flex; gap: 8px; }
 
@@ -498,9 +505,13 @@ body::before {
 .cmp[data-status="MATCH"] { box-shadow: inset 3px 0 0 var(--verify); }
 .cmp[data-status="ATTENTION"] { box-shadow: inset 3px 0 0 var(--red); }
 .cmp[data-status="UNDETERMINED"] { box-shadow: inset 3px 0 0 var(--review); }
+html[dir="rtl"] .cmp, .i18n-surface[dir="rtl"] .cmp { box-shadow: inset -3px 0 0 var(--ink-4); }
+html[dir="rtl"] .cmp[data-status="MATCH"], .i18n-surface[dir="rtl"] .cmp[data-status="MATCH"] { box-shadow: inset -3px 0 0 var(--verify); }
+html[dir="rtl"] .cmp[data-status="ATTENTION"], .i18n-surface[dir="rtl"] .cmp[data-status="ATTENTION"] { box-shadow: inset -3px 0 0 var(--red); }
+html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[data-status="UNDETERMINED"] { box-shadow: inset -3px 0 0 var(--review); }
 .cmp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .cmp-el { font-family: var(--mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.cmp-tag { margin-left: auto; }
+.cmp-tag { margin-inline-start: auto; }
 .cmp[data-status="MATCH"] .cmp-tag { border-color: var(--verify); color: var(--verify); }
 .cmp[data-status="ATTENTION"] .cmp-tag { border-color: var(--red); color: var(--red); background: var(--red-wash); }
 .cmp[data-status="UNDETERMINED"] .cmp-tag { border-color: var(--review); color: var(--review); background: var(--review-wash); }
@@ -567,6 +578,8 @@ body::before {
 /* Corner registration marks: the frame reads as a measured image. */
 .sheet-cal { position: absolute; inset: 0; pointer-events: none; }
 .sheet-cal i { position: absolute; width: 14px; height: 14px; border: 1px solid rgba(255,255,255,.5); }
+/* Viewfinder corners: drawn on all four sides, so mirroring would paint the
+   identical picture. Physical coordinates stay. */
 .sheet-cal i:nth-child(1) { top: 8px; left: 8px; border-right: 0; border-bottom: 0; }
 .sheet-cal i:nth-child(2) { top: 8px; right: 8px; border-left: 0; border-bottom: 0; }
 .sheet-cal i:nth-child(3) { bottom: 8px; left: 8px; border-right: 0; border-top: 0; }
@@ -588,6 +601,9 @@ body::before {
 .ev:hover, .ev[data-active="true"] { background: rgba(200,16,46,.22); border-color: var(--red); }
 .ev-n {
   position: absolute;
+  /* Deliberately physical: this badge hangs off evidence-box geometry, which
+     is computed in pixels and is never mirrored. Mirroring it would detach the
+     number from the region it labels. */
   top: -9px; left: -9px;
   min-width: 18px; height: 18px;
   display: grid; place-items: center;
@@ -684,7 +700,7 @@ body::before {
 .trust-tag[data-status="REJECTED"] { border-color: var(--reject); color: var(--reject); background: var(--reject-wash); }
 .trust-tag[data-status="NEEDS_REVIEW"] { border-color: var(--review); color: var(--review); background: var(--review-wash); }
 .trust-arrow { color: var(--ink-4); }
-.trust-note { margin-left: auto; color: var(--ink-4); letter-spacing: .04em; }
+.trust-note { margin-inline-start: auto; color: var(--ink-4); letter-spacing: .04em; }
 
 .hdr-rev-btn {
   background: transparent;
@@ -720,9 +736,9 @@ body::before {
   margin-top: var(--gap);
 }
 .finding-card[data-active="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red-line); }
-.finding-card[data-status="VERIFIED"] { border-left: 3px solid var(--verify); }
-.finding-card[data-status="REJECTED"] { border-left: 3px solid var(--reject); opacity: .72; }
-.finding-card[data-status="NEEDS_REVIEW"] { border-left: 3px solid var(--review); }
+.finding-card[data-status="VERIFIED"] { border-inline-start: 3px solid var(--verify); }
+.finding-card[data-status="REJECTED"] { border-inline-start: 3px solid var(--reject); opacity: .72; }
+.finding-card[data-status="NEEDS_REVIEW"] { border-inline-start: 3px solid var(--review); }
 
 .fc-head {
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
@@ -733,7 +749,7 @@ body::before {
 }
 .fc-id { font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
 .fc-title { font-size: 13px; font-weight: 600; }
-.fc-tail { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.fc-tail { margin-inline-start: auto; display: flex; align-items: center; gap: 8px; }
 
 .fc-body { display: none; }
 .finding-card[data-open="true"] .fc-body { display: block; }
@@ -761,7 +777,7 @@ body::before {
   width: 84px; height: 6px;
   background: var(--concrete-2);
   vertical-align: middle;
-  margin-right: 8px;
+  margin-inline-end: 8px;
 }
 .conf-fill { display: block; height: 100%; background: var(--red); }
 .conf-fill[data-band="MEDIUM"] { background: var(--review); }
@@ -832,6 +848,8 @@ body::before {
 .prio-b { font-family: var(--mono); font-size: 10px; color: var(--ink-4); margin-top: 2px; }
 .prio[data-attention="HIGH"] { box-shadow: inset 3px 0 0 var(--red); }
 .prio[data-attention="MEDIUM"] { box-shadow: inset 3px 0 0 var(--review); }
+html[dir="rtl"] .prio[data-attention="HIGH"], .i18n-surface[dir="rtl"] .prio[data-attention="HIGH"] { box-shadow: inset -3px 0 0 var(--red); }
+html[dir="rtl"] .prio[data-attention="MEDIUM"], .i18n-surface[dir="rtl"] .prio[data-attention="MEDIUM"] { box-shadow: inset -3px 0 0 var(--review); }
 
 .status {
   padding: 10px 12px;
@@ -874,7 +892,7 @@ body::before {
 .elig {
   margin: 10px 0 0;
   padding: 8px 10px;
-  border-left: 2px solid var(--review);
+  border-inline-start: 2px solid var(--review);
   background: var(--review-wash);
   font-family: var(--mono);
   font-size: 10.5px;
@@ -888,7 +906,7 @@ body::before {
   padding: 11px;
 }
 .fail-h { margin: 0 0 6px; font-family: var(--mono); font-size: 11px; color: var(--reject); font-weight: 700; }
-.fail ul { margin: 0; padding-left: 16px; font-family: var(--mono); font-size: 10.5px; color: var(--reject); }
+.fail ul { margin: 0; padding-inline-start: 16px; font-family: var(--mono); font-size: 10.5px; color: var(--reject); }
 
 .empty {
   padding: 16px 18px;
@@ -917,13 +935,13 @@ body::before {
 .obs-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .obs-n { font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
 .obs-cat { font-family: var(--mono); font-size: 10px; letter-spacing: .06em; color: var(--ink-2); }
-.obs-head .conf { margin-left: auto; display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.obs-head .conf { margin-inline-start: auto; display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
 .obs-text { margin: 7px 0 0; font-size: 12.5px; }
 .obs-ev { margin: 6px 0 0; font-size: 11.5px; color: var(--ink-3); }
 .obs-ev b { font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; color: var(--ink-4); }
 .obs-ev-full { font-family: var(--mono); font-size: 9.5px; color: var(--ink-4); }
 .obs-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; align-items: center; }
-.obs-next { font-family: var(--mono); font-size: 10px; color: var(--ink-4); margin-right: auto; }
+.obs-next { font-family: var(--mono); font-size: 10px; color: var(--ink-4); margin-inline-end: auto; }
 
 .finding {
   border: 1px solid var(--rule);
@@ -950,9 +968,9 @@ body::before {
   color: var(--ink); font-weight: 600; font-size: 11.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.proj-caret { color: var(--ink-3); border-left: 1px solid var(--rule); padding-left: 6px; }
+.proj-caret { color: var(--ink-3); border-inline-start: 1px solid var(--rule); padding-inline-start: 6px; }
 .proj-menu {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+  position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 40;
   min-width: 260px; max-width: 320px; padding: 10px;
   background: var(--paper); border: 1px solid var(--rule-2);
   box-shadow: 0 8px 24px rgba(28, 27, 25, .16);
@@ -965,10 +983,13 @@ body::before {
 .proj-item {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   width: 100%; padding: 8px 10px; background: var(--paper);
-  border: 0; text-align: left; cursor: pointer;
+  border: 0; text-align: start; cursor: pointer;
 }
 .proj-item:hover { background: var(--concrete); }
+/* The current-project rule is genuinely directional: it must sit at the
+   reading-start edge in both directions, so the RTL mirror is explicit. */
 .proj-item[aria-current="true"] { background: var(--paper); box-shadow: inset 3px 0 0 var(--red); }
+html[dir="rtl"] .proj-item[aria-current="true"] { box-shadow: inset -3px 0 0 var(--red); }
 .proj-item-n { font-family: var(--mono); font-size: 11.5px; color: var(--ink); font-weight: 600; }
 .proj-item-c { font-family: var(--mono); font-size: 10px; color: var(--ink-4); white-space: nowrap; }
 .proj-empty { margin: 0; padding: 10px; font-size: 11px; color: var(--ink-3); line-height: 1.5; }
@@ -996,11 +1017,12 @@ body::before {
 }
 .capture-row { display: flex; align-items: stretch; background: var(--paper); }
 .capture-main {
-  flex: 1; min-width: 0; display: block; width: 100%; text-align: left;
+  flex: 1; min-width: 0; display: block; width: 100%; text-align: start;
   padding: 9px 11px; background: transparent; border: 0; cursor: pointer;
 }
 .capture-main:hover { background: var(--concrete); }
 .capture-row[aria-current="true"] .capture-main { background: var(--paper); box-shadow: inset 3px 0 0 var(--red); }
+html[dir="rtl"] .capture-row[aria-current="true"] .capture-main { box-shadow: inset -3px 0 0 var(--red); }
 .capture-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
 .capture-tag {
   padding: 1px 5px; border: 1px solid var(--rule-2); color: var(--ink-3);
@@ -1009,7 +1031,7 @@ body::before {
 .capture-tag[data-source="DEMO_FIXTURE"] { border-color: var(--ink-4); color: var(--ink-3); }
 .capture-del {
   flex: none; padding: 0 10px; background: transparent;
-  border: 0; border-left: 1px solid var(--rule-hair);
+  border: 0; border-inline-start: 1px solid var(--rule-hair);
   color: var(--ink-4); font-family: var(--mono); font-size: 15px; cursor: pointer;
 }
 .capture-del:hover { background: var(--red-wash); color: var(--red); }
@@ -1024,7 +1046,7 @@ body::before {
 }
 
 .proj-badge {
-  margin-left: 6px; padding: 1px 5px;
+  margin-inline-start: 6px; padding: 1px 5px;
   border: 1px solid var(--ink-4); color: var(--ink-3);
   font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
   vertical-align: 1px;
@@ -1184,7 +1206,7 @@ body::before {
   color: var(--ink-4);
 }
 .foot-thesis { color: var(--ink-2); font-weight: 600; letter-spacing: .02em; }
-.foot-r { margin-left: auto; }
+.foot-r { margin-inline-start: auto; }
 
 /* ==========================================================================
    THE REVIEWER GATE
@@ -1242,14 +1264,17 @@ body::before {
   grid-template-columns: auto 1fr;
   grid-template-areas: "n k" "n model" "n note";
   column-gap: 10px;
-  padding: 9px 14px 9px 0;
-  border-right: 1px solid var(--rule-hair);
-  border-left: 1px solid transparent;
-  padding-left: 14px;
-  margin-left: -14px;
+  padding-block: 9px;
+  padding-inline: 14px;
+  /* Step dividers connect the strip in both directions: the divider always
+     sits at the inline end, so the strip reads as one instrument in LTR and
+     in RTL without a separate override. */
+  border-inline-end: 1px solid var(--rule-hair);
+  border-inline-start: 1px solid transparent;
+  margin-inline-start: -14px;
   transition: background var(--fast) var(--ease);
 }
-.pipe-step:last-child { border-right: 0; }
+.pipe-step:last-child { border-inline-end: 0; }
 .pipe-n {
   grid-area: n;
   align-self: start;
@@ -1292,6 +1317,7 @@ body::before {
   box-shadow: inset 3px 0 0 var(--review);
 }
 .pipe-step[data-state="partial"] .pipe-n { color: var(--review); }
+html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 var(--review); }
 .fail[data-status="PARTIAL"] {
   border-color: rgba(154, 103, 0, .40);
   background: var(--review-wash);
@@ -1341,7 +1367,7 @@ body::before {
   text-transform: uppercase;
   color: var(--ink);
 }
-.dataset-head .tag { margin-left: auto; }
+.dataset-head .tag { margin-inline-start: auto; }
 .dataset-note {
   margin: 0;
   padding: 8px 12px;
@@ -1379,7 +1405,7 @@ body::before {
   display: grid;
   gap: 3px;
   padding: 8px 9px 9px;
-  text-align: left;
+  text-align: start;
   background: var(--paper);
   border: 0;
   border-top: 2px solid transparent;
@@ -1407,7 +1433,7 @@ body::before {
   padding: 1px 4px;
 }
 .tile-hero { background: var(--red); color: var(--paper); }
-.tile-big { background: var(--ink-4); color: var(--paper); margin-left: auto; }
+.tile-big { background: var(--ink-4); color: var(--paper); margin-inline-start: auto; }
 .tile-title {
   font-size: 11.5px;
   line-height: 1.35;
@@ -1429,10 +1455,10 @@ body::before {
   margin-top: 16px;
   border: 1px solid var(--rule-2);
   background: var(--paper-2);
-  border-left: 3px solid var(--ink-4);
+  border-inline-start: 3px solid var(--ink-4);
 }
-.reason[data-status="AVAILABLE"] { border-left-color: var(--verify); }
-.reason[data-status="UNAVAILABLE"] { border-left-color: var(--review); }
+.reason[data-status="AVAILABLE"] { border-inline-start-color: var(--verify); }
+.reason[data-status="UNAVAILABLE"] { border-inline-start-color: var(--review); }
 .reason-head {
   display: flex;
   align-items: baseline;
@@ -1453,7 +1479,7 @@ body::before {
 .reason[data-status="AVAILABLE"] .reason-h { color: var(--verify); }
 .reason[data-status="UNAVAILABLE"] .reason-h { color: var(--review); }
 .reason-model {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--ink-3);
@@ -1526,7 +1552,7 @@ body::before {
   margin: 0 14px 12px;
   padding: 10px 12px;
   background: var(--review-wash);
-  border-left: 2px solid var(--review);
+  border-inline-start: 2px solid var(--review);
 }
 .reason-fail-h {
   margin: 0;
@@ -1542,7 +1568,7 @@ body::before {
   font-size: 9.5px;
   color: var(--ink-3);
 }
-.reason-fail ul { margin: 6px 0 0; padding-left: 16px; font-size: 11px; color: var(--ink-3); }
+.reason-fail ul { margin: 6px 0 0; padding-inline-start: 16px; font-size: 11px; color: var(--ink-3); }
 .reason-fail-foot { margin: 7px 0 0; font-size: 11.5px; color: var(--ink-2); }
 .reason-foot {
   margin: 0;
@@ -1559,7 +1585,7 @@ body::before {
   margin: 8px 0 0;
   padding: 7px 9px;
   background: var(--review-wash);
-  border-left: 2px solid var(--review);
+  border-inline-start: 2px solid var(--review);
   font-family: var(--mono);
   font-size: 9.5px;
   line-height: 1.5;
@@ -1584,7 +1610,7 @@ body::before {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  margin-left: auto;
+  margin-inline-start: auto;
   color: var(--ink-3);
   font-size: 10px;
 }
@@ -1607,14 +1633,26 @@ body::before {
   padding: 3px 6px;
 }
 .lang-sel select:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
-.lang-note { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+/* The presentation-only hint is a title tooltip on the control, not visible
+   header text, so the identity strip stays compact at desktop and narrow
+   widths. No .lang-note element remains in the markup. */
+.tr-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.tr-badge { letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule-2); padding: 2px 7px; background: var(--paper-2); }
+.tr-fallback { color: var(--ink-3); }
+.tr-toggle { font-family: var(--mono); font-size: 10px; color: var(--ink); background: var(--paper-2); border: 1px solid var(--rule-2); padding: 2px 8px; cursor: pointer; }
+.tr-toggle:hover { border-color: var(--ink-3); }
+.fc-source .tr-toggle, .obs-acts .tr-toggle { margin-inline-start: 6px; }
 .i18n-surface[lang="zh-CN"] { line-height: 1.75; }
 .i18n-surface[lang="zh-CN"] .bay-h,
 .i18n-surface[lang="zh-CN"] .panel-h { letter-spacing: .04em; }
 
 /* Numbers, ids and model names are Latin-runs inside Arabic text. Isolating each
    one keeps "openbmb/MiniCPM-V-4_5" and a count from being reordered by the
-   bidirectional algorithm, which is what makes mixed content unreadable. */
+   bidirectional algorithm, which is what makes mixed content unreadable.
+   Technical values outside the result bays (pipeline strip, identity strip,
+   reasoning header) are marked data-latin in the markup and isolated against
+   the DOCUMENT direction, because those chrome regions follow html[dir]. */
+html[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; }
 .i18n-surface[dir="rtl"] { text-align: right; }
 .i18n-surface[dir="rtl"] .mono,
 .i18n-surface[dir="rtl"] .obs-n,
@@ -1622,8 +1660,8 @@ body::before {
 .i18n-surface[dir="rtl"] .rig-name,
 .i18n-surface[dir="rtl"] .ident-v,
 .i18n-surface[dir="rtl"] .conf,
-.i18n-surface[dir="rtl"] .fc-title,
 .i18n-surface[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; text-align: left; }
+.i18n-surface[dir="rtl"] .fc-title { unicode-bidi: plaintext; }
 /* Long unbroken strings must wrap rather than push a card off the page. */
 .i18n-surface[dir="rtl"] .obs-text,
 .i18n-surface[dir="rtl"] .fc-title,
@@ -1643,7 +1681,7 @@ body::before {
 .img-label { grid-area: label; font-size: 11px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .img-status { grid-area: status; font-family: var(--mono); font-size: 9px; letter-spacing: .08em; color: var(--ink-3); }
 .img-status-failed { color: var(--red); }
-.img-drop { position: absolute; top: 1px; right: 3px; border: 0; background: transparent; color: var(--ink-4); font-size: 15px; line-height: 1; cursor: pointer; padding: 2px 5px; }
+.img-drop { position: absolute; top: 1px; inset-inline-end: 3px; border: 0; background: transparent; color: var(--ink-4); font-size: 15px; line-height: 1; cursor: pointer; padding: 2px 5px; }
 .img-drop:hover { color: var(--red); }
 .imgs-note { margin: 9px 0 0; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
 .btn-xs { padding: 5px 10px; font-size: 11px; }
