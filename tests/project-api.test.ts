@@ -15,6 +15,19 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 );
+/**
+ * Open the reviewer gate for the active project.
+ *
+ * Uploading and running produce evidence attributed to a reviewer, so the
+ * server refuses them until one is named. These tests assert project
+ * isolation, not the gate, so naming one is fixture setup; the gate itself is
+ * covered by reviewer-gate.test.ts.
+ */
+async function nameReviewer(call: Call): Promise<void> {
+  const res = await call.json('POST', '/api/reviewer', { name: 'API Tester', role: 'QA' });
+  assert.equal(res.status, 200, 'naming a reviewer must succeed');
+}
+
 
 async function withServer(fn: (call: Call) => Promise<void>): Promise<void> {
   const handle = createInspectionServer({
@@ -97,12 +110,16 @@ test('a capture from another project cannot be run, read or deleted', async () =
     const projectA = a.body.project.id;
 
     await call.json('POST', '/api/projects/switch', { projectId: projectA });
+    await nameReviewer(call);
+
     const upload = await call.raw('POST', '/api/upload?name=siteA.png&type=image/png', PNG, 'application/octet-stream');
     assert.equal(upload.status, 200);
     const captureId = JSON.parse(upload.body.toString('utf8')).capture.id;
 
     const b = await call.json('POST', '/api/projects', { name: 'Project B' });
     assert.equal(b.body.captures.length, 0);
+
+    await nameReviewer(call);
 
     const run = await call.json('POST', '/api/run', { captureId });
     assert.equal(run.status, 403);
@@ -122,6 +139,8 @@ test('image bytes are refused across a project boundary', async () => {
   await withServer(async (call) => {
     const a = await call.json('POST', '/api/projects', { name: 'Project A' });
     await call.json('POST', '/api/projects/switch', { projectId: a.body.project.id });
+    await nameReviewer(call);
+
     const upload = await call.raw('POST', '/api/upload?name=siteA.png&type=image/png', PNG, 'application/octet-stream');
     const captureId = JSON.parse(upload.body.toString('utf8')).capture.id;
 
@@ -135,6 +154,8 @@ test('deleting another project\'s capture is refused', async () => {
   await withServer(async (call) => {
     const a = await call.json('POST', '/api/projects', { name: 'Project A' });
     await call.json('POST', '/api/projects/switch', { projectId: a.body.project.id });
+    await nameReviewer(call);
+
     const upload = await call.raw('POST', '/api/upload?name=siteA.png&type=image/png', PNG, 'application/octet-stream');
     const captureId = JSON.parse(upload.body.toString('utf8')).capture.id;
 
@@ -148,6 +169,8 @@ test('switching back restores that project\'s inspection and verifications', asy
   await withServer(async (call) => {
     const a = await call.json('POST', '/api/projects', { name: 'Project A' });
     await call.json('POST', '/api/projects/switch', { projectId: a.body.project.id });
+    await nameReviewer(call);
+
     await call.raw('POST', '/api/upload?name=siteA.png&type=image/png', PNG, 'application/octet-stream');
 
     const run = await call.json('POST', '/api/run', {});
@@ -174,6 +197,8 @@ test('deleting a capture removes it from the project list and stops serving its 
   await withServer(async (call) => {
     const a = await call.json('POST', '/api/projects', { name: 'Project A' });
     await call.json('POST', '/api/projects/switch', { projectId: a.body.project.id });
+    await nameReviewer(call);
+
     const upload = await call.raw('POST', '/api/upload?name=siteA.png&type=image/png', PNG, 'application/octet-stream');
     const captureId = JSON.parse(upload.body.toString('utf8')).capture.id;
 
@@ -235,6 +260,8 @@ test('a cached result is never served to another project', async () => {
   await withServer(async (call) => {
     const a = await call.json('POST', '/api/projects', { name: 'Project A' });
     await call.json('POST', '/api/projects/switch', { projectId: a.body.project.id });
+    await nameReviewer(call);
+
     const upload = await call.raw('POST', '/api/upload?name=siteA.png&type=image/png', PNG, 'application/octet-stream');
     const captureId = JSON.parse(upload.body.toString('utf8')).capture.id;
 
@@ -242,6 +269,11 @@ test('a cached result is never served to another project', async () => {
     assert.equal(run.body.provenance.projectId, a.body.project.id);
 
     await call.json('POST', '/api/projects', { name: 'Project B' });
+    // Project B gets a reviewer too. This test is about ownership, so the gate
+    // must be open on BOTH projects: otherwise the request is refused for a
+    // missing reviewer and the ownership check it was written to prove never
+    // runs. The gate's own ordering is asserted in reviewer-gate.test.ts.
+    await nameReviewer(call);
     const leak = await call.json('POST', '/api/run', { captureId, cache: true });
     assert.equal(leak.status, 403, 'the cache must not bypass ownership');
 

@@ -1283,6 +1283,17 @@ body::before {
   line-height: 1.4;
   margin-top: 1px;
 }
+/* A partial analysis sits between the two outcomes: not the red of a failed
+   run, and not the green of a completed one. Its own hue is the only honest
+   encoding, because it is a third state rather than a softer version of either. */
+.pipe-step[data-state="partial"] { background: var(--review-wash); }
+.pipe-step[data-state="partial"] .pipe-n { color: var(--review); }
+.fail[data-status="PARTIAL"] {
+  border-color: rgba(154, 103, 0, .40);
+  background: var(--review-wash);
+}
+.fail[data-status="PARTIAL"] .fail-h { color: var(--review); }
+
 .pipe-step[data-state="done"] { background: rgba(31, 111, 67, .055); }
 .pipe-step[data-state="done"] .pipe-n { color: var(--verify); }
 .pipe-step[data-state="fail"] { background: var(--review-wash); }

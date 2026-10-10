@@ -62,7 +62,9 @@ const state = {
   evidenceCaptureId: null,
   // The ceiling on one inspection, read from the server that enforces it, so
   // the masthead can never claim a different maximum than the API.
-  maxInspectionImages: null
+  maxInspectionImages: null,
+  // The gate the server actually enforces, read from the workspace payload.
+  reviewerGate: null
 };
 
 /**
@@ -199,6 +201,10 @@ async function api(path, options) {
   if (!res.ok) {
     const err = new Error(body.message || body.error || 'request failed');
     err.status = res.status;
+    // The machine-readable code, kept so a caller can react to a SPECIFIC
+    // refusal rather than matching on English prose. REVIEWER_REQUIRED in
+    // particular has one correct response: open the reviewer setup.
+    err.code = typeof body.error === 'string' ? body.error : '';
     throw err;
   }
   return body;
@@ -249,6 +255,9 @@ function applyWorkspace(payload) {
   state.maxInspectionImages = typeof payload.maxInspectionImages === 'number'
     ? payload.maxInspectionImages
     : state.maxInspectionImages;
+  if (payload.reviewerGate !== undefined && payload.reviewerGate !== null) {
+    state.reviewerGate = payload.reviewerGate;
+  }
   // The server is authoritative about which photographs are open, including the
   // grouped order. Falls back to the single id so an older payload still works.
   state.captureIds = Array.isArray(payload.activeCaptureIds) && payload.activeCaptureIds.length > 0
@@ -1196,13 +1205,21 @@ function renderPipeline() {
   const r = view.reasoning;
 
   // 01 SEE
-  step1.dataset.state = view.outcome === 'FAILED' ? 'fail' : 'done';
+  // A partial analysis must not paint as a completed one. "done" beside a
+  // pipeline would say every photograph was read, and one of them was not.
+  const partial = view.failure !== null && view.failure.kind === 'PARTIAL_ANALYSIS';
+  step1.dataset.state = view.outcome === 'FAILED' ? 'fail' : partial ? 'partial' : 'done';
   set('pipe-vision-model', p.model);
   set('pipe-vision-note',
     view.outcome === 'FAILED'
       ? fillText(t('pipe.didNotComplete'), {
           kind: view.failure !== null ? view.failure.kind.toLowerCase().replace(/_/g, ' ') : t('fail.error')
         })
+      : partial
+        ? fillText(t('pipe.partial'), {
+            analysed: state.captureIds.length - view.images.filter((i) => i.status === 'FAILED').length,
+            total: state.captureIds.length,
+          })
       : view.isDemoFixture
         ? t('pipe.syntheticFixture')
         : view.inferenceOrigin === 'CACHED'
@@ -1717,8 +1734,17 @@ function renderProvenance() {
 
   if (view.failure !== null) {
     const box = el('div', 'fail');
-    box.appendChild(el('p', 'fail-h', fillText(t('prov.failedHead'), { kind: view.failure.kind })));
-    box.appendChild(el('p', null, describeFailure(view.failure.kind, view.failure.message)));
+    if (view.failure.kind === 'PARTIAL_ANALYSIS') {
+      // A partial run is not a failed run. Labelling it "INSPECTION FAILED"
+      // would throw away the evidence it did produce; the panel says how much
+      // of the inspection actually ran.
+      box.dataset.status = 'PARTIAL';
+      box.appendChild(el('p', 'fail-h', t('prov.partialHead')));
+      box.appendChild(el('p', null, view.failure.message));
+    } else {
+      box.appendChild(el('p', 'fail-h', fillText(t('prov.failedHead'), { kind: view.failure.kind })));
+      box.appendChild(el('p', null, describeFailure(view.failure.kind, view.failure.message)));
+    }
     failHost.appendChild(box);
   }
 
@@ -1925,11 +1951,39 @@ function renderAll() {
 function renderReviewerGate() {
   const banner = $('reviewer-gate');
   if (!banner) return;
-  const reviewer = state.project === null ? null : state.project.reviewer;
-  const named = reviewer !== null && reviewer !== undefined
-    && typeof reviewer.name === 'string' && reviewer.name.trim().length > 0;
-  banner.hidden = named;
-  $('reviewer-gate-reason').textContent = t('gate.reason');
+  const server = state.reviewerGate;
+  // The server's own verdict, not a recomputation here. The banner used to read
+  // the project and decide for itself, which meant it could assert a gate the
+  // API would not enforce; now the banner and the routes share one definition.
+  const closed = server !== null && server !== undefined
+    ? server.required === true
+    : reviewerMissingLocally();
+  banner.hidden = !closed;
+  const reason = $('reviewer-gate-reason');
+  if (reason !== null) {
+    // A server-authored reason is canonical system text and is shown verbatim,
+    // even when it is not the default sentence the catalog knows.
+    reason.textContent = server !== null && server !== undefined
+      && typeof server.reason === 'string' && server.reason.length > 0
+      ? server.reason
+      : t('gate.reason');
+  }
+}
+
+/**
+ * Whether this client copy believes the gate is closed, before any payload.
+ *
+ * Fail-closed, and only a fallback: it covers the window before the first
+ * workspace payload arrives, so the banner never flashes "open" and then invites
+ * a request the server will refuse. Once a payload lands, the server decides.
+ */
+function reviewerMissingLocally() {
+  const project = state.project;
+  if (project === null || project === undefined) return false;
+  const reviewer = project.reviewer;
+  return reviewer === null || reviewer === undefined
+    || typeof reviewer.name !== 'string'
+    || reviewer.name.trim().length === 0;
 }
 
 /**
@@ -2235,6 +2289,17 @@ async function uploadFiles(files) {
       );
       const payload = await body.json();
       if (!body.ok) {
+        // A closed gate is one refusal for the whole batch, not one per file.
+        // Repeating it twelve times would bury the single actionable message
+        // and read as twelve separate problems.
+        if (payload.error === 'REVIEWER_REQUIRED') {
+          error.textContent = payload.message || t('gate.reason');
+          error.hidden = false;
+          setLamp('problem', t('gate.required'));
+          notify(t('gate.reason'), 'bad');
+          openReviewerModal();
+          return;
+        }
         refused += 1;
         error.textContent = payload.message || payload.error || t('imgs.readFailed');
         error.hidden = false;
@@ -2409,6 +2474,16 @@ async function runInspection() {
     }
     renderAll();
   } catch (error) {
+    // A closed reviewer gate is not a provider failure and must not read as
+    // one: the run never reached a model, and no evidence was produced. Say so,
+    // and route to the one action that opens the gate.
+    if (error.code === 'REVIEWER_REQUIRED') {
+      setLamp('problem', 'REVIEWER REQUIRED');
+      setStatus(t('gate.reason'), 'bad');
+      notify(t('gate.reason'), 'bad');
+      openReviewerModal();
+      return;
+    }
     setLamp('problem', 'Inspection failed');
     const message = 'AI provider request failed: ' + error.message;
     setStatus(message, 'bad');

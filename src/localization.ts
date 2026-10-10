@@ -245,6 +245,8 @@ const EN = {
     + 'No image was re-encoded.',
   'prov.geometryStored': 'Stored {sw}×{sh}, displayed {dw}×{dh}.',
   'prov.failedHead': 'INSPECTION FAILED ({kind})',
+  'prov.partialHead': 'PARTIAL INSPECTION',
+  'pipe.partial': '{analysed} of {total} photograph(s) analysed, the rest failed and contributed nothing',
   'prov.rejectedHead': '{n} MODEL ENTRIES REJECTED BY VALIDATION',
 
   // -- yes/no and generic failures -----------------------------------------
@@ -708,6 +710,8 @@ const FR: Record<TranslationKey, string> = {
     + 'repère. Aucune image n’a été réencodée.',
   'prov.geometryStored': 'Enregistré {sw}×{sh}, affiché {dw}×{dh}.',
   'prov.failedHead': 'INSPECTION ÉCHOUÉE ({kind})',
+  'prov.partialHead': 'INSPECTION PARTIELLE',
+  'pipe.partial': '{analysed} photo(s) analys\u00e9e(s) sur {total}, les autres ont \u00e9chou\u00e9 et n\u2019ont fourni rien',
   'prov.rejectedHead': '{n} ENTRÉES DU MODÈLE REJETÉES PAR LA VALIDATION',
 
   'fail.timeout': "Le fournisseur d'IA a expiré. Le modèle n'a pas répondu à temps ; aucun résultat n'a été produit.",
@@ -1153,6 +1157,8 @@ const AR: Record<TranslationKey, string> = {
     + 'لذلك يستخدم النموذج والعرض وطبقة الدليل نظام إحداثيات واحدًا. لم يُعَد ترميز أي صورة.',
   'prov.geometryStored': 'المخزَّن {sw}×{sh}، والمعروض {dw}×{dh}.',
   'prov.failedHead': 'فشل الفحص ({kind})',
+  'prov.partialHead': '\u0641\u062d\u0635 \u062c\u0632\u0626\u064a',
+  'pipe.partial': '\u062d\u0644\u0644\u0629 {analysed} \u0635\u0648\u0631\u0629 \u0645\u0646 {total} \u062a\u0645 \u062a\u062d\u0644\u064a\u0644\u0647\u0627\u060c \u0648\u0627\u0644\u0628\u0627\u0642\u064a \u0641\u0634\u0644\u062a \u0648\u0644\u0645 \u062a\u0633\u0627\u0647\u0645',
   'prov.rejectedHead': '{n} مدخلًا من النموذج رُفضت بواسطة التحقق',
 
   'fail.timeout': 'انتهت مهلة مزود الذكاء الاصطناعي. لم يستجب النموذج في الوقت المحدد؛ ولم يُنتَج أي نتيجة.',
@@ -1589,6 +1595,8 @@ const ZH: Record<TranslationKey, string> = {
     + '坐标系。未对任何图像重新编码。',
   'prov.geometryStored': '存储 {sw}×{sh}，显示 {dw}×{dh}。',
   'prov.failedHead': '检查失败（{kind}）',
+  'prov.partialHead': '\u90e8\u5206\u68c0\u67e5',
+  'pipe.partial': '{total} \u5f20\u7167\u7247\u4e2d\u5df2\u5206\u6790 {analysed} \u5f20\uff0c\u5176\u4f59\u5931\u8d25\u4e14\u672a\u63d0\u4f9b\u8bc1\u636e',
   'prov.rejectedHead': '{n} 条模型输出被校验拒绝',
 
   'fail.timeout': 'AI 服务方超时。模型未及时应答；未产生任何结果。',

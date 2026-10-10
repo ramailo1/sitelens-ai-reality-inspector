@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Durable state: what survives a restart, and what must not.
  *
  * The claim this file has to defend is specific. It is not "the app saves
@@ -15,7 +15,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { WorkspacePersistence } from '../src/persistence.ts';
 import { readExifOrientation } from '../src/image-metadata.ts';
 import { ProjectStore } from '../src/projects.ts';
@@ -69,6 +69,72 @@ test('with persistence the store reports the real directory', () => {
   } finally {
     fixture.cleanup();
   }
+});
+
+test('an explicit directory option is used, not silently ignored', () => {
+  // The constructor accepted a `directory` and read only the environment, so a
+  // caller passing a temporary directory still wrote to the process default.
+  // A test believing it had isolated its writes was in fact reading and
+  // overwriting the real one.
+  const fixture = tempDataDir();
+  const other = tempDataDir();
+  try {
+    const explicit = new WorkspacePersistence({
+      directory: fixture.dir,
+      env: { ...process.env, SITELENS_DATA_DIR: other.dir },
+    });
+    assert.equal(explicit.directory, resolve(fixture.dir),
+      'the explicit option must win over the environment');
+    assert.equal(explicit.location, resolve(fixture.dir),
+      'the reported location must be the directory actually used');
+
+    // And it must really write there, not merely report it.
+    const store = new ProjectStore({
+      provider: new DemoFixtureProvider(),
+      zoneId: 'zone_level_02',
+      reasoner: new UnavailableReasoner({ kind: 'DISABLED', message: 'test' }),
+      persistence: explicit,
+    });
+    store.seedDemoProject('Isolated', 'Somewhere');
+    store.persist();
+    assert.ok(existsSync(join(fixture.dir, 'workspace.json')),
+      'state must land in the directory the caller named');
+    assert.equal(existsSync(join(other.dir, 'workspace.json')), false,
+      'the environment directory must not be written when an option overrides it');
+  } finally {
+    fixture.cleanup();
+    other.cleanup();
+  }
+});
+
+test('the environment is used when no explicit directory is given', () => {
+  const fixture = tempDataDir();
+  try {
+    const fromEnv = new WorkspacePersistence({ env: { ...process.env, SITELENS_DATA_DIR: fixture.dir } });
+    assert.equal(fromEnv.directory, resolve(fixture.dir));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('a blank explicit directory falls back to the environment rather than the cwd', () => {
+  const fixture = tempDataDir();
+  try {
+    // A blank string is not a directory. Resolving it would silently send every
+    // write to the process working directory.
+    const store = new WorkspacePersistence({
+      directory: '   ',
+      env: { ...process.env, SITELENS_DATA_DIR: fixture.dir },
+    });
+    assert.equal(store.directory, resolve(fixture.dir));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('with neither an option nor the environment, the documented default is used', () => {
+  const store = new WorkspacePersistence({ env: {} });
+  assert.equal(store.directory, resolve('data'), 'the fallback must be the documented data directory');
 });
 
 test('a project and its reference survive a restart', () => {
@@ -349,7 +415,7 @@ test('a restored dataset capture is orientation-normalized and the source file i
   // A dataset capture is stored as a PATH, and the dataset file itself is never
   // rewritten. So after a restart the raw bytes come back off the disk carrying
   // their original EXIF rotation, and the restore path must re-apply the same
-  // normalization import applied — otherwise a capture that displayed upright
+  // normalization import applied â€” otherwise a capture that displayed upright
   // before the restart would come back sideways, with model, display and
   // evidence overlay in disagreement again.
   const fixture = tempDataDir();

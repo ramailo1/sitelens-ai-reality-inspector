@@ -97,6 +97,51 @@ class NoActiveCapture extends Error {
 }
 
 /**
+ * The one sentence that says why the workflow is closed.
+ *
+ * Exported so the client and the tests read the same words the guard throws,
+ * rather than each holding their own copy that can drift.
+ */
+export const REVIEWER_REQUIRED_REASON =
+  'Configure the inspection reviewer before adding reality or running an inspection.';
+
+/**
+ * Thrown when a route that produces or attributes evidence is reached before a
+ * reviewer has been named.
+ *
+ * The refusal is server-side on purpose. A banner in the browser is a claim
+ * about this state, not the state itself; a client can be edited, replayed or
+ * simply wrong. Evidence that exists without anyone to attribute it cannot be
+ * retroactively attributed honestly, so the work is refused before it happens
+ * rather than flagged afterwards.
+ */
+class ReviewerRequired extends Error {
+  public constructor() {
+    super(REVIEWER_REQUIRED_REASON);
+    this.name = 'ReviewerRequired';
+  }
+}
+
+/**
+ * Whether the reviewer gate is closed for a project.
+ *
+ * ONE definition, read by both the route guard and the workspace payload, so the
+ * state the browser renders and the state the server enforces cannot drift
+ * apart. The structural parameter reads a single field and does not care which
+ * module declares the project.
+ */
+function reviewerGateState(
+  project: { readonly reviewer: { readonly name: string } | null } | null,
+): { readonly required: boolean; readonly reason: string | null } {
+  if (project === null) return { required: false, reason: null };
+  const reviewer = project.reviewer;
+  if (reviewer !== null && reviewer !== undefined && reviewer.name.trim().length > 0) {
+    return { required: false, reason: null };
+  }
+  return { required: true, reason: REVIEWER_REQUIRED_REASON };
+}
+
+/**
  * Capture as the UI sees it: identity, provenance and ownership, never raw bytes.
  *
  * `source` is structural, not cosmetic. It is the only thing that stops a
@@ -238,6 +283,22 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
     if (session === null) throw new NoActiveCapture();
     return session;
   };
+
+  /**
+   * Refuse a request that would create or attribute evidence without a reviewer.
+   *
+   * Thrown BEFORE any mutation, so a rejected request leaves nothing behind: no
+   * capture stored, no bytes written, no provider call made. A route that has
+   * already written before throwing would leave the very evidence the gate
+   * exists to prevent, attributed to nobody.
+   *
+   * With no active project the gate is OPEN: a missing project is reported by
+   * that route's own NO_ACTIVE_PROJECT refusal, and inventing a reviewer error
+   * here would hide the real problem behind the wrong one.
+   */
+  const requireReviewer = (): void => {
+    if (reviewerGateState(store.activeProject()).required) throw new ReviewerRequired();
+  };
   /**
    * The one payload every mutating route answers with, so the client always
    * receives the authoritative project, capture list and session view together
@@ -263,6 +324,9 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       // client labels the masthead with this rather than repeating the number,
       // so the header can never claim a different maximum than the server.
       maxInspectionImages: MAX_INSPECTION_IMAGES,
+      // The gate the routes actually enforce, read from the same function the
+      // guard uses, so the banner and the refusal cannot disagree.
+      reviewerGate: reviewerGateState(project),
       // Photographs the last selection REFUSED as byte-identical duplicates.
       // Reported rather than dropped silently: "2 of 3 photographs inspected"
       // must never be shown as "3 photographs inspected".
@@ -309,6 +373,13 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
     void handle(req, res).catch((error: unknown) => {
       if (error instanceof NoActiveCapture) {
         sendJson(res, 400, { error: 'NO_ACTIVE_CAPTURE', message: error.message });
+        return;
+      }
+      if (error instanceof ReviewerRequired) {
+        // 409, not 400: the request itself is well formed. The project is simply
+        // not in a state where this work is allowed yet, which is a conflict
+        // between the request and the current state rather than a bad request.
+        sendJson(res, 409, { error: 'REVIEWER_REQUIRED', message: error.message });
         return;
       }
       sendJson(res, 500, { error: 'internal error' });
@@ -657,6 +728,9 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
     // The id is validated against the discovered index, so this cannot be used
     // to read an arbitrary path off the machine.
     if (req.method === 'POST' && path === '/api/dataset/import') {
+      // Before the dataset is read: importing stores a capture, which is the
+      // same unattributable evidence an upload would be.
+      requireReviewer();
       if (store.activeProject() === null) {
         sendJson(res, 400, { error: 'create a project before importing a dataset image' });
         return;
@@ -727,6 +801,11 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       return;
     }
     if (req.method === 'POST' && path === '/api/run') {
+      // First, before the body is read and before any selection changes. A run
+      // produces findings attributed to a reviewer and spends provider budget;
+      // producing them with nobody to attribute them is the failure this gate
+      // exists to prevent, and refusing afterwards would leave them already made.
+      requireReviewer();
       const raw = await readJsonBody(req);
       if (raw.trim().length > 0) {
         try {
@@ -791,6 +870,10 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
     }
     // Capture upload
     if (req.method === 'POST' && path === '/api/upload') {
+      // Before the body is read: a refused upload must not cost a transfer or
+      // write a byte. Stored reality is unattributable evidence until a reviewer
+      // is named.
+      requireReviewer();
       if (store.activeProject() === null) {
         sendJson(res, 400, { error: 'create a project before uploading a capture' });
         return;
@@ -841,7 +924,12 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       sendJson(res, 200, { capture: captureSummary(stored), ...workspace() });
       return;
     }
-    if (req.method === 'POST' && path === '/api/review') {
+if (req.method === 'POST' && path === '/api/review') {
+      // The project must already name a reviewer. A reviewer string supplied in
+      // this request body does NOT open the gate: it would let any caller
+      // attribute a decision to a name the project never recorded, which is the
+      // attribution this endpoint exists to protect.
+      requireReviewer();
       const body = await readJsonBody(req);
       let payload: {
         observationId?: unknown;
@@ -892,6 +980,9 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       return;
     }
     if (req.method === 'POST' && path === '/api/review-finding') {
+      // Same trust boundary as /api/review: the named reviewer comes from the
+      // project, never from this request body.
+      requireReviewer();
       const body = await readJsonBody(req);
       let payload: {
         findingId?: unknown;
@@ -938,6 +1029,10 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       return;
     }
     if (req.method === 'POST' && path === '/api/finding-state') {
+      // Changing a finding's state attributes a human triage decision to the
+      // project, so it is gated like recording one. OPEN -> CLOSED is a claim
+      // that a human dealt with the finding, which needs a name.
+      requireReviewer();
       const body = await readJsonBody(req);
       let payload: { findingId?: unknown; state?: unknown };
       try {

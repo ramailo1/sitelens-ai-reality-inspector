@@ -239,9 +239,29 @@ test('the reviewer gate states the real reason and routes to the setup dialog', 
   assert.match(APP_JS, /\$\('reviewer-gate-btn'\)/, 'the gate button must be resolved');
   assert.match(APP_JS, /gateBtn\.addEventListener\('click', \(\) => openReviewerModal\(\)\)/,
     'the gate must be the route to the one action that resolves it');
-  // The banner must be driven by the project's real reviewer, never assumed.
-  assert.match(APP_JS, /state\.project\.reviewer/);
-  assert.match(APP_JS, /name\.trim\(\)\.length > 0/, 'a blank name must not open the gate');
+  // The banner reads the gate the SERVER enforces, out of the workspace payload.
+  // It used to decide for itself from the project, which meant it could assert a
+  // closed gate while the API happily accepted the work.
+  assert.match(APP_JS, /state\.reviewerGate/, 'the banner must read the server verdict');
+  assert.match(APP_JS, /payload\.reviewerGate/, 'the server verdict must reach the client');
+  assert.match(APP_JS, /server\.required === true/);
+  // A blank name must not open the gate. The client's own fallback is
+  // fail-closed: it closes on anything that is not a non-empty string.
+  assert.match(APP_JS, /typeof reviewer\.name !== 'string'/);
+  assert.match(APP_JS, /reviewer\.name\.trim\(\)\.length === 0/,
+    'a blank name must not open the gate');
+});
+
+test('a refused run opens the reviewer setup instead of blaming the provider', () => {
+  // The server's refusal is a setup gate, not a provider failure. Reading it as
+  // "AI provider request failed" would send the operator to a credential problem
+  // they do not have.
+  assert.match(APP_JS, /err\.code = typeof body\.error === 'string' \? body\.error : ''/,
+    'the machine-readable error code must survive to the caller');
+  assert.match(APP_JS, /error\.code === 'REVIEWER_REQUIRED'/,
+    'the run path must recognise the gate refusal');
+  assert.match(APP_JS, /payload\.error === 'REVIEWER_REQUIRED'/,
+    'the upload path must recognise the gate refusal');
 });
 
 test('the primary action is ink, so red stays reserved for destruction', () => {

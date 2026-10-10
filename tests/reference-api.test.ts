@@ -163,6 +163,9 @@ test('an operator edit is recorded against the project, not the shared reference
 
 test('changing the reference discards the comparison it produced', async () => {
   await withServer(async (call) => {
+    // A run produces evidence attributed to the project's reviewer, so the gate
+    // has to be open first. This file asserts comparison semantics, not the gate.
+    await call.json('POST', '/api/reviewer', { name: 'Reference Tester', role: 'QA' });
     const run = await call.json('POST', '/api/run', {});
     assert.ok(run.body.comparison.length > 0, 'the run must produce rows first');
 
@@ -178,6 +181,7 @@ test('changing the reference discards the comparison it produced', async () => {
 test('re-running after a reference change compares against the new one', async () => {
   await withServer(async (call) => {
     await call.json('POST', '/api/expected', { presetId: 'south-wing' });
+    await call.json('POST', '/api/reviewer', { name: 'Reference Tester', role: 'QA' });
     const run = await call.json('POST', '/api/run', {});
     assert.equal(run.body.comparison.length, 3);
     assert.equal(run.body.expected.zone, 'South Wing');

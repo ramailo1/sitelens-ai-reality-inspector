@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Image storage lifecycle over the real HTTP surface.
  *
  * The storage assertions deliberately look at the live store rather than a mock,
@@ -70,6 +70,23 @@ async function upload(call: Call, name = 'site.png'): Promise<string> {
   return JSON.parse(res.body.toString('utf8')).capture.id as string;
 }
 
+/**
+ * Create a project that is allowed to hold evidence.
+ *
+ * Uploading stores reality, and stored reality is evidence, so the reviewer gate
+ * refuses an upload to a project with no named reviewer. These tests are about
+ * what happens to those bytes, not about the gate, so the reviewer is part of
+ * their fixture rather than something each assertion re-tests. The gate's own
+ * behaviour is covered in reviewer-gate.test.ts.
+ */
+async function projectWithReviewer(call: Call, name: string): Promise<JsonResult> {
+  const created = await call.json('POST', '/api/projects', { name });
+  assert.equal(created.status, 201, 'project creation must succeed');
+  const named = await call.json('POST', '/api/reviewer', { name: 'Lifecycle Tester', role: 'QA' });
+  assert.equal(named.status, 200, 'naming a reviewer must succeed');
+  return created;
+}
+
 test('the API states where imagery is actually stored', async () => {
   await withServer(async (call) => {
     const res = await call.json('GET', '/api/workspace');
@@ -81,7 +98,7 @@ test('the API states where imagery is actually stored', async () => {
 
 test('an upload is held in memory as the exact bytes received', async () => {
   await withServer(async (call) => {
-    await call.json('POST', '/api/projects', { name: 'Storage' });
+    await projectWithReviewer(call, 'Storage');
     const id = await upload(call);
     const record = call.store().captures.get(id);
     assert.equal(Buffer.isBuffer(record.bytes), true);
@@ -92,7 +109,7 @@ test('an upload is held in memory as the exact bytes received', async () => {
 
 test('an authorised capture serves its bytes back unchanged', async () => {
   await withServer(async (call) => {
-    await call.json('POST', '/api/projects', { name: 'Storage' });
+    await projectWithReviewer(call, 'Storage');
     const id = await upload(call);
     const res = await call.raw('GET', `/api/capture-image/${id}`, Buffer.alloc(0), 'text/plain');
     assert.equal(res.status, 200);
@@ -102,17 +119,17 @@ test('an authorised capture serves its bytes back unchanged', async () => {
 
 test('a capture belonging to another project serves nothing', async () => {
   await withServer(async (call) => {
-    const a = await call.json('POST', '/api/projects', { name: 'A' });
+    const a = await projectWithReviewer(call, 'A');
     await call.json('POST', '/api/projects/switch', { projectId: a.body.project.id });
     const id = await upload(call);
-    await call.json('POST', '/api/projects', { name: 'B' });
+    await projectWithReviewer(call, 'B');
     const res = await call.raw('GET', `/api/capture-image/${id}`, Buffer.alloc(0), 'text/plain');
     assert.equal(res.status, 403);
   });
 });
 test('deleting a capture actually releases its bytes and session', async () => {
   await withServer(async (call) => {
-    await call.json('POST', '/api/projects', { name: 'A' });
+    await projectWithReviewer(call, 'A');
     const id = await upload(call);
     const store = call.store();
     assert.equal(store.captures.has(id), true);
@@ -128,7 +145,7 @@ test('deleting a capture actually releases its bytes and session', async () => {
 
 test('deleting a project removes every image it owned', async () => {
   await withServer(async (call) => {
-    const a = await call.json('POST', '/api/projects', { name: 'A' });
+    const a = await projectWithReviewer(call, 'A');
     await call.json('POST', '/api/projects/switch', { projectId: a.body.project.id });
     const id = await upload(call);
 
@@ -149,14 +166,14 @@ test('a fresh server starts with only the synthetic demo project', async () => {
 
 test('an operator-created project is not marked as demo', async () => {
   await withServer(async (call) => {
-    const created = await call.json('POST', '/api/projects', { name: 'Mine' });
+    const created = await projectWithReviewer(call, 'Mine');
     assert.equal(created.body.project.demo, false);
   });
 });
 
 test('a malformed image is refused rather than stored', async () => {
   await withServer(async (call) => {
-    await call.json('POST', '/api/projects', { name: 'A' });
+    await projectWithReviewer(call, 'A');
     const res = await call.raw(
       'POST', '/api/upload?name=broken.png&type=image/png',
       Buffer.from('this is not a png'), 'application/octet-stream',
@@ -167,7 +184,7 @@ test('a malformed image is refused rather than stored', async () => {
 
 test('an unsupported image type is refused', async () => {
   await withServer(async (call) => {
-    await call.json('POST', '/api/projects', { name: 'A' });
+    await projectWithReviewer(call, 'A');
     const res = await call.raw(
       'POST', '/api/upload?name=notes.txt&type=text/plain',
       Buffer.from('plain text'), 'application/octet-stream',

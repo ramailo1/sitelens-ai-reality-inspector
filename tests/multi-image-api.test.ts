@@ -96,6 +96,10 @@ test('three real photographs become ONE inspection, through the running server',
 
   // --- a project ---------------------------------------------------------
   assert.equal(await postWorkspace('/api/projects', { name: 'Level 02 re-shoot', location: 'North core' }), 201);
+  // Uploading and running both produce evidence attributed to the project's
+  // reviewer, so the gate has to be open before either. Closed-gate behaviour
+  // is covered in reviewer-gate.test.ts.
+  assert.equal(await postWorkspace('/api/reviewer', { name: 'Multi Image Tester', role: 'QA' }), 200);
   assert.ok((await workspace()).project !== null);
 
   // --- three REAL dataset photographs ------------------------------------

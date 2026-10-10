@@ -223,12 +223,32 @@ export interface ProvenanceRecord {
   readonly rejectionIssues: readonly ValidationIssue[];
 }
 
+/**
+ * Why an inspection could not produce a complete result.
+ *
+ * `PARTIAL_ANALYSIS` is its own kind rather than a variant of FAILED. A run in
+ * which two of three photographs were read is not a failed run and not a clean
+ * one: the evidence it does hold is real, and the photograph it could not read
+ * is absent. Reporting that as either "no failure" or "inspection failed" loses
+ * the only fact that matters, so a consumer reading `failure` alone cannot tell
+ * a complete inspection from a partial one.
+ */
+export type InspectionFailureKind =
+  | 'PARTIAL_ANALYSIS'
+  | 'NOT_CONFIGURED'
+  | 'TIMEOUT'
+  | 'UNAVAILABLE'
+  | 'AUTHENTICATION'
+  | 'RATE_LIMITED'
+  | 'MALFORMED_RESPONSE'
+  | 'ERROR';
+
 export interface SessionView {
   readonly outcome: InspectionOutcome['status'];
   readonly provenance: ProvenanceRecord;
   readonly observations: readonly ObservationView[];
   readonly findings: readonly Finding[];
-  readonly failure: { readonly kind: string; readonly message: string; readonly detail: string | null } | null;
+  readonly failure: { readonly kind: InspectionFailureKind | string; readonly message: string; readonly detail: string | null } | null;
 
   /** WHAT EXISTS ON SITE, as reported by the model. */
   readonly detections: readonly DetectedElementView[];
@@ -556,6 +576,36 @@ export class InspectionSession {
   /** The label of a capture this inspection holds, or its id if unknown. */
   private labelFor(captureId: string): string {
     return this.captures.find((c) => c.id === captureId)?.label ?? captureId;
+  }
+
+  /**
+   * The headline failure of this run, partial analysis included.
+   *
+   * All-or-nothing stays FAILED. A run that read SOME photographs is COMPLETED
+   * with a PARTIAL_ANALYSIS failure rather than a clean COMPLETED: the result is
+   * usable and the omission is real, and both facts have to reach the same
+   * reader.
+   */
+  private topLevelFailure(
+    outcome: InspectionOutcome | null,
+  ): { readonly kind: InspectionFailureKind | string; readonly message: string; readonly detail: string | null } | null {
+    // PENDING carries no result and therefore no failure. It is a member of the
+    // union rather than assumed away.
+    if (outcome === null || outcome.status === 'PENDING') return null;
+    if (outcome.status === 'FAILED') {
+      return { kind: outcome.kind, message: outcome.message, detail: outcome.detail };
+    }
+    const failed = this.imageOutcomes.filter((o) => o.status === 'FAILED');
+    if (failed.length === 0) return null;
+    const analysed = this.captures.length - failed.length;
+    return {
+      kind: 'PARTIAL_ANALYSIS',
+      message:
+        `Partial inspection: ${analysed} of ${this.captures.length} photograph(s) were analysed and `
+        + `${failed.length} failed (${failed.map((f) => f.captureLabel).join(', ')}). `
+        + 'The failed photographs contributed no evidence.',
+      detail: failed.map((f) => f.failure).filter((m): m is string => typeof m === 'string').join(' | '),
+    };
   }
 
   /**
@@ -1316,10 +1366,11 @@ export class InspectionSession {
       provenance,
       observations,
       findings,
-      failure:
-        outcome !== null && outcome.status === 'FAILED'
-          ? { kind: outcome.kind, message: outcome.message, detail: outcome.detail }
-          : null,
+      // A partial analysis is stated HERE, at the top level, and not only in
+      // `images`. Every per-image status is already reported, but a consumer
+      // that reads the headline would otherwise read a 2-of-3 inspection as a
+      // clean one and quote complete evidence from a photograph nothing read.
+      failure: this.topLevelFailure(outcome),
       detections,
       expected: this.expected,
       comparison,

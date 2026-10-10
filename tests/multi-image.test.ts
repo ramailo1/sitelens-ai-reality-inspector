@@ -393,6 +393,53 @@ test('F: one failed image does not silently become a success', async () => {
   // And its observations genuinely are absent.
   assert.equal(view.observations.some((o) => o.captureId === TWO.id), false);
   assert.equal(view.images.filter((i) => i.status === 'ANALYSED').length, 2);
+
+  // The top-level result must also say so. A consumer reading only `failure`
+  // would otherwise read a 2-of-3 inspection as a clean 3-of-3 and report
+  // complete evidence from a photograph that was never read.
+  assert.notEqual(view.failure, null,
+    'a partial inspection must not report no failure at all');
+  assert.equal(view.failure?.kind, 'PARTIAL_ANALYSIS');
+  assert.match(String(view.failure?.message), /2 of 3/,
+    'the message must state how many of how many photographs produced evidence');
+});
+
+test('F: a fully successful run reports no partial-analysis failure', async () => {
+  // The counterpart to the case above. If every photograph was read, the same
+  // message must NOT appear, or a clean run would cry wolf.
+  const { session } = sessionForImages({});
+  const view = await session.run();
+  assert.equal(view.outcome, 'COMPLETED');
+  assert.equal(view.failure, null,
+    'a run that read every photograph must not claim a partial analysis');
+});
+
+test('F: a run where every photograph failed is a FAILED run, not a partial one', async () => {
+  // All-or-nothing is its own state and must not borrow the partial wording.
+  const { session } = sessionForImages({
+    failFor: { [ONE.id]: 'unreachable 1', [TWO.id]: 'unreachable 2', [THREE.id]: 'unreachable 3' },
+  });
+  const view = await session.run();
+  assert.equal(view.outcome, 'FAILED');
+  assert.notEqual(view.failure, null);
+  assert.notEqual(view.failure?.kind, 'PARTIAL_ANALYSIS',
+    'a run with no surviving evidence is FAILED, not PARTIAL_ANALYSIS');
+  assert.equal(view.images.every((i) => i.status === 'FAILED'), true,
+    'every photograph must still be reported as failed');
+});
+
+test('F: a single failed photograph reports a partial analysis, not a clean one', async () => {
+  // The two-photograph shape of the same defect: one survived, one did not.
+  const { session } = sessionForImages({
+    images: [{ capture: ONE, label: 'north elevation' }, { capture: TWO, label: 'close-up' }],
+    failFor: { [TWO.id]: 'unreachable' },
+  });
+  const view = await session.run();
+  assert.equal(view.outcome, 'COMPLETED');
+  assert.equal(view.failure?.kind, 'PARTIAL_ANALYSIS');
+  assert.match(String(view.failure?.message), /1 of 2/);
+  // The surviving photograph's evidence is still real and still reported.
+  assert.equal(view.images.filter((i) => i.status === 'ANALYSED').length, 1);
 });
 
 /* ------------------------------------------------------------------ *

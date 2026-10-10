@@ -180,10 +180,21 @@ export class WorkspacePersistence {
     readonly env?: NodeJS.ProcessEnv;
   } = {}) {
     const env = options.env ?? process.env;
+    // Precedence: an explicit option, then the environment, then the default.
+    //
+    // The explicit option is read at all because a constructor argument that is
+    // silently ignored is worse than no argument: callers passing a temporary
+    // directory believe they have isolated their writes, while the store keeps
+    // using the process default and they read and overwrite the real one. A
+    // caller who names a directory means that directory.
+    const explicit = typeof options.directory === 'string' && options.directory.trim().length > 0
+      ? options.directory.trim()
+      : null;
     const configured = env['SITELENS_DATA_DIR'];
-    const raw = configured !== undefined && configured.trim().length > 0
+    const fromEnv = configured !== undefined && configured.trim().length > 0
       ? configured.trim()
-      : DEFAULT_DATA_DIR;
+      : null;
+    const raw = explicit ?? fromEnv ?? DEFAULT_DATA_DIR;
     this.directory = resolve(process.cwd(), raw);
     this.location = this.directory;
     // Resolved through the DATASET module rather than reimplemented here. When
