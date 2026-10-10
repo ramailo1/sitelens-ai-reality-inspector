@@ -813,3 +813,77 @@ test('a consolidated inspection comes back after a restart, with its per-photo p
     rmSync(dir, { recursive: true, force: true });
   }
 });
+/* ------------------------------------------------------------------ *
+ * Restore refuses a photograph it does not hold.
+ *
+ * A stored inspection may name a capture the session no longer has, whose
+ * bytes are unavailable. Restoring it anyway would attach its observations to
+ * an image identity nobody can open, so it is skipped. The guard had no direct
+ * test: the restart suite only ever restored captures it still held.
+ * ------------------------------------------------------------------ */
+
+test('a restored payload naming an absent capture is skipped, not misattributed', async () => {
+  const { session, captures } = sessionForImages({ images: [{ capture: ONE, label: 'only-frame' }] });
+  const held = captures.map((c) => c.id);
+  assert.ok(held.length === 1, 'the fixture holds exactly one photograph');
+
+  const record: any = {
+    provider: 'demo-fixture',
+    model: 'demo-fixture-vision-v1',
+    inspectedAt: '2026-01-01T00:00:00.000Z',
+    latencyMs: 1,
+    inferenceOrigin: 'FRESH',
+    // Empty: this record carries no human decisions, and the restore path
+    // expects the field rather than tolerating its absence.
+    reviews: [],
+    payload: {
+      elements: [{ element: 'REBAR', present: true, count: null, confidence: 0.7, evidence: 'e', boundingBox: null }],
+      observations: [],
+      findings: [],
+      rejected: [],
+      rejectedInspection: [],
+    },
+    // One payload the session CAN resolve, and one it cannot.
+    payloads: [
+      {
+        captureId: held[0],
+        captureLabel: 'only-frame',
+        payload: {
+          elements: [{ element: 'REBAR', present: true, count: null, confidence: 0.7, evidence: 'e', boundingBox: null }],
+          observations: [],
+          findings: [],
+          rejected: [],
+          rejectedInspection: [],
+        },
+      },
+      {
+        captureId: 'cap_not_held_anywhere',
+        captureLabel: 'vanished-frame',
+        payload: {
+          elements: [{ element: 'COLUMN', present: true, count: null, confidence: 0.9, evidence: 'e', boundingBox: null }],
+          observations: [],
+          findings: [],
+          rejected: [],
+          rejectedInspection: [],
+        },
+      },
+    ],
+  };
+
+  const ok = session.restoreInspection(record);
+  assert.equal(ok, true, 'the resolvable payload must still restore');
+  const view = session.view();
+
+  // The unheld capture contributes nothing: no detection, no image row, and
+  // certainly no observation labelled with an image nobody can open.
+  assert.equal(view.detections.some((d) => d.captureId === 'cap_not_held_anywhere'), false,
+    'a detection must not be attributed to a capture the session does not hold');
+  assert.equal(view.detections.some((d) => d.element === 'COLUMN'), false,
+    'nothing from the unresolvable payload may appear');
+  assert.equal(view.images.some((i) => i.captureId === 'cap_not_held_anywhere'), false,
+    'an unheld capture must not appear as a contributing photograph');
+
+  // And the payload that COULD be resolved is untouched by the one that could not.
+  assert.equal(view.detections.some((d) => d.element === 'REBAR'), true,
+    'the resolvable detection must survive the skipped one');
+});

@@ -1205,21 +1205,29 @@ function renderPipeline() {
   const r = view.reasoning;
 
   // 01 SEE
-  // A partial analysis must not paint as a completed one. "done" beside a
-  // pipeline would say every photograph was read, and one of them was not.
+  // Partial is checked BEFORE the outcome, deliberately. A partial analysis is
+  // its own third state: when it wins the comparison, the run is not "did not
+  // complete" and the step must not borrow the failure colour and wording.
   const partial = view.failure !== null && view.failure.kind === 'PARTIAL_ANALYSIS';
-  step1.dataset.state = view.outcome === 'FAILED' ? 'fail' : partial ? 'partial' : 'done';
+  const failed = view.outcome === 'FAILED' && !partial;
+  step1.dataset.state = partial ? 'partial' : failed ? 'fail' : 'done';
   set('pipe-vision-model', p.model);
   set('pipe-vision-note',
-    view.outcome === 'FAILED'
+    failed
       ? fillText(t('pipe.didNotComplete'), {
           kind: view.failure !== null ? view.failure.kind.toLowerCase().replace(/_/g, ' ') : t('fail.error')
         })
       : partial
-        ? fillText(t('pipe.partial'), {
-            analysed: state.captureIds.length - view.images.filter((i) => i.status === 'FAILED').length,
-            total: state.captureIds.length,
-          })
+        ? fillText(t('pipe.partial'), (function () {
+            // Counted from the images themselves rather than derived from the
+            // open group: subtracting failures from a separately-sized list can
+            // go negative, and "-1 of 1 analysed" is worse than no number.
+            const images = Array.isArray(view.images) ? view.images : [];
+            return {
+              analysed: images.filter((i) => i.status !== 'FAILED').length,
+              total: images.length,
+            };
+          })())
       : view.isDemoFixture
         ? t('pipe.syntheticFixture')
         : view.inferenceOrigin === 'CACHED'

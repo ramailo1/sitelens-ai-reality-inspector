@@ -350,6 +350,57 @@ test('the photo names are available without widening the masthead', () => {
   assert.match(APP_CSS, /\.rig-disclose-list\s*\{[^}]*overflow-y:\s*auto/);
 });
 
+/* ------------------------------------------------------------------ *
+ * A partial analysis is its own state, not a softer failure.
+ *
+ * Found by driving the real page: a partial run rendered the SEE step as
+ * 'fail' with "did not complete", and its count read "-1 of 1 analysed"
+ * because it subtracted failures from a differently-sized list.
+ * ------------------------------------------------------------------ */
+
+test('a partial analysis is decided before the run outcome, not after it', () => {
+  // Order is the fix. Checking `outcome === 'FAILED'` first let a partial run
+  // borrow the failure state and wording whenever the outcome happened to be
+  // FAILED alongside a partial failure.
+  const partialAt = APP_JS.indexOf('const partial = view.failure !== null');
+  const failedAt = APP_JS.indexOf('const failed = view.outcome');
+  assert.ok(partialAt > -1, 'the partial flag must be computed explicitly');
+  assert.ok(failedAt > -1, 'the failure flag must exclude a partial run');
+  assert.ok(partialAt < failedAt, 'partial must be decided first');
+  assert.match(APP_JS, /const failed = view\.outcome === 'FAILED' && !partial;/,
+    'a partial run must not be treated as a total failure');
+});
+
+test('the partial count is taken from the images, so it cannot go negative', () => {
+  // It used to be `captureIds.length - failedImages`, and the open group and the
+  // image list are different lengths, which produced "-1 of 1 analysed".
+  assert.match(APP_JS, /analysed: images\.filter\(\(i\) => i\.status !== 'FAILED'\)\.length/);
+  assert.match(APP_JS, /total: images\.length/);
+  assert.doesNotMatch(APP_JS, /analysed: state\.captureIds\.length - /,
+    'the analysed count must not be derived by subtraction from a separate list');
+});
+
+test('partial, done and failed are visually distinguishable from one another', () => {
+  // Partial and failure were the same amber wash, so the only difference was a
+  // word in a small label. Partial now also carries an inset rule.
+  assert.match(APP_CSS, /\.pipe-step\[data-state="partial"\]\s*\{[^}]*box-shadow:\s*inset/,
+    'partial must carry a rule that neither done nor failed has');
+  assert.match(APP_CSS, /\.pipe-step\[data-state="partial"\]\s*\{[^}]*--review/);
+  // The failure state must NOT acquire that rule, or they converge again.
+  const failRule = /\.pipe-step\[data-state="fail"\]\s*\{([^}]*)\}/.exec(APP_CSS);
+  assert.ok(failRule !== null, 'the failure state must have its own rule');
+  assert.doesNotMatch(failRule[1]!, /box-shadow:\s*inset/,
+    'the failure state must not share the partial rule');
+});
+
+test('the partial panel is labelled as partial, not as a failed inspection', () => {
+  assert.match(APP_JS, /view\.failure\.kind === 'PARTIAL_ANALYSIS'/);
+  assert.match(APP_JS, /box\.dataset\.status = 'PARTIAL'/);
+  assert.match(APP_JS, /t\('prov\.partialHead'\)/);
+  // The partial wording must come from the catalog, in every language.
+  assert.match(APP_JS, /t\('pipe\.partial'\)/);
+});
+
 test('the NVIDIA requirement card states the verdict, the stages and the path', () => {
   assert.match(INDEX_HTML, /id="qual-subtitle"/, 'the pipeline shape must be stated');
   // The verdict is the badge alone; the platform and the qualifying stage are

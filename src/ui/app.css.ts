@@ -1283,10 +1283,14 @@ body::before {
   line-height: 1.4;
   margin-top: 1px;
 }
-/* A partial analysis sits between the two outcomes: not the red of a failed
-   run, and not the green of a completed one. Its own hue is the only honest
-   encoding, because it is a third state rather than a softer version of either. */
-.pipe-step[data-state="partial"] { background: var(--review-wash); }
+/* A partial analysis is its own third state: not the green of a completed run
+   and not a failed one. The failure state uses the same amber wash, so partial
+   is separated from it by an inset left rule instead of by colour alone -- the
+   two can then be told apart at a glance and in high-contrast mode. */
+.pipe-step[data-state="partial"] {
+  background: var(--review-wash);
+  box-shadow: inset 3px 0 0 var(--review);
+}
 .pipe-step[data-state="partial"] .pipe-n { color: var(--review); }
 .fail[data-status="PARTIAL"] {
   border-color: rgba(154, 103, 0, .40);

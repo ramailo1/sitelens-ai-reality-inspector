@@ -1187,16 +1187,25 @@ export class InspectionSession {
     ];
 
     const rawDetections: readonly DetectedElement[] = result?.elements ?? [];
-    // Which photograph produced each reading. Recorded here rather than on
-    // DetectedElement because that type is validated model output and must stay
-    // exactly what the model returned.
-    const detectionCaptureByIndex = new Map<number, string>();
+    // Which photograph produced each reading, indexed by its position in the
+    // MERGED element list. Recorded here rather than on DetectedElement because
+    // that type is validated model output and must stay exactly what the model
+    // returned.
+    //
+    // The offset RUNS ACROSS photographs. It used to restart at zero inside each
+    // one, so a map keyed by that position had two frames that each reported two
+    // elements overwrite each other's keys: every detection was then attributed
+    // to the last frame that contributed an entry, and the rest silently fell
+    // back to the primary capture. A detection read in one photograph was drawn
+    // on another, and its evidence box was positioned against the wrong frame's
+    // dimensions.
+    const detectionCaptureByIndex: string[] = [];
     for (const image of this.imageOutcomes) {
-      image.elements.forEach((_, index) => detectionCaptureByIndex.set(index, image.captureId));
+      for (const _ of image.elements) detectionCaptureByIndex.push(image.captureId);
     }
     let detectionCursor = 0;
     const detections: DetectedElementView[] = rawDetections.map((d) => {
-      const captureId = detectionCaptureByIndex.get(detectionCursor) ?? this.capture.id;
+      const captureId = detectionCaptureByIndex[detectionCursor] ?? this.capture.id;
       detectionCursor += 1;
       const own = dimensionsFor(captureId);
       const pixelBox = toPixelBox(d.boundingBox, own);
