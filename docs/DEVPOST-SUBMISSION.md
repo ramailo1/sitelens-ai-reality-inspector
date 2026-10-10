@@ -20,7 +20,8 @@ See full submission documentation in:
 ---
 
 ## Verified Hackathon Product State
-* **Product Commit**: `780b92f00eb95f3d35734b7bda692055ab32fc83`
-* **Test Suite**: 339/339 tests passing
-* **Typecheck**: 0 TypeScript errors
-* **AI Architecture**: Hybrid MiniCPM-V-4_5 (SEE) + `compare.ts` (COMPARE) + `nvidia/Nemotron-3-Ultra-550b-a55b` via Nebius Token Factory (UNDERSTAND) + Named Human Inspector (VERIFY)
+* **Branch**: `main`
+* **Test Suite**: 583/583 tests passing (32 test suites)
+* **Typecheck**: 0 TypeScript errors (`npx tsc --noEmit`)
+* **Browser Verification**: 32/32 locale × viewport × bay acceptance cells verified in Playwright Chromium (`en`, `fr`, `ar` RTL, `zh-CN` LTR across `1440×900` desktop and `390×844` mobile)
+* **AI Architecture**: Hybrid `openbmb/MiniCPM-V-4_5` (SEE, 1–6 photos with per-frame attribution) + `src/compare.ts` (COMPARE, deterministic arithmetic) + `nvidia/Nemotron-3-Ultra-550b-a55b` via Nebius Token Factory (UNDERSTAND) + Named Human Inspector Gate (VERIFY) + 4-language projection (`en`, `fr`, `ar` RTL, `zh-CN` LTR)

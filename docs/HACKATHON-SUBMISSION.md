@@ -51,8 +51,9 @@ REALITY IMAGE ➔ [1] MiniCPM-V (SEE) ➔ [2] compare.ts (COMPARE) ➔ [3] Nemot
 * **No Perfect BIM Required**: Operates directly on site photographs and lightweight expected-state references.
 * **Deterministic Isolation**: Comparison logic lives in code, preventing LLM prose from altering mathematical compliance evaluations.
 * **Explicit Uncertainty**: Insufficient evidence produces an `UNDETERMINED` result (severity `INFO`) rather than a false defect or fabricated match.
-* **Truthful Evidence**: Features localized bounding boxes, full-frame disclosures, or explicit "unlocalized" state—never synthetic boxes.
-* **Reviewer Attribution**: Verification decisions record the reviewer identity in force at the time, and persist across server restarts without rewriting historical records. These are local JSON records, not a tamper-evident ledger.
+* **Truthful Evidence**: Features localized bounding boxes, full-frame disclosures, or explicit "unlocalized" state—never synthetic boxes. Every detection attributes the specific photograph it came from.
+* **Reviewer Gate & Attribution**: Inspection runs and verification decisions require a configured project reviewer identity, persisting decisions across server restarts without rewriting historical records. These are local JSON records, not a tamper-evident ledger.
+* **Multilingual Inspection Projection (`en`, `fr`, `ar` RTL, `zh-CN` LTR)**: Projects every inspection across English, French, Arabic (full right-to-left document layout), and Chinese with zero re-inference on language switch, pixel-invariant evidence bounding boxes, and provenance-labeled AI translation (`Translated from English` + `View original` toggle).
 
 ---
 
@@ -60,25 +61,24 @@ REALITY IMAGE ➔ [1] MiniCPM-V (SEE) ➔ [2] compare.ts (COMPARE) ➔ [3] Nemot
 
 ### Technology Stack
 * **Language & Runtime**: TypeScript, Node.js (≥ 22.6, zero runtime dependencies, native type-stripping).
-* **Testing**: Node.js native test runner (339 tests passing, 0 TypeScript errors).
+* **Testing**: Node.js native test runner (583 tests passing across 32 test suites, 0 TypeScript errors) + Playwright Chromium browser verification across all 4 locales and desktop/mobile viewports.
 * **Persistence**: Atomic JSON storage under `data/`.
 
 ### NVIDIA Contribution
 * **Model**: `nvidia/Nemotron-3-Ultra-550b-a55b`.
-* **Role**: Stage 3 Construction Reasoning. Synthesizes structured vision readings and comparison data into actionable engineering recommendations.
+* **Role**: Stage 3 Construction Reasoning (synthesizing structured vision readings and deterministic comparison data into actionable engineering recommendations) and structured batch translation of novel AI prose across French, Arabic, and Chinese.
 
 ### Nebius Contribution
 * **Platform**: Nebius Token Factory API (`https://api.tokenfactory.nebius.com/v1/`).
-* **Role**: High-speed, OpenAI-compatible model serving for reasoning completions over HTTPS.
+* **Role**: High-speed, OpenAI-compatible model serving for vision (`openbmb/MiniCPM-V-4_5`) and reasoning (`nvidia/Nemotron-3-Ultra-550b-a55b`) completions over HTTPS.
 
 ---
 
 ## 6. Measured Performance & Demo Timings
 
-* Observed hero live inspection timings:
-  * **Vision Stage (MiniCPM-V)**: ~14.1 seconds
-  * **Reasoning Stage (Nemotron-3-Ultra)**: ~3.8 seconds
-  * **Total Pipeline Execution**: ~18 seconds
+* Observed live inspection timings on Nebius Token Factory:
+  * **Single-Photo Live Run (363 KB site capture)**: Vision (`MiniCPM-V-4_5`) ~3.0 seconds, Reasoning (`Nemotron-3-Ultra`) ~2.7 seconds (~5.7 seconds total).
+  * **Hero Dataset Capture (`030`)**: Vision (`MiniCPM-V-4_5`) ~14.1 seconds, Reasoning (`Nemotron-3-Ultra`) ~3.8 seconds (~18 seconds total).
 * *Note: Timings are single-session measured observations, not guaranteed SLAs.*
 
 ---
@@ -95,4 +95,4 @@ REALITY IMAGE ➔ [1] MiniCPM-V (SEE) ➔ [2] compare.ts (COMPARE) ➔ [3] Nemot
 
 * **Local Demo Scope**: Built for local execution; no multi-tenant enterprise RBAC or cloud database attached.
 * **Visual Bounding Boxes**: Vision models occasionally provide unlocalized readings; SiteLens discloses unlocalized evidence rather than fabricating regions.
-* **Single Capture Scope**: Analyzes individual spatial captures rather than multi-date 4D timelines.
+* **Spatial Group Scope (Up to 6 Captures)**: Analyzes single photographs or multi-photo groups (up to 6 captures per inspection) against an expected reference state rather than multi-month 4D schedule timelines.
