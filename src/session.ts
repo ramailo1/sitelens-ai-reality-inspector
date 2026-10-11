@@ -617,6 +617,16 @@ export class InspectionSession {
     return this.captures.map((c) => c.id);
   }
 
+  /**
+   * The project this inspection belongs to, or null when none was named.
+   *
+   * Exposed so the store can stamp the reference an inspection was judged
+   * against without reaching into private state.
+   */
+  public get project(): string | null {
+    return this.projectId;
+  }
+
   /** How many real vision calls this inspection makes. */
   public get imageCount(): number {
     return this.captures.length;

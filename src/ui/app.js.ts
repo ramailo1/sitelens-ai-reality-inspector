@@ -70,7 +70,11 @@ const state = {
   // 'obs:<id>', 'fnd:<id>:<field>' or 'reason:<field>'. Cleared on language
   // change so the switch consistently shows the translation again.
   trOriginal: new Set(),
-  lastRunSecs: null
+  lastRunSecs: null,
+  findingInFlight: new Set(),
+  obsReviewInFlight: new Set(),
+  findingFeedback: {},
+  referenceInvalidated: null
 };
 
 /**
@@ -336,6 +340,16 @@ function applyWorkspace(payload) {
   state.lastRunSecs = null;
   state.activeId = null;
   state.openIds.clear();
+  if (state.findingInFlight) state.findingInFlight.clear();
+  if (state.obsReviewInFlight) state.obsReviewInFlight.clear();
+  state.findingFeedback = {};
+  if (state.referenceInvalidated && (
+    !state.project
+    || state.referenceInvalidated.projectId !== state.project.id
+    || (state.view && state.view.outcome !== 'PENDING')
+  )) {
+    state.referenceInvalidated = null;
+  }
   // The open group changed, so the frame the evidence stage was showing may no
   // longer belong to it. renderStage repairs this on the next pass; dropping the
   // stale id here keeps that repair from showing a box on the wrong photograph
@@ -478,10 +492,24 @@ function renderStorage() {
   const node = $('storage-note');
   if (!node) return;
   if (!state.storage) {
-    node.textContent = 'Storage: unknown.';
+    node.dataset.durable = 'unknown';
+    node.textContent = 'Storage: unknown — durability not confirmed (treat as process memory only).';
     return;
   }
-  node.textContent = 'Storage: ' + state.storage.location + '. ' + state.storage.detail;
+  const view = state.view;
+  if (view && view.persistence && view.persistence.written === false) {
+    node.dataset.durable = 'failed';
+    node.textContent = 'Storage write failed (' + state.storage.location + '): ' + view.persistence.message;
+    return;
+  }
+  if (state.storage.durable === true) {
+    node.dataset.durable = 'true';
+    const confirmed = view && view.outcome === 'COMPLETED' ? ' Confirmed written to disk.' : '';
+    node.textContent = 'Storage (durable): ' + state.storage.location + '. ' + state.storage.detail + confirmed;
+    return;
+  }
+  node.dataset.durable = 'false';
+  node.textContent = 'Storage (process memory only — not durable): ' + state.storage.location + '. ' + state.storage.detail;
 }
 
 /**
@@ -867,7 +895,13 @@ async function submitReviewerModal(event) {
     if (state.pendingReviewIntent) {
       const intent = state.pendingReviewIntent;
       state.pendingReviewIntent = null;
-      await submitReview(intent.findingId, intent.decision);
+      if (intent.findingId) {
+        await submitReview(intent.findingId, intent.decision);
+      } else if (intent.observationId) {
+        await submitObservationReview(intent.observationId, intent.decision);
+      } else if (intent.ledgerFindingId) {
+        await updateFindingState(intent.ledgerFindingId, intent.nextState);
+      }
     }
   } catch (error) {
     const note = $('reviewer-modal-note');
@@ -1363,13 +1397,21 @@ function renderPipeline() {
 
   // 04 VERIFY
   const counters = view.counters;
-  step4.dataset.state = counters.verified > 0 ? 'done' : (counters.pending > 0 ? 'wait' : 'idle');
+  const obsVerified = Array.isArray(view.observations)
+    ? view.observations.filter((o) => o.verificationStatus === 'VERIFIED').length
+    : 0;
+  const obsRejected = Array.isArray(view.observations)
+    ? view.observations.filter((o) => o.verificationStatus === 'REJECTED').length
+    : 0;
+  const totalVerified = counters.verified + obsVerified;
+  const totalRejected = counters.rejected + obsRejected;
+  step4.dataset.state = totalVerified > 0 ? 'done' : (counters.pending > 0 ? 'wait' : 'idle');
   set('pipe-verify-note',
-    counters.verified === 0 && counters.rejected === 0
+    totalVerified === 0 && totalRejected === 0
       ? fillText(t('pipe.verifyPending'), { n: counters.pending })
       : fillText(t('pipe.verifyCounts'), {
-          verified: counters.verified,
-          rejected: counters.rejected,
+          verified: totalVerified,
+          rejected: totalRejected,
         }));
 
   updateInspectIntro();
@@ -1415,6 +1457,17 @@ function renderFindings() {
   if (view === null) return;
   const l10n = localized();
 
+  if (state.referenceInvalidated && view.outcome === 'PENDING') {
+    const invProject = state.referenceInvalidated.project || (state.project ? state.project.name : '');
+    const invCount = typeof state.referenceInvalidated.count === 'number' ? state.referenceInvalidated.count : 0;
+    const banner = el('div', 'ref-invalidated-banner', fillText(t('ref.invalidatedNotice'), {
+      project: invProject,
+      count: invCount,
+    }));
+    banner.dataset.invalidated = 'true';
+    host.appendChild(banner);
+  }
+
   const list = view.inspectionFindings;
   if (list.length === 0) {
     host.appendChild(el('p', 'empty', t('finding.empty')));
@@ -1456,6 +1509,11 @@ function renderFindings() {
       tail.appendChild(el('span', 'tag tag-attention', f === null ? finding.severity : f.severityLabel));
     }
     tail.appendChild(statusTag(finding.verificationStatus));
+    if (finding.evidenceState) {
+      const evTag = el('span', 'tag tag-evstate', t('evidenceState.' + finding.evidenceState));
+      evTag.dataset.evidenceState = finding.evidenceState;
+      tail.appendChild(evTag);
+    }
     head.appendChild(tail);
 
     const toggle = () => {
@@ -1523,11 +1581,24 @@ function renderFindings() {
     // real reading, no rectangle — and it is never given an invented one. A
     // finding with no visual reading at all says so rather than borrowing the
     // image's authority.
-    const evidenceNote = f === null ? null : f.evidenceNote;
+    const evidenceNote = f === null
+      ? (finding.evidenceState === 'FULL_FRAME'
+        ? t('finding.evidence.fullFrame')
+        : finding.evidenceState === 'NONE'
+          ? t('finding.evidence.none')
+          : null)
+      : f.evidenceNote;
+    const evidenceNoteHead = f === null
+      ? (finding.evidenceState === 'FULL_FRAME'
+        ? t('finding.evidence.headFullFrame')
+        : finding.evidenceState === 'NONE'
+          ? t('finding.evidence.headNone')
+          : '')
+      : (f.evidenceNoteHead || '');
     if (evidenceNote !== null) {
       const note = el('p', 'fc-noev');
       note.dataset.state = finding.evidenceState;
-      note.appendChild(el('b', null, (f === null ? '' : f.evidenceNoteHead) + ' '));
+      note.appendChild(el('b', null, evidenceNoteHead + ' '));
       note.appendChild(document.createTextNode(evidenceNote));
       body.appendChild(note);
     }
@@ -1838,6 +1909,15 @@ function renderProvenance() {
   // A restored result is real but was NOT re-run, so "inference executed: yes"
   // plus "0 ms" would read as a broken live call. State the restoration.
   const restored = view.inferenceOrigin === 'CACHED';
+  const persistFailed = view.persistence !== undefined && view.persistence !== null
+    && view.persistence.written === false;
+  const persistValue = persistFailed
+    ? t('prov.persistFailed') + (view.persistence.message ? ' (' + view.persistence.message + ')' : '')
+    : state.storage && state.storage.durable === true
+      ? t('prov.persistDurable')
+      : state.storage && state.storage.durable === false
+        ? t('prov.persistMemory')
+        : t('storage.unknown');
   // Every VALUE here is canonical: the provider name, the model id, the counts,
   // the latency and the timestamp are the same in every language. Only the row
   // LABELS follow the selected language.
@@ -1852,7 +1932,8 @@ function renderProvenance() {
     [t('prov.observationsRejected'), p.observationsRejected],
     [t('prov.latency'), restored ? t('prov.notRerun') : p.latencyMs + ' ms'],
     [t('prov.capturedAt'), p.inspectedAt.replace('T', ' ').slice(0, 19)],
-    [t('prov.humanReview'), p.humanReviewPerformed ? t('prov.yes') : t('prov.no')]
+    [t('prov.humanReview'), p.humanReviewPerformed ? t('prov.yes') : t('prov.no')],
+    [t('prov.persistence'), persistValue]
   ];
   for (const row of rows) {
     const cell = el('div');
@@ -1878,6 +1959,15 @@ function renderProvenance() {
     } else {
       geom.hidden = true;
     }
+  }
+
+  if (persistFailed) {
+    const pBox = el('div', 'fail');
+    pBox.dataset.status = 'PERSISTENCE_FAILED';
+    pBox.appendChild(el('p', 'fail-h', t('prov.persistFailedHead')));
+    pBox.appendChild(el('p', null, t('prov.persistFailed')
+      + (view.persistence.message ? ' — ' + view.persistence.message : '')));
+    failHost.appendChild(pBox);
   }
 
   if (view.failure !== null) {
@@ -1910,12 +2000,211 @@ function renderProvenance() {
   }
 }
 
-/** The earlier observation-level product, still rendered and still reviewable. */
+/**
+ * Render the Verified-Finding Ledger (view.findings) and the raw visual
+ * observations (view.observations) that feed it when human-verified.
+ *
+ * Inspection findings (fnd_*, rendered in renderFindings) and verified
+ * ledger findings (find_*, rendered here) have distinct IDs and lifecycle
+ * contracts:
+ *   - obs_*  -> reviewed via POST /api/review -> raises/removes find_*
+ *   - find_* -> triaged via POST /api/finding-state (OPEN / ACKNOWLEDGED / CLOSED)
+ */
 function renderObservations() {
   const host = $('findings');
   clear(host);
   const view = state.view;
   if (view === null) return;
+
+  if (state.referenceInvalidated && view.outcome === 'PENDING') {
+    const invProject = state.referenceInvalidated.project || (state.project ? state.project.name : '');
+    const invCount = typeof state.referenceInvalidated.count === 'number' ? state.referenceInvalidated.count : 0;
+    const banner = el('div', 'ref-invalidated-banner', fillText(t('ref.invalidatedNotice'), {
+      project: invProject,
+      count: invCount,
+    }));
+    banner.dataset.invalidated = 'true';
+    host.appendChild(banner);
+  }
+
+  const activeProjectId = state.project ? state.project.id : null;
+  const openCaptures = Array.isArray(state.captureIds) && state.captureIds.length > 0
+    ? state.captureIds
+    : (state.currentCaptureId
+      ? [state.currentCaptureId]
+      : (view.provenance && view.provenance.captureId ? [view.provenance.captureId] : []));
+
+  const rawLedger = Array.isArray(view.findings) ? view.findings : [];
+  // Scope guard: only display ledger findings owned by the active project and
+  // within the open capture selection.
+  const ledgerFindings = rawLedger.filter((item) => {
+    if (!item || typeof item.id !== 'string') return false;
+    if (activeProjectId !== null && item.projectId && item.projectId !== activeProjectId) return false;
+    if (openCaptures.length > 0 && item.captureId && !openCaptures.includes(item.captureId)) return false;
+    return true;
+  });
+
+  const ledgerByObsId = {};
+  for (const item of ledgerFindings) {
+    if (item.sourceObservationId) {
+      ledgerByObsId[item.sourceObservationId] = item;
+    }
+  }
+
+  const ledgerSection = el('section', 'ledger-section');
+  ledgerSection.id = 'ledger-section';
+  const ledgerBar = el('div', 'ledger-bar');
+  ledgerBar.appendChild(el('p', 'ledger-title', t('ledger.heading')));
+
+  const openCount = ledgerFindings.filter((f) => f.state === 'OPEN').length;
+  const ackCount = ledgerFindings.filter((f) => f.state === 'ACKNOWLEDGED').length;
+  const closedCount = ledgerFindings.filter((f) => f.state === 'CLOSED').length;
+  const countsBadge = el('span', 'ledger-counts', fillText(t('ledger.counts'), {
+    total: ledgerFindings.length,
+    open: openCount,
+    acknowledged: ackCount,
+    closed: closedCount,
+  }));
+  countsBadge.id = 'ledger-counts';
+  ledgerBar.appendChild(countsBadge);
+  ledgerSection.appendChild(ledgerBar);
+  ledgerSection.appendChild(el('p', 'ledger-sub', t('ledger.subtitle')));
+
+  if (ledgerFindings.length === 0) {
+    const emptyLedger = el('p', 'empty', t('ledger.empty'));
+    emptyLedger.id = 'ledger-empty';
+    ledgerSection.appendChild(emptyLedger);
+  } else {
+    const ledgerList = el('div', 'ledger-list');
+    ledgerList.id = 'ledger-list';
+
+    ledgerFindings.forEach((ledgerItem) => {
+      const card = el('article', 'finding ledger-card');
+      card.dataset.ledgerFindingId = ledgerItem.id;
+      card.dataset.findingState = ledgerItem.state;
+      card.dataset.projectId = ledgerItem.projectId || '';
+      card.dataset.captureId = ledgerItem.captureId || '';
+      card.dataset.observationId = ledgerItem.sourceObservationId || '';
+
+      const head = el('div', 'finding-head');
+      const idBadge = el('span', 'finding-id', fillText(t('ledger.idBadge'), { id: ledgerItem.id }));
+      idBadge.setAttribute('data-latin', '');
+      head.appendChild(idBadge);
+      head.appendChild(el('span', 'obs-cat', ledgerItem.category));
+      head.appendChild(el('span', 'tag', t('severity.' + ledgerItem.severity)));
+
+      const stateTag = el(
+        'span',
+        'tag ledger-state-tag ledger-state-' + String(ledgerItem.state).toLowerCase(),
+        t('ledger.state.' + ledgerItem.state),
+      );
+      stateTag.dataset.state = ledgerItem.state;
+      head.appendChild(stateTag);
+      card.appendChild(head);
+
+      const ledKey = 'led:' + ledgerItem.id;
+      const ledShowOrig = showingOriginal(ledKey);
+      const txSum = modelTx(ledgerItem.summary);
+      const summaryText = state.lang !== 'en' && txSum.translated && !ledShowOrig
+        ? txSum.text
+        : ledgerItem.summary;
+      card.appendChild(el('p', 'finding-summary', summaryText));
+
+      const matchedObs = view.observations.filter((o) => o.id === ledgerItem.sourceObservationId)[0] || null;
+      const captureObj = state.captures.filter((c) => c.id === ledgerItem.captureId)[0] || null;
+      const captureLabel = captureObj
+        ? captureObj.label
+        : (matchedObs && matchedObs.captureLabel
+          ? matchedObs.captureLabel
+          : (view.provenance && view.provenance.captureId === ledgerItem.captureId
+            ? view.provenance.captureLabel
+            : ledgerItem.captureId));
+      const projectLabel = state.project && state.project.id === ledgerItem.projectId
+        ? state.project.name
+        : ledgerItem.projectId;
+      const zoneLabel = ledgerItem.zoneId || (view.expected ? view.expected.zone : '-');
+
+      const meta = el('div', 'ledger-meta-grid');
+      meta.appendChild(el('p', 'ledger-meta-line', fillText(t('ledger.scope'), {
+        project: projectLabel,
+        capture: captureLabel,
+        zone: zoneLabel,
+      })));
+
+      let sourceDesc = fillText(t('ledger.sourceObs'), { id: ledgerItem.sourceObservationId });
+      const rawEvDesc = ledgerItem.evidenceDescription || (matchedObs && matchedObs.evidenceDescription) || '';
+      if (rawEvDesc) {
+        const txMatchedEv = modelTx(rawEvDesc);
+        const matchedEvText = state.lang !== 'en' && txMatchedEv.translated && !ledShowOrig
+          ? txMatchedEv.text
+          : rawEvDesc;
+        sourceDesc += ' — ' + matchedEvText;
+      }
+      meta.appendChild(el('p', 'ledger-meta-line', sourceDesc));
+      meta.appendChild(el('p', 'ledger-meta-line', fillText(t('ledger.target'), { target: ledgerItem.target })));
+      meta.appendChild(el('p', 'ledger-meta-line', fillText(t('ledger.raisedBy'), {
+        reviewer: ledgerItem.raisedBy,
+        at: String(ledgerItem.raisedAt || '').replace('T', ' ').slice(0, 19),
+      })));
+      const reviewNote = ledgerItem.note || (matchedObs && matchedObs.review && matchedObs.review.note) || null;
+      if (reviewNote) {
+        meta.appendChild(el('p', 'ledger-meta-line', fillText(t('ledger.reviewNote'), { note: reviewNote })));
+      }
+      card.appendChild(meta);
+
+      const nextAction = el('p', 'ledger-next', t('ledger.next.' + ledgerItem.state));
+      nextAction.dataset.state = ledgerItem.state;
+      card.appendChild(nextAction);
+
+      const inFlight = state.findingInFlight.has(ledgerItem.id);
+      const feedback = state.findingFeedback[ledgerItem.id] || null;
+      if (inFlight || feedback !== null) {
+        const fbNode = el('p', 'ledger-feedback', inFlight ? t('ledger.saving') : feedback.message);
+        fbNode.dataset.tone = inFlight ? 'working' : feedback.tone;
+        card.appendChild(fbNode);
+      }
+
+      const actions = el('div', 'finding-actions');
+      const transitions = ledgerItem.state === 'OPEN'
+        ? [
+            ['ACKNOWLEDGED', t('ledger.act.acknowledge'), 'btn btn-verify'],
+            ['CLOSED', t('ledger.act.close'), 'btn btn-reject'],
+          ]
+        : ledgerItem.state === 'ACKNOWLEDGED'
+          ? [
+              ['CLOSED', t('ledger.act.close'), 'btn btn-reject'],
+              ['OPEN', t('ledger.act.reopen'), 'btn'],
+            ]
+          : [
+              ['ACKNOWLEDGED', t('ledger.act.acknowledge'), 'btn'],
+              ['OPEN', t('ledger.act.reopen'), 'btn'],
+            ];
+
+      for (const transition of transitions) {
+        const nextState = transition[0];
+        const btnLabel = transition[1];
+        const btnClass = transition[2];
+        const btn = el('button', btnClass, btnLabel);
+        btn.type = 'button';
+        btn.dataset.nextState = nextState;
+        btn.dataset.ledgerFindingId = ledgerItem.id;
+        btn.disabled = inFlight;
+        btn.addEventListener('click', () => {
+          return updateFindingState(ledgerItem.id, nextState);
+        });
+        actions.appendChild(btn);
+      }
+      card.appendChild(actions);
+      ledgerList.appendChild(card);
+    });
+
+    ledgerSection.appendChild(ledgerList);
+  }
+
+  host.appendChild(ledgerSection);
+
+  const obsHead = el('p', 'obs-section-title', t('obs.sectionHead'));
+  host.appendChild(obsHead);
 
   if (view.observations.length === 0) {
     host.appendChild(el('p', 'empty', t('obs.empty')));
@@ -1923,10 +2212,22 @@ function renderObservations() {
 
   view.observations.forEach((observation, index) => {
     const row = el('div', 'obs');
+    row.dataset.observationId = observation.id;
+    row.dataset.status = observation.verificationStatus;
     row.appendChild(el('span', 'obs-n', String(index + 1).padStart(2, '0')));
     row.appendChild(el('span', 'obs-cat', observation.category));
     row.appendChild(el('span', 'tag', t('severity.' + observation.severity)));
     row.appendChild(statusTag(observation.verificationStatus));
+
+    const linkedFinding = ledgerByObsId[observation.id] || null;
+    if (linkedFinding !== null) {
+      const raisedTag = el('span', 'tag tag-verify obs-raised', fillText(t('obs.ledgerRaised'), {
+        id: linkedFinding.id,
+        state: t('ledger.state.' + linkedFinding.state),
+      }));
+      raisedTag.dataset.ledgerId = linkedFinding.id;
+      row.appendChild(raisedTag);
+    }
 
     // Which photograph this observation came from. Over a group, an evidence
     // line without its photograph is not auditable, so the source is always
@@ -2002,6 +2303,7 @@ function renderObservations() {
         at: observation.review.reviewedAt.replace('T', ' ').slice(0, 19),
       })));
     }
+    const obsInFlight = state.obsReviewInFlight.has(observation.id);
     for (const decision of ['VERIFIED', 'NEEDS_REVIEW', 'REJECTED']) {
       const label = decision === 'NEEDS_REVIEW'
         ? t('finding.needsReview')
@@ -2009,34 +2311,116 @@ function renderObservations() {
       const button = el('button', 'btn', label);
       button.type = 'button';
       button.dataset.decision = decision;
-      button.addEventListener('click', async () => {
-        const currentReviewer = formatReviewerObj(state.project ? state.project.reviewer : null);
-        if (!currentReviewer) {
-          notify(t('review.reviewerMissingObservation'), 'bad');
-          openReviewerModal();
-          return;
-        }
-        try {
-          state.view = await post('/api/review', {
-            observationId: observation.id,
-            decision: decision,
-            reviewer: currentReviewer,
-            note: $('note').value.trim() || null
-          });
-          notify(fillText(t('review.recordedObservation'), {
-            status: t('review.' + decisionWord(decision)),
-            reviewer: currentReviewer,
-          }), 'good');
-          renderAll();
-        } catch (error) {
-          notify(error.message, 'bad');
-        }
+      button.disabled = obsInFlight;
+      button.addEventListener('click', () => {
+        return submitObservationReview(observation.id, decision);
       });
       acts.appendChild(button);
     }
     row.appendChild(acts);
     host.appendChild(row);
   });
+}
+
+async function submitObservationReview(observationId, decision) {
+  if (state.obsReviewInFlight.has(observationId)) return;
+  const currentReviewer = formatReviewerObj(state.project ? state.project.reviewer : null);
+  if (!currentReviewer) {
+    notify(t('review.reviewerMissingObservation'), 'bad');
+    openReviewerModal({ observationId: observationId, decision: decision });
+    return;
+  }
+  state.obsReviewInFlight.add(observationId);
+  renderObservations();
+  try {
+    state.view = await post('/api/review', {
+      observationId: observationId,
+      decision: decision,
+      reviewer: currentReviewer,
+      note: $('note') ? ($('note').value.trim() || null) : null
+    });
+    state.obsReviewInFlight.delete(observationId);
+    notify(fillText(t('review.recordedObservation'), {
+      status: t('review.' + decisionWord(decision)),
+      reviewer: currentReviewer,
+    }), decision === 'REJECTED' ? 'bad' : 'good');
+    setLamp('done', t('review.lampRecorded'));
+    renderAll();
+  } catch (error) {
+    state.obsReviewInFlight.delete(observationId);
+    renderObservations();
+    notify(error.message, 'bad');
+  }
+}
+
+async function updateFindingState(findingId, nextState) {
+  if (state.findingInFlight.has(findingId)) return;
+  const view = state.view;
+  if (view === null) return;
+  const currentReviewer = formatReviewerObj(state.project ? state.project.reviewer : null);
+  if (!currentReviewer) {
+    notify(t('review.reviewerMissingFinding'), 'bad');
+    openReviewerModal({ ledgerFindingId: findingId, nextState: nextState });
+    return;
+  }
+
+  // Scope guard: refuse to mutate a finding that does not belong to the active
+  // project and open capture selection.
+  const activeProjectId = state.project ? state.project.id : null;
+  const openCaptures = Array.isArray(state.captureIds) && state.captureIds.length > 0
+    ? state.captureIds
+    : (state.currentCaptureId ? [state.currentCaptureId] : []);
+  const existing = (Array.isArray(view.findings) ? view.findings : []).filter((f) => f.id === findingId)[0] || null;
+  if (existing === null
+    || (activeProjectId !== null && existing.projectId && existing.projectId !== activeProjectId)
+    || (openCaptures.length > 0 && existing.captureId && !openCaptures.includes(existing.captureId))) {
+    const scopeMsg = t('fail.error') + ': Finding is outside the active project or capture scope.';
+    state.findingFeedback[findingId] = { tone: 'bad', message: scopeMsg };
+    notify(scopeMsg, 'bad');
+    renderObservations();
+    return;
+  }
+
+  const lastConfirmedState = existing.state;
+  state.findingInFlight.add(findingId);
+  delete state.findingFeedback[findingId];
+  renderObservations();
+
+  try {
+    const updatedView = await post('/api/finding-state', {
+      findingId: findingId,
+      state: nextState,
+    });
+    state.findingInFlight.delete(findingId);
+    state.view = updatedView;
+
+    const confirmed = (Array.isArray(updatedView.findings) ? updatedView.findings : []).filter((f) => f.id === findingId)[0] || null;
+    const confirmedState = confirmed ? confirmed.state : nextState;
+    const stateLabel = t('ledger.state.' + confirmedState);
+    const durable = state.storage && state.storage.durable === true
+      && !(updatedView.persistence && updatedView.persistence.written === false);
+    const confirmMsg = fillText(t(durable ? 'ledger.savedDurable' : 'ledger.savedMemory'), {
+      state: stateLabel,
+    });
+    state.findingFeedback[findingId] = {
+      tone: durable ? 'good' : 'warn',
+      message: confirmMsg,
+    };
+    notify(confirmMsg, 'good');
+    setLamp('done', t('review.lampRecorded'));
+    renderAll();
+  } catch (error) {
+    state.findingInFlight.delete(findingId);
+    // Preserve last confirmed state and never report the rejected transition as saved.
+    if (existing) existing.state = lastConfirmedState;
+    const errMsg = t('fail.error') + ': ' + error.message;
+    state.findingFeedback[findingId] = {
+      tone: 'bad',
+      message: errMsg,
+    };
+    notify(errMsg, 'bad');
+    renderObservations();
+  }
 }
 
 function renderStage() {
@@ -2095,6 +2479,7 @@ function safeRender(name, fn) {
 
 function renderAll() {
   applyLanguage();
+  safeRender('storage', renderStorage);
   safeRender('imgs', renderImages);
   safeRender('gate', renderReviewerGate);
   safeRender('captureSummary', renderCaptureSummary);
@@ -2182,6 +2567,13 @@ function renderRunOutcome() {
       fillText(t('run.plainDone'), { how, overall: overallText }),
       failedImages.length > 0 ? 'bad' : 'good',
     );
+  }
+  if (view.persistence !== undefined && view.persistence !== null && view.persistence.written === false) {
+    setLamp('problem', t('run.persistFailedLamp'));
+    const persistWarn = t('prov.persistFailed')
+      + (view.persistence.message ? ' — ' + view.persistence.message : '');
+    setStatus(persistWarn, 'bad');
+    notify(persistWarn, 'bad');
   }
 }
 
@@ -2633,6 +3025,10 @@ async function runInspection() {
     const view = state.view;
     state.activeId = null;
     state.openIds.clear();
+    state.referenceInvalidated = null;
+    state.findingFeedback = {};
+    state.findingInFlight.clear();
+    state.obsReviewInFlight.clear();
 
     if (view.outcome === 'COMPLETED') {
       const origin = view.inferenceOrigin;
@@ -2695,6 +3091,14 @@ async function runInspection() {
         }
       } else {
         notify(fillText(t('run.plainDone'), { how, overall: view.brief.overall.replace(/_/g, ' ') }), failedImages.length > 0 ? 'bad' : 'good');
+      }
+
+      if (view.persistence !== undefined && view.persistence !== null && view.persistence.written === false) {
+        setLamp('problem', t('run.persistFailedLamp'));
+        const persistWarn = t('prov.persistFailed')
+          + (view.persistence.message ? ' — ' + view.persistence.message : '');
+        setStatus(persistWarn, 'bad');
+        notify(persistWarn, 'bad');
       }
 
       // only move on to the evidence stage once the inspection really completed
@@ -2784,17 +3188,64 @@ function describeFailure(kind, message) {
   }
 }
 
+function countActiveHumanReviews() {
+  const view = state.view;
+  if (view === null || view.outcome === 'PENDING') return 0;
+  const fCount = Array.isArray(view.inspectionFindings)
+    ? view.inspectionFindings.filter((f) => f.verificationStatus !== 'UNVERIFIED').length
+    : 0;
+  const oCount = Array.isArray(view.observations)
+    ? view.observations.filter((o) => o.verificationStatus !== 'UNVERIFIED').length
+    : 0;
+  return fCount + oCount;
+}
+
+function confirmReferenceInvalidation() {
+  const reviewCount = countActiveHumanReviews();
+  if (reviewCount === 0) return true;
+  if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+    const projectName = state.project ? state.project.name : 'this project';
+    const ledgerCount = state.view && Array.isArray(state.view.findings) ? state.view.findings.length : 0;
+    return window.confirm(fillText(t('ref.warnInvalidate'), {
+      project: projectName,
+      verified: reviewCount,
+      ledger: ledgerCount,
+    }));
+  }
+  return true;
+}
+
 async function applyExpected(presetId) {
   const preset = presetId === undefined ? $('expected-preset').value : presetId;
+  if (!confirmReferenceInvalidation()) {
+    if ($('expected-preset') && state.project && state.project.expectedPresetId) {
+      $('expected-preset').value = state.project.expectedPresetId;
+    }
+    return;
+  }
+  const hadInspection = state.view !== null && state.view.outcome !== 'PENDING';
+  const prevReviews = countActiveHumanReviews();
   try {
     const payload = await post('/api/expected', { presetId: preset });
     applyWorkspace(payload);
     if (state.view) state.expected = state.view.expected;
+    if (hadInspection) {
+      const projName = state.project ? state.project.name : 'this project';
+      state.referenceInvalidated = { projectId: state.project ? state.project.id : null, project: projName, count: prevReviews };
+      const invMsg = fillText(t('ref.invalidatedNotice'), {
+        project: projName,
+        count: prevReviews,
+      });
+      setLamp('ready', t('ref.invalidatedLamp'));
+      setStatus(invMsg, null);
+      notify(invMsg, 'good');
+    } else {
+      notify(
+        'Reference applied. Re-run the inspection to compare against it.',
+        'good'
+      );
+    }
     renderExpected();
-    notify(
-      'Reference applied. Re-run the inspection to compare against it.',
-      'good'
-    );
     renderAll();
   } catch (error) {
     notify(error.message, 'bad');
@@ -2804,12 +3255,27 @@ async function applyExpected(presetId) {
 async function applyExpectedEdits() {
   const payload = collectExpected();
   if (payload === null) return;
+  if (!confirmReferenceInvalidation()) return;
+  const hadInspection = state.view !== null && state.view.outcome !== 'PENDING';
+  const prevReviews = countActiveHumanReviews();
   try {
     const result = await post('/api/expected', payload);
     applyWorkspace(result);
     if (state.view) state.expected = state.view.expected;
+    if (hadInspection) {
+      const projName = state.project ? state.project.name : 'this project';
+      state.referenceInvalidated = { projectId: state.project ? state.project.id : null, project: projName, count: prevReviews };
+      const invMsg = fillText(t('ref.invalidatedNotice'), {
+        project: projName,
+        count: prevReviews,
+      });
+      setLamp('ready', t('ref.invalidatedLamp'));
+      setStatus(invMsg, null);
+      notify(invMsg, 'good');
+    } else {
+      notify('Reference updated. Re-run the inspection to recompute the comparison.', 'good');
+    }
     renderExpected();
-    notify('Reference updated. Re-run the inspection to recompute the comparison.', 'good');
     renderAll();
   } catch (error) {
     notify(error.message, 'bad');
@@ -2944,7 +3410,7 @@ function openDeleteModal(kind, subject) {
       'Delete the capture "' + subject.label +
       '"? Its inspection results, findings and human verifications are removed. This cannot be undone.',
     preset:
-      'Delete the reference "' + subject.label + '"? The project falls back to the default reference and any comparison against it is discarded.',
+      'Delete the reference "' + subject.label + '"? The project falls back to the default reference and any comparison, human-review decisions, and verified ledger findings on its sessions are invalidated.',
   };
   $('del-body').textContent = bodies[kind];
   $('del-modal').showModal();
@@ -2959,13 +3425,27 @@ async function commitDelete() {
   $('del-modal').close();
   if (!pending) return;
   state.pendingDelete = null;
+  const hadInspection = state.view !== null && state.view.outcome !== 'PENDING';
+  const prevReviews = countActiveHumanReviews();
   try {
     if (pending.kind === 'project') {
       applyWorkspace(await del('/api/projects/' + encodeURIComponent(pending.subject.id)));
       notify('Project deleted.', 'good');
     } else if (pending.kind === 'preset') {
       applyWorkspace(await del('/api/presets/' + encodeURIComponent(pending.subject.id)));
-      notify('Reference deleted. The project now uses the default reference.', 'good');
+      if (hadInspection) {
+        const projName = state.project ? state.project.name : 'this project';
+        state.referenceInvalidated = { projectId: state.project ? state.project.id : null, project: projName, count: prevReviews };
+        const invMsg = fillText(t('ref.invalidatedNotice'), {
+          project: projName,
+          count: prevReviews,
+        });
+        setLamp('ready', t('ref.invalidatedLamp'));
+        setStatus(invMsg, null);
+        notify(invMsg, 'good');
+      } else {
+        notify('Reference deleted. The project now uses the default reference.', 'good');
+      }
     } else {
       applyWorkspace(await del('/api/captures/' + encodeURIComponent(pending.subject.id)));
       notify('Capture deleted.', 'good');

@@ -1713,4 +1713,110 @@ html[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; }
 /* Which photograph an observation came from. Evidence without its source
    photograph is not auditable once more than one image is in play. */
 .obs-photo { font-family: var(--mono); font-size: 10px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
+
+/* The ledger finding an observation raised. It names a full record id, and
+   .tag is white-space:nowrap, so at phone widths the id pushed the strip off
+   the screen and produced a horizontal scrollbar. Allowing the break keeps the
+   id intact and auditable instead of trimming it. */
+.obs-raised { white-space: normal; overflow-wrap: anywhere; }
+
+/* ---- verified finding ledger & persistence truth ----------------------- */
+.ledger-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--rule-2); }
+.ledger-bar { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ledger-title, .obs-section-title {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.obs-section-title { margin: 14px 0 6px; color: var(--ink-2); }
+.ledger-counts {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  padding: 2px 7px;
+  border: 1px solid var(--rule-2);
+  background: var(--paper);
+}
+.ledger-sub { margin: 4px 0 10px; font-size: 11.5px; color: var(--ink-3); line-height: 1.5; }
+.ledger-list { display: grid; gap: 10px; }
+.ledger-card {
+  border-inline-start: 3px solid var(--verify);
+  background: var(--paper);
+}
+.ledger-card[data-state="ACKNOWLEDGED"] { border-inline-start-color: var(--review); }
+.ledger-card[data-state="CLOSED"] { border-inline-start-color: var(--ink-4); background: var(--paper-2); }
+.finding-id {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  background: var(--paper-2);
+  padding: 1px 6px;
+  border: 1px solid var(--rule);
+}
+.ledger-state-tag { font-weight: 700; }
+.ledger-state-open { color: var(--verify); border-color: var(--verify); background: var(--verify-wash); }
+.ledger-state-acknowledged { color: var(--review); border-color: var(--review); background: var(--review-wash); }
+.ledger-state-closed { color: var(--ink-3); border-color: var(--rule-2); background: var(--paper-3); }
+.ledger-meta-grid {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--rule-hair);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.ledger-next {
+  margin: 7px 0 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-2);
+}
+.ledger-feedback {
+  margin: 7px 0 0;
+  padding: 5px 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  border-inline-start: 2px solid var(--ink-4);
+  background: var(--paper-2);
+  color: var(--ink-2);
+}
+.ledger-feedback[data-tone="good"] { border-inline-start-color: var(--verify); background: var(--verify-wash); color: var(--verify); }
+.ledger-feedback[data-tone="warn"] { border-inline-start-color: var(--review); background: var(--review-wash); color: var(--review); }
+.ledger-feedback[data-tone="bad"] { border-inline-start-color: var(--red); background: var(--red-wash); color: var(--red); }
+.tag-evstate { border-color: var(--rule-2); color: var(--ink-3); }
+.tag-evstate[data-evidence-state="LOCALIZED"] { border-color: var(--verify); color: var(--verify); }
+.tag-evstate[data-evidence-state="FULL_FRAME"] { border-color: var(--review); color: var(--review); }
+.tag-evstate[data-evidence-state="NONE"] { border-color: var(--ink-4); color: var(--ink-3); }
+.storage-note[data-durable="failed"] {
+  border-color: var(--red);
+  background: var(--red-wash);
+  color: var(--red);
+}
+.storage-note[data-durable="false"] {
+  border-color: var(--review);
+  background: var(--review-wash);
+  color: var(--ink-2);
+}
+.ref-invalidated-banner {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--review);
+  border-inline-start: 3px solid var(--review);
+  background: var(--review-wash);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+@media (max-width: 640px) {
+  .finding-head, .obs-acts, .finding-acts { gap: 5px; }
+  .finding-acts .btn, .obs-acts .btn { flex: 1 1 auto; text-align: center; }
+  .obs-photo { max-width: 100%; }
+}
 `;

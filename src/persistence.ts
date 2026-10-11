@@ -30,7 +30,7 @@
  *   claims durability it does not have.
  */
 
-import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
 import { datasetDirectory } from './dataset.ts';
 import { normalizeOrientation } from './image-metadata.ts';
@@ -113,6 +113,20 @@ export interface PersistedInspection {
     readonly state: string;
     readonly target: string;
   }[] | undefined;
+  /**
+   * The comparison reference this inspection was judged against.
+   *
+   * Recorded so a restore can REFUSE an inspection produced against a
+   * reference the project has since replaced, without destroying the record.
+   * The record is the audit trail for a real model call and the human
+   * decisions made against its output, so an inspection invalidated by a
+   * reference change is superseded on read rather than deleted on write.
+   *
+   * Absent on records written before this field existed; those are restored
+   * as they always were, because a missing stamp is not evidence of a
+   * mismatch and must not silently discard the operator's own history.
+   */
+  readonly referencePresetId?: string | null | undefined;
   /** Reasoning provenance, so a restored result is not credited to a model that did not run. */
   readonly reasoning: {
     readonly status: string;
@@ -390,6 +404,11 @@ export class WorkspacePersistence {
       ...(Array.isArray(record['ledgerFindings'])
         ? { ledgerFindings: record['ledgerFindings'] as PersistedInspection['ledgerFindings'] }
         : {}),
+      // Read as `undefined` when absent, so an old record is distinguishable
+      // from one that genuinely stamped a null reference.
+      ...('referencePresetId' in record
+        ? { referencePresetId: readStringOrNull(record['referencePresetId']) }
+        : {}),
       reasoning:
         typeof record['reasoning'] === 'object' && record['reasoning'] !== null
           ? (record['reasoning'] as PersistedInspection['reasoning'])
@@ -402,6 +421,19 @@ export class WorkspacePersistence {
       rmSync(this.inspectionFile(captureId), { force: true });
     } catch {
       // Nothing to do: a leftover file is inert and overwritten on next save.
+    }
+    try {
+      if (!existsSync(this.inspectionsDir)) return;
+      for (const entry of readdirSync(this.inspectionsDir)) {
+        if (!entry.startsWith('grp_') || !entry.endsWith('.json')) continue;
+        const key = entry.slice(0, -5);
+        const members = key.slice(4).split('+');
+        if (members.includes(captureId)) {
+          rmSync(join(this.inspectionsDir, entry), { force: true });
+        }
+      }
+    } catch {
+      // Best-effort cleanup of consolidated group files referencing this capture.
     }
   }
 

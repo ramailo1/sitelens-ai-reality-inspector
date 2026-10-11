@@ -605,7 +605,18 @@ export class ProjectStore {
     return { ...reference, state: cloneExpectedState(state) };
   }
 
-  /** Push a project's reference into its sessions, dropping results it invalidates. */
+  /**
+   * Push a project's reference into its sessions, dropping results it invalidates.
+   *
+   * The in-memory state is dropped here; the DURABLE record is deliberately
+   * left alone. A reference change invalidates how an inspection was JUDGED,
+   * not the fact that the model ran and that a named human reviewed its
+   * output. Deleting the record would destroy the only copy of a real model
+   * payload and the human verification trail built on it — an audit record
+   * `docs/ARCHITECTURE.md` promises is kept — to solve a problem that
+   * `hydrateFromPersistence` closes by refusing to restore a record stamped
+   * against a reference the project no longer uses.
+   */
   private markStale(projectId: string): void {
     const reference = this.referenceFor(projectId);
     const projectCaptureIds = new Set(this.capturesOf(projectId).map((c) => c.id));
@@ -765,10 +776,39 @@ export class ProjectStore {
     // reopen of a multi-photo inspection would silently come back empty.
     const key = groupKey(this.selectedCaptures());
     if (this.hydrated.has(key)) return;
-    this.hydrated.add(key);
 
     const record = store.loadInspection(key);
     if (record === null) return;
+
+    // An inspection judged against a reference the project has since replaced
+    // is superseded, not deleted: the record stays on disk as the audit trail
+    // for the model call and the human decisions made against it, but it must
+    // never be presented as the current inspection.
+    //
+    // This FAILS CLOSED. A stamped record is restored only when the reference
+    // in force is KNOWN to be the one it names. A record whose stamp cannot be
+    // matched against a known current reference is refused, because an
+    // unreadable reference is not evidence of a match. The one exception is a
+    // record written before the stamp existed: it carries no claim either way,
+    // and discarding it would silently destroy history the operator still owns.
+    const sessionProject = session.project;
+    // Resolved through referenceFor() rather than read from the map, so a
+    // project whose reference has never been written out still has a KNOWN
+    // current reference instead of an absent one. Resolving it is what makes
+    // the comparison below a real comparison rather than a fail-open.
+    const currentPresetId = sessionProject === null
+      ? null
+      : this.referenceFor(sessionProject).presetId;
+    if (
+      record.referencePresetId !== undefined
+      && record.referencePresetId !== currentPresetId
+    ) {
+      return;
+    }
+
+    // Marked visited only once the record is actually adopted, so a reference
+    // change followed by a re-inspection can be re-read on the next open.
+    this.hydrated.add(key);
     if (!session.restoreInspection(record)) return;
 
     // Reasoning is restored alongside the result so a reopened capture still
@@ -984,6 +1024,12 @@ public ensureSelection(): Project {
       reviews: session.getReviewRecords(),
       observationReviews,
       ledgerFindings,
+      // The reference this result was judged against. Written so a later
+      // reference change can supersede the record on READ while leaving the
+      // model payload and the human verification trail intact on disk.
+      referencePresetId: session.project === null
+        ? null
+        : this.references.get(session.project)?.presetId ?? null,
       reasoning:
         reasoning === null
           ? null

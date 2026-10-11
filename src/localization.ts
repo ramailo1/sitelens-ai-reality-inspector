@@ -586,6 +586,46 @@ const EN = {
   'elementPlural.REBAR': 'rebar',
   'elementPlural.FINISH': 'finishes',
   'elementPlural.EXCAVATION': 'excavations',
+
+  // -- verified finding ledger --------------------------------------------
+  'ledger.heading': 'Verified finding ledger',
+  'ledger.subtitle': 'Actionable triage records raised when a named reviewer confirms an observation.',
+  'ledger.empty':
+    'No verified ledger findings yet. Confirm an observation below to raise a tracked finding in this ledger.',
+  'ledger.counts': '{total} verified — {open} open · {acknowledged} acknowledged · {closed} closed',
+  'ledger.idBadge': 'Ledger ID: {id}',
+  'ledger.state.OPEN': 'OPEN',
+  'ledger.state.ACKNOWLEDGED': 'ACKNOWLEDGED',
+  'ledger.state.CLOSED': 'CLOSED',
+  'ledger.next.OPEN': 'Next step: acknowledge receipt or close once resolved on site.',
+  'ledger.next.ACKNOWLEDGED': 'Next step: close when site action is complete, or reopen if triage must restart.',
+  'ledger.next.CLOSED': 'Triage complete: closed. Reopen if follow-up inspection shows the issue persists.',
+  'ledger.act.acknowledge': 'Acknowledge',
+  'ledger.act.close': 'Close finding',
+  'ledger.act.reopen': 'Reopen',
+  'ledger.saving': 'Saving state change…',
+  'ledger.savedDurable': 'Saved to durable storage ({state})',
+  'ledger.savedMemory': 'Updated in process memory ({state}) — not written to disk',
+  'ledger.raisedBy': 'Verified by {reviewer} at {at}',
+  'ledger.scope': 'Project {project} · Capture {capture} · Zone {zone}',
+  'ledger.sourceObs': 'Source observation: {id}',
+  'ledger.reviewNote': 'Reviewer note: "{note}"',
+  'ledger.target': 'Ledger target: {target}',
+  'obs.sectionHead': 'Raw visual observations',
+  'obs.ledgerRaised': 'Ledger finding: {id} ({state})',
+
+  // -- persistence & reference invalidation -------------------------------
+  'prov.persistence': 'Persistence',
+  'prov.persistDurable': 'Confirmed written to disk',
+  'prov.persistMemory': 'Process memory only (lost on restart)',
+  'prov.persistFailed': 'Write failed — held in process memory only',
+  'prov.persistFailedHead': 'DURABLE STORAGE WRITE FAILED',
+  'run.persistFailedLamp': 'INSPECTION COMPLETE — STORAGE WRITE FAILED',
+  'ref.warnInvalidate':
+    'Changing the comparison reference for {project} will invalidate the current inspection and clear {verified} human verification(s) and {ledger} verified ledger finding(s). Continue?',
+  'ref.invalidatedNotice':
+    'Reference updated for {project}. Prior inspection results and {count} human verification record(s) were invalidated because they were judged against the previous reference. Re-run the inspection to evaluate against the new reference.',
+  'ref.invalidatedLamp': 'REFERENCE CHANGED — RE-INSPECTION REQUIRED',
 } satisfies Catalog;
 
 type TranslationKey = keyof typeof EN;
@@ -1040,6 +1080,46 @@ const FR: Record<TranslationKey, string> = {
   'elementPlural.REBAR': 'ferraillages',
   'elementPlural.FINISH': 'finitions',
   'elementPlural.EXCAVATION': 'fouilles',
+
+  'ledger.heading': 'Registre des constats vérifiés',
+  'ledger.subtitle': 'Entrées de suivi créées lorsqu’un examinateur nommé confirme une observation.',
+  'ledger.empty':
+    'Aucun constat vérifié au registre pour le moment. Confirmez une observation ci-dessous pour créer une entrée suivie.',
+  'ledger.counts': '{total} vérifié(s) — {open} ouvert(s) · {acknowledged} pris en compte · {closed} clôturé(s)',
+  'ledger.idBadge': 'ID registre : {id}',
+  'ledger.state.OPEN': 'OUVERT',
+  'ledger.state.ACKNOWLEDGED': 'PRIS EN COMPTE',
+  'ledger.state.CLOSED': 'CLÔTURÉ',
+  'ledger.next.OPEN': 'Étape suivante : accuser réception ou clôturer une fois résolu sur site.',
+  'ledger.next.ACKNOWLEDGED':
+    'Étape suivante : clôturer une fois l’action sur site terminée, ou rouvrir si le suivi doit reprendre.',
+  'ledger.next.CLOSED':
+    'Suivi terminé : clôturé. Rouvrir si un contrôle ultérieur montre que l’écart persiste.',
+  'ledger.act.acknowledge': 'Prendre en compte',
+  'ledger.act.close': 'Clôturer le constat',
+  'ledger.act.reopen': 'Rouvrir',
+  'ledger.saving': 'Enregistrement du changement d’état…',
+  'ledger.savedDurable': 'Enregistré sur le stockage durable ({state})',
+  'ledger.savedMemory': 'Mis à jour en mémoire du processus ({state}) — non écrit sur disque',
+  'ledger.raisedBy': 'Vérifié par {reviewer} à {at}',
+  'ledger.scope': 'Projet {project} · Capture {capture} · Zone {zone}',
+  'ledger.sourceObs': 'Observation source : {id}',
+  'ledger.reviewNote': 'Note de l’examinateur : « {note} »',
+  'ledger.target': 'Cible du registre : {target}',
+  'obs.sectionHead': 'Observations visuelles brutes',
+  'obs.ledgerRaised': 'Constat au registre : {id} ({state})',
+
+  'prov.persistence': 'Persistance',
+  'prov.persistDurable': 'Écriture sur disque confirmée',
+  'prov.persistMemory': 'Mémoire du processus uniquement (perdu au redémarrage)',
+  'prov.persistFailed': 'Échec d’écriture — conservé en mémoire uniquement',
+  'prov.persistFailedHead': 'ÉCHEC D’ÉCRITURE SUR LE STOCKAGE DURABLE',
+  'run.persistFailedLamp': 'INSPECTION TERMINÉE — ÉCHEC DE SAUVEGARDE',
+  'ref.warnInvalidate':
+    'Modifier la référence de comparaison pour {project} invalidera l’inspection en cours et effacera {verified} vérification(s) humaine(s) ainsi que {ledger} constat(s) vérifié(s) au registre. Continuer ?',
+  'ref.invalidatedNotice':
+    'Référence mise à jour pour {project}. Les résultats précédents et {count} décision(s) de revue humaine ont été invalidés car établis selon l’ancienne référence. Relancez l’inspection pour évaluer la nouvelle référence.',
+  'ref.invalidatedLamp': 'RÉFÉRENCE MODIFIÉE — NOUVELLE INSPECTION REQUISE',
 };
 
 const AR: Record<TranslationKey, string> = {
@@ -1482,6 +1562,46 @@ const AR: Record<TranslationKey, string> = {
   'elementPlural.REBAR': 'حديد التسليح',
   'elementPlural.FINISH': 'تشطيبات',
   'elementPlural.EXCAVATION': 'حفر',
+
+  'ledger.heading': 'سجل النتائج المتحقق منها',
+  'ledger.subtitle': 'سجلات فرز قابلة للتنفيذ تُنشأ عندما يؤكد مراجع مُسمّى ملاحظة.',
+  'ledger.empty':
+    'لا توجد نتائج متحقق منها في السجل بعد. أكّد ملاحظة أدناه لإدراج نتيجة متتبعة في هذا السجل.',
+  'ledger.counts': '{total} متحقق منها — {open} مفتوحة · {acknowledged} مُقرّ بها · {closed} مغلقة',
+  'ledger.idBadge': 'معرّف السجل: {id}',
+  'ledger.state.OPEN': 'مفتوح',
+  'ledger.state.ACKNOWLEDGED': 'مُقرّ به',
+  'ledger.state.CLOSED': 'مغلق',
+  'ledger.next.OPEN': 'الخطوة التالية: الإقرار بالاستلام أو الإغلاق بعد المعالجة في الموقع.',
+  'ledger.next.ACKNOWLEDGED':
+    'الخطوة التالية: الإغلاق عند اكتمال إجراء الموقع، أو إعادة الفتح إذا لزم استئناف الفرز.',
+  'ledger.next.CLOSED':
+    'اكتمل الفرز: مغلق. أعد الفتح إذا أظهر فحص المتابعة استمرار المشكلة.',
+  'ledger.act.acknowledge': 'إقرار بالاستلام',
+  'ledger.act.close': 'إغلاق النتيجة',
+  'ledger.act.reopen': 'إعادة فتح',
+  'ledger.saving': 'جارٍ حفظ تغيير الحالة…',
+  'ledger.savedDurable': 'تم الحفظ في التخزين الدائم ({state})',
+  'ledger.savedMemory': 'تم التحديث في ذاكرة العملية ({state}) — غير مكتوب على القرص',
+  'ledger.raisedBy': 'تم التحقق بواسطة {reviewer} في {at}',
+  'ledger.scope': 'المشروع {project} · الالتقاط {capture} · المنطقة {zone}',
+  'ledger.sourceObs': 'الملاحظة المصدر: {id}',
+  'ledger.reviewNote': 'ملاحظة المراجع: «{note}»',
+  'ledger.target': 'هدف السجل: {target}',
+  'obs.sectionHead': 'الملاحظات البصرية الخام',
+  'obs.ledgerRaised': 'نتيجة السجل: {id} ({state})',
+
+  'prov.persistence': 'الحفظ الدائم',
+  'prov.persistDurable': 'تأكدت الكتابة على القرص',
+  'prov.persistMemory': 'ذاكرة العملية فقط (تُفقد عند إعادة التشغيل)',
+  'prov.persistFailed': 'فشلت الكتابة — محفوظ في ذاكرة العملية فقط',
+  'prov.persistFailedHead': 'فشلت الكتابة في التخزين الدائم',
+  'run.persistFailedLamp': 'اكتمل الفحص — فشل الحفظ الدائم',
+  'ref.warnInvalidate':
+    'سيؤدي تغيير مرجع المقارنة للمشروع {project} إلى إبطال الفحص الحالي ومسح {verified} من التحققات البشرية و{ledger} من نتائج السجل المتحقق منها. هل تريد المتابعة؟',
+  'ref.invalidatedNotice':
+    'تم تحديث المرجع للمشروع {project}. أُبطلت نتائج الفحص السابقة و{count} من سجلات المراجعة البشرية لأنها قُيّمت وفق المرجع السابق. أعد تشغيل الفحص للتقييم وفق المرجع الجديد.',
+  'ref.invalidatedLamp': 'تغيّر المرجع — يلزم إعادة الفحص',
 };
 
 const ZH: Record<TranslationKey, string> = {
@@ -1911,6 +2031,44 @@ const ZH: Record<TranslationKey, string> = {
   'elementPlural.REBAR': '钢筋',
   'elementPlural.FINISH': '饰面',
   'elementPlural.EXCAVATION': '开挖',
+
+  'ledger.heading': '已核实问题台账',
+  'ledger.subtitle': '由指定复核人确认观察项后生成的可执行分诊记录。',
+  'ledger.empty':
+    '暂无已核实的台账记录。在下方确认一条观察项即可在此台账中生成跟踪记录。',
+  'ledger.counts': '共 {total} 项已核实 — {open} 项待处理 · {acknowledged} 项已确认知悉 · {closed} 项已关闭',
+  'ledger.idBadge': '台账编号：{id}',
+  'ledger.state.OPEN': '待处理',
+  'ledger.state.ACKNOWLEDGED': '已确认知悉',
+  'ledger.state.CLOSED': '已关闭',
+  'ledger.next.OPEN': '下一步：确认知悉，或在现场处理完毕后关闭。',
+  'ledger.next.ACKNOWLEDGED': '下一步：现场处理完成后关闭，或需重新分诊时重新打开。',
+  'ledger.next.CLOSED': '分诊已完成：已关闭。若后续检查显示问题仍存在，可重新打开。',
+  'ledger.act.acknowledge': '确认知悉',
+  'ledger.act.close': '关闭记录',
+  'ledger.act.reopen': '重新打开',
+  'ledger.saving': '正在保存状态变更…',
+  'ledger.savedDurable': '已保存至持久化存储（{state}）',
+  'ledger.savedMemory': '已在进程内存中更新（{state}）— 未写入磁盘',
+  'ledger.raisedBy': '由 {reviewer} 于 {at} 核实',
+  'ledger.scope': '项目 {project} · 照片 {capture} · 区域 {zone}',
+  'ledger.sourceObs': '来源观察项：{id}',
+  'ledger.reviewNote': '复核人备注：“{note}”',
+  'ledger.target': '台账目标：{target}',
+  'obs.sectionHead': '原始视觉观察项',
+  'obs.ledgerRaised': '台账记录：{id}（{state}）',
+
+  'prov.persistence': '持久化状态',
+  'prov.persistDurable': '已确认写入磁盘',
+  'prov.persistMemory': '仅保存在进程内存中（重启后丢失）',
+  'prov.persistFailed': '写入失败 — 仅保留在进程内存中',
+  'prov.persistFailedHead': '持久化存储写入失败',
+  'run.persistFailedLamp': '检查完成 — 存储写入失败',
+  'ref.warnInvalidate':
+    '更改 {project} 的比对基准将使当前检查失效，并清除 {verified} 项人工复核结果及 {ledger} 项已核实台账记录。是否继续？',
+  'ref.invalidatedNotice':
+    '已更新 {project} 的比对基准。此前的检查结果及 {count} 项人工复核记录因基于旧基准判定而作废。请重新运行检查以按新基准评估。',
+  'ref.invalidatedLamp': '基准已更改 — 需重新检查',
 };
 
 /**
