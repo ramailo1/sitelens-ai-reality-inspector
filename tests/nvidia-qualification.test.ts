@@ -1,21 +1,4 @@
-/**
- * The NVIDIA qualification contract, at all three levels.
- *
- * The defect these tests exist for: a run whose VISION model is not an NVIDIA
- * model was rendered with a prominent "NOT_ELIGIBLE" line and a sentence saying
- * the run does not satisfy the NVIDIA requirement, while the run DID satisfy it
- * through the NVIDIA construction-reasoning stage. Both facts were true. The
- * product showed the subordinate one at the top and buried the real verdict.
- *
- * Three questions are therefore locked apart here:
- *
- *   MODEL       is this model an NVIDIA model?
- *   STAGE       what did this stage contribute?
- *   SUBMISSION  does the run as a whole meet the requirement?
- *
- * And one rule that must survive all of it: MET is never reachable from a model
- * NAME alone. If no verified NVIDIA output was produced, the verdict is not MET.
- */
+// The NVIDIA qualification contract, at all three levels.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,8 +25,7 @@ import { APP_JS, INDEX_HTML } from '../src/ui-assets.ts';
 const VISION_PROVIDER = 'nebius-nvidia';
 const REASONING_PROVIDER = 'nebius-nemotron-reasoner';
 
-/* ------------------------------------------------------------------ CASE D --
-   Model metadata. A model-level fact, with no reference to any run. */
+// CASE D -- Model metadata. A model-level fact, with no reference to any run.
 
 test('CASE D: the vision model is not an NVIDIA model', () => {
   assert.equal(DEFAULT_NEBIUS_MODEL, 'openbmb/MiniCPM-V-4_5');
@@ -70,8 +52,7 @@ test('CASE D: the stage classification reports each model honestly', () => {
   );
 });
 
-/* ------------------------------------------------------------------ CASE A --
-   The current hybrid architecture, end to end through a real session. */
+// CASE A -- The current hybrid architecture, end to end through a real session.
 
 const VISION_BODY = {
   choices: [
@@ -185,8 +166,7 @@ test('CASE A: the hybrid run meets the NVIDIA requirement', async () => {
   const { session, reasonCalls } = hybridSession();
   const view = await session.run();
 
-  // The qualifying stage really ran: the request reached the reasoning endpoint
-  // and its output was accepted, so MET rests on evidence, not on a config value.
+  // The qualifying stage really ran: the request reached the reasoning endpoint and its output was accepted, so MET rests.
   assert.equal(reasonCalls.length, 1);
   assert.equal(view.reasoning.status, 'AVAILABLE');
   assert.equal(view.reasoning.model, DEFAULT_REASONING_MODEL);
@@ -207,13 +187,11 @@ test('CASE A: the vision stage is still reported as a non-NVIDIA model', async (
   assert.equal(vision.isNvidiaModel, false);
   assert.equal(vision.classification, 'NOT_ELIGIBLE');
 
-  // Subordinate in wording as well as in classification: the vision row states
-  // what the model is, and does not assert anything about the run's verdict.
+  // Subordinate in wording as well as in classification: the vision row states what the model is, and does not assert.
   assert.doesNotMatch(vision.note, /does not satisfy/i);
 });
 
-/* ------------------------------------------------------------------ CASE B --
-   MiniCPM with no qualifying NVIDIA inference anywhere in the run. */
+// CASE B -- MiniCPM with no qualifying NVIDIA inference anywhere in the run.
 
 test('CASE B: MiniCPM on its own does NOT meet the NVIDIA requirement', async () => {
   const { session, reasonCalls } = hybridSession({ reasoning: false });
@@ -235,8 +213,7 @@ test('CASE B: the vision stage keeps working when reasoning is absent', async ()
   assert.ok(view.pipelineEligibility.stages.some((s) => s.stage === 'REASONING' && s.produced === false));
 });
 
-/* ------------------------------------------------------------------ CASE C --
-   Nemotron through Nebius is the qualifying stage. */
+// CASE C -- Nemotron through Nebius is the qualifying stage.
 
 test('CASE C: Nemotron through Nebius Token Factory meets the requirement', () => {
   const e = classifyPipelineEligibility({
@@ -255,8 +232,7 @@ test('CASE C: Nemotron through Nebius Token Factory meets the requirement', () =
   assert.match(e.qualificationPath, /Nebius Token Factory/);
 });
 
-/* -------------------------------------------------------- FAIL-CLOSED ------
-   The rule that stops this feature becoming a rubber stamp. */
+// FAIL-CLOSED The rule that stops this feature becoming a rubber stamp.
 
 test('a configured NVIDIA name that produced nothing is NOT enough', () => {
   const e = classifyPipelineEligibility({
@@ -277,8 +253,7 @@ test('an unverified NVIDIA id is never claimed, however it is configured', () =>
     visionProvider: VISION_PROVIDER,
     visionModel: 'openbmb/MiniCPM-V-4_5',
     reasoningProvider: REASONING_PROVIDER,
-    // Not in VERIFIED_REASONING_MODELS, so it is not claimed even when output
-    // comes back. Callable-in-principle is not proven-usable.
+    // Not in VERIFIED_REASONING_MODELS, so it is not claimed even when output comes back.
     reasoningModel: 'nvidia/nemotron-3-nano-omni',
     reasoningProduced: true,
   });
@@ -308,8 +283,7 @@ test('only the Nebius providers are described as Nebius Token Factory', () => {
   assert.equal(inferencePlatformFor('unavailable'), null);
 });
 
-/* ---------------------------------------------------------- STAGE-SCOPED --
-   The model-level note must never read as a submission verdict. */
+// STAGE-SCOPED -- The model-level note must never read as a submission verdict.
 
 test('the vision-stage note never claims the run fails the requirement', () => {
   const note = describeEligibility('NOT_ELIGIBLE', 'openbmb/MiniCPM-V-4_5');
@@ -321,10 +295,7 @@ test('the vision-stage note never claims the run fails the requirement', () => {
 });
 
 test('the misleading sentence exists only where it is true', () => {
-  // "does not satisfy the NVIDIA requirement" is a correct statement about a run
-  // that contained no NVIDIA inference, and a false one about a hybrid run that
-  // did. It is therefore permitted in exactly ONE place: the NOT_MET copy. It
-  // must not appear anywhere the verdict could be MET.
+  // "does not satisfy the NVIDIA requirement" is a correct statement about a run that contained no NVIDIA inference, and.
   const phrase = /does not satisfy the NVIDIA requirement/i;
 
   const offenders = Object.entries(UI_STRINGS)
@@ -340,16 +311,13 @@ test('the misleading sentence exists only where it is true', () => {
   assert.doesNotMatch(partial, phrase);
   assert.match(met, /runs through/);
 
-  // The vision-stage label never makes a submission-level claim, on either
-  // surface. APP_JS embeds the catalog, so the phrase check above is the
-  // authority on the wording; here only the removed LABEL is checked.
+  // The vision-stage label never makes a submission-level claim, on either surface.
   assert.doesNotMatch(APP_JS, /Vision-stage eligibility/i);
   assert.doesNotMatch(INDEX_HTML, /Vision-stage eligibility/i);
   assert.doesNotMatch(INDEX_HTML, phrase);
 });
 
-/* ------------------------------------------------------------------ CASE E --
-   The rendered Inspect page, executed rather than grepped. */
+// CASE E -- The rendered Inspect page, executed rather than grepped.
 
 interface StubNode {
   tagName: string;
@@ -423,7 +391,7 @@ function stubDocument(): { document: unknown; nodes: Map<string, StubNode> } {
   return { document, nodes };
 }
 
-/** Run the real renderQualification() against a real view object. */
+// Run the real renderQualification() against a real view object.
 function renderQualification(view: unknown): { verdict: string; path: string; body: string } {
   const start = APP_JS.indexOf('function renderQualification(');
   assert.ok(start > -1, 'renderQualification must exist');
@@ -434,9 +402,7 @@ function renderQualification(view: unknown): { verdict: string; path: string; bo
   const context: Record<string, unknown> = {
     document,
     state: { view },
-    // renderQualification reads the localized projection for the panel copy and
-    // falls back to the canonical strings when it is absent, which is exactly
-    // the path a pre-localization view takes.
+    // renderQualification reads the localized projection for the panel copy and falls back to the canonical strings when it.
     localized: () => (view === null || typeof view !== 'object' || !('localized' in view)
       ? null
       : (view as { localized: Record<string, unknown> }).localized['en'] ?? null),
@@ -480,10 +446,7 @@ test('CASE E: the Inspect page leads with NVIDIA requirement: MET', async () => 
   const { session } = hybridSession();
   const view = await session.run();
   const rendered = renderQualification(view);
-
-  // The verdict badge is the headline and reads MET on its own; the platform and
-  // the qualifying stage each get their own row so the reader never has to parse
-  // them out of a sentence.
+  // The verdict badge is the headline and reads MET on its own.
   assert.equal(rendered.verdict.trim(), 'MET');
   assert.match(rendered.body, /Nebius Token Factory/);
   assert.match(rendered.body, /construction reasoning/i);
@@ -498,8 +461,7 @@ test('CASE E: the non-NVIDIA vision model stays visible and subordinate', async 
   assert.match(rendered.body, /NOT AN NVIDIA MODEL/);
   assert.match(rendered.body, /nvidia\/Nemotron-3-Ultra-550b-a55b/);
   assert.match(rendered.body, /NVIDIA MODEL/);
-  // The verdict is stated once, as the headline, and the vision stage never
-  // contradicts it.
+  // The verdict is stated once, as the headline, and the vision stage never contradicts it.
   assert.doesNotMatch(rendered.body, /does not satisfy/i);
 });
 

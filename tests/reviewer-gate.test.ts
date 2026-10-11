@@ -1,20 +1,4 @@
-/**
- * The reviewer gate, enforced by the server.
- *
- * A finding only becomes VERIFIED when a named person moves it, and every
- * observation and finding is attributed to that person. Evidence produced with
- * nobody to attribute it cannot be retroactively attributed honestly, so the
- * work is refused BEFORE it happens rather than flagged afterwards.
- *
- * The bug this covers: the gate existed only as a banner in the browser. The
- * banner rendered "REVIEWER REQUIRED" from the client copy of the project while
- * `POST /api/run` returned 200 and produced unattributed findings. A banner is a
- * claim about server state, not the state itself, so the refusal has to live
- * where the state lives.
- *
- * Every test here therefore drives the real HTTP surface and asserts on the
- * real status code, not on a client-side flag.
- */
+// The reviewer gate, enforced by the server.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -74,7 +58,7 @@ async function withServer(fn: (call: Call) => Promise<void>): Promise<void> {
   }
 }
 
-/** Assert the documented refusal: 409 and the machine-readable code. */
+// Assert the documented refusal: 409 and the machine-readable code.
 function assertRefused(res: JsonResult, what: string): void {
   assert.equal(res.status, 409, `${what} must be refused with 409 while the gate is closed`);
   assert.equal(res.body.error, 'REVIEWER_REQUIRED', `${what} must report REVIEWER_REQUIRED`);
@@ -82,15 +66,12 @@ function assertRefused(res: JsonResult, what: string): void {
     `${what} must say a reviewer is what is missing`);
 }
 
-/* ------------------------------------------------------------------ *
- * The gate is closed by default.
- * ------------------------------------------------------------------ */
+// The gate is closed by default.
 
 test('the workspace payload states the gate, and the banner reads that state', async () => {
   await withServer(async (call) => {
     const ws = await call.json('GET', '/api/workspace');
-    // The payload the browser renders the banner from. It must exist, so the
-    // banner and the refusal cannot disagree about whether the gate is shut.
+    // The payload the browser renders the banner from.
     assert.ok(ws.body.reviewerGate !== undefined, 'the payload must carry the gate state');
     assert.equal(ws.body.reviewerGate.required, true, 'no reviewer has been named yet');
     assert.match(String(ws.body.reviewerGate.reason), /inspection reviewer/i);
@@ -107,9 +88,7 @@ test('naming a reviewer opens the gate in the same payload', async () => {
   });
 });
 
-/* ------------------------------------------------------------------ *
- * Every route that produces or attributes evidence is refused.
- * ------------------------------------------------------------------ */
+// Every route that produces or attributes evidence is refused.
 
 test('a run without a reviewer is refused', async () => {
   await withServer(async (call) => {
@@ -152,8 +131,7 @@ test('recording a finding review without a reviewer is refused', async () => {
 
 test('changing a finding state without a reviewer is refused', async () => {
   await withServer(async (call) => {
-    // OPEN -> CLOSED is a claim that a human dealt with the finding, which is an
-    // attribution and is gated like recording a decision.
+    // OPEN -> CLOSED is a claim that a human dealt with the finding, which is an attribution and is gated like recording a decision.
     assertRefused(await call.json('POST', '/api/finding-state', {
       findingId: 'any-finding',
       state: 'CLOSED',
@@ -161,14 +139,11 @@ test('changing a finding state without a reviewer is refused', async () => {
   });
 });
 
-/* ------------------------------------------------------------------ *
- * Identity comes from the project, never from the request.
- * ------------------------------------------------------------------ */
+// Identity comes from the project, never from the request.
 
 test('a reviewer named in the request body does not open the gate', async () => {
   await withServer(async (call) => {
-    // Otherwise any caller could attribute a decision to a person the project
-    // never recorded, which is the one thing attribution exists to prevent.
+    // Otherwise any caller could attribute a decision to a person the project never recorded, which is the one thing.
     assertRefused(await call.json('POST', '/api/review-finding', {
       findingId: 'any-finding',
       decision: 'VERIFIED',
@@ -185,9 +160,7 @@ test('a blank reviewer name does not open the gate', async () => {
   });
 });
 
-/* ------------------------------------------------------------------ *
- * A refusal must leave nothing behind.
- * ------------------------------------------------------------------ */
+// A refusal must leave nothing behind.
 
 test('a refused upload stores nothing', async () => {
   await withServer(async (call) => {
@@ -213,9 +186,7 @@ test('a refused run performs no inference and leaves no findings', async () => {
 });
 
 test('a refused run costs no provider call', async () => {
-  // The refusal is a setup gate, not an inference result, so it must not reach
-  // the provider at all. A provider that answered anyway would have been billed
-  // for evidence nobody can attribute.
+  // The refusal is a setup gate, not an inference result, so it must not reach the provider at all.
   let calls = 0;
   const handle = createInspectionServer({
     provider: {
@@ -242,17 +213,13 @@ test('a refused run costs no provider call', async () => {
   }
 });
 
-/* ------------------------------------------------------------------ *
- * Legitimate work still works.
- * ------------------------------------------------------------------ */
+// Legitimate work still works.
 
 test('naming a reviewer reopens every gated route', async () => {
   await withServer(async (call) => {
     await call.json('POST', '/api/reviewer', { name: 'Takou Rah', role: 'Site Engineer' });
 
-    // The review is checked before the upload, because uploading selects a
-    // different capture and would move the session out from under the finding
-    // this test is reviewing.
+    // The review is checked before the upload, because uploading selects a different capture and would move the session out.
     const run = await call.json('POST', '/api/run', {});
     assert.equal(run.status, 200, 'a run must work once the gate is open');
 
@@ -268,13 +235,7 @@ test('naming a reviewer reopens every gated route', async () => {
     assert.equal(settled.verificationStatus, 'VERIFIED');
     assert.match(settled.review.reviewer, /Takou Rah/);
 
-    // finding-state operates on the finding LEDGER, which only holds findings
-    // raised from a human-verified OBSERVATION. Verifying one is what makes the
-    // id real: passing an inspection-finding id instead used to return 200 for a
-    // silent no-op, which is exactly the false confirmation the route now
-    // refuses. This is done BEFORE the upload below, because uploading selects a
-    // different capture and the observation would no longer belong to the open
-    // inspection. The gate being open is still what this test proves.
+    // finding-state operates on the finding LEDGER, which only holds findings raised from a human-verified OBSERVATION.
     const observation = run.body.observations[0];
     assert.ok(observation, 'the run must produce an observation to verify');
     const raised = await call.json('POST', '/api/review', {
@@ -282,13 +243,11 @@ test('naming a reviewer reopens every gated route', async () => {
       decision: 'VERIFIED',
     });
     assert.equal(raised.status, 200, 'an observation review must work once the gate is open');
-    // Read the ledger from the session the route just mutated, so the id used
-    // below is one the ledger genuinely holds.
+    // Read the ledger from the session the route just mutated, so the id used below is one the ledger genuinely holds.
     const ledgerFinding = (await call.json('GET', '/api/session')).body.findings[0];
     assert.ok(ledgerFinding, 'verifying an observation must raise a ledger finding');
 
-    // Read on the session that raised it, before the upload below switches the
-    // active capture to a different (uninspected) session.
+    // Read on the session that raised it, before the upload below switches the active capture to a different (uninspected) session.
     const state = await call.json('POST', '/api/finding-state', {
       findingId: ledgerFinding.id,
       state: 'ACKNOWLEDGED',
@@ -307,8 +266,7 @@ test('naming a reviewer reopens every gated route', async () => {
 
 test('read-only routes are never gated', async () => {
   await withServer(async (call) => {
-    // Reading the instrument must keep working while the gate is closed,
-    // otherwise the operator cannot see WHY it is closed.
+    // Reading the instrument must keep working while the gate is closed, otherwise the operator cannot see WHY it is closed.
     for (const path of ['/api/workspace', '/api/session', '/api/projects', '/api/captures', '/api/dataset']) {
       const res = await call.json('GET', path);
       assert.equal(res.status, 200, `${path} is read-only and must not be gated`);
@@ -318,8 +276,7 @@ test('read-only routes are never gated', async () => {
 
 test('a reviewer can always be configured, including while the gate is closed', async () => {
   await withServer(async (call) => {
-    // The gate must never trap the operator: the action that opens it cannot
-    // itself be behind it.
+    // The gate must never trap the operator: the action that opens it cannot itself be behind it.
     const set = await call.json('POST', '/api/reviewer', { name: 'Takou Rah' });
     assert.equal(set.status, 200, 'configuring a reviewer must always be possible');
   });
@@ -336,14 +293,10 @@ test('a reviewer can be changed, not only set once', async () => {
   });
 });
 
-/* ------------------------------------------------------------------ *
- * UI and API agree.
- * ------------------------------------------------------------------ */
+// UI and API agree.
 
 test('the served client reacts to the refusal code, not to a status number', async () => {
-  // The browser must react to the SERVER's error code. Matching on 409 alone
-  // would open the reviewer dialog for any future 409 from an unrelated cause
-  // and send the operator to a problem they do not have.
+  // The browser must react to the SERVER's error code.
   assert.match(APP_JS, /err\.code = typeof body\.error === 'string' \? body\.error : ''/);
   assert.match(APP_JS, /error\.code === 'REVIEWER_REQUIRED'/);
   assert.match(APP_JS, /payload\.error === 'REVIEWER_REQUIRED'/);

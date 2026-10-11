@@ -1,22 +1,4 @@
-/**
- * Nemotron construction reasoning over Nebius Token Factory.
- *
- * This is the NVIDIA contribution to the product, and it is a working one: it
- * receives MiniCPM's validated visual observations plus SiteLens's deterministic
- * comparison and returns the construction reasoning that turns "4 bars seen"
- * into "reinforcement installation is in progress, and here is what the
- * photograph still cannot establish".
- *
- * It is a TEXT model and is deliberately given no image. That is the whole
- * design: the vision stage owns pixels, the reasoning stage owns meaning, and
- * the deterministic engine owns comparison. Verified live against all four
- * `nvidia/Nemotron-*` ids in the Token Factory catalogue; see the measured
- * table in README.md.
- *
- * The credential is read from the environment, sent only as a bearer header,
- * never logged, and the same host allowlist and deadline enforcement as the
- * vision provider apply (see config.ts).
- */
+// Nemotron construction reasoning over Nebius Token Factory.
 
 import type {
   ConstructionReasoning,
@@ -37,16 +19,7 @@ import type { FetchLike } from './nebius-nvidia.provider.ts';
 
 export const NEMOTRON_REASONER_NAME = 'nebius-nemotron-reasoner' as const;
 
-/**
- * The reasoning instruction.
- *
- * The worked example matters: it demonstrates the required BEHAVIOUR (reason
- * about significance, name what the image cannot establish, keep UNDETERMINED
- * undetermined) far more reliably than another paragraph of rules. Each legal
- * enum value is shown as one concrete word rather than a pipe-separated list,
- * because models echo template placeholders verbatim and a copied
- * `"UNCERTAIN | INSUFFICIENT_EVIDENCE"` is then correctly rejected downstream.
- */
+// The reasoning instruction.
 export function buildReasoningPrompt(): string {
   return [
     'You are the construction REASONING stage of a site inspection system. Another model has already',
@@ -107,26 +80,16 @@ export interface ReasonerOptions {
   readonly env: NodeJS.ProcessEnv;
 }
 
-/**
- * The reasoning stage, behind an interface, so a caller can be handed an
- * explicit "unavailable" reasoner instead of a network call that fails later.
- */
+// The reasoning stage, behind an interface, so a caller can be handed an explicit "unavailable" reasoner instead of a.
 export interface Reasoner {
   readonly name: string;
   readonly model: string;
-  /** True when a credential is present and the stage can actually be called. */
+  // True when a credential is present and the stage can actually be called.
   readonly configured: boolean;
   reason(input: ReasoningContextInput): Promise<ReasoningOutcome>;
 }
 
-/**
- * Always-unavailable reasoner.
- *
- * Used when reasoning is switched off or no credential is present. It reports
- * the reason and returns nothing, which is what lets the visual observation and
- * the deterministic comparison stand on their own instead of being discarded
- * along with a missing reasoning stage.
- */
+// Always-unavailable reasoner.
 export class UnavailableReasoner implements Reasoner {
   public readonly name = 'unavailable';
   public readonly configured = false;
@@ -177,13 +140,7 @@ export class NemotronReasoner implements Reasoner {
     return this.credentials !== undefined;
   }
 
-  /**
-   * Reason over one inspection.
-   *
-   * Never throws: every failure becomes an explicit UNAVAILABLE outcome, because
-   * a reasoning outage must not destroy the visual observation or the
-   * deterministic comparison that were already produced successfully.
-   */
+  // Reason over one inspection.
   async reason(input: ReasoningContextInput): Promise<ReasoningOutcome> {
     if (!this.credentials) {
       return {
@@ -241,10 +198,7 @@ export class NemotronReasoner implements Reasoner {
 
     const reasoning: ConstructionReasoning = validated.value;
 
-    // A headline that restates a planned-state note as an observed conclusion
-    // is laundered evidence, even when the JSON shape is perfect. The
-    // deterministic row underneath stays exactly as computed; only the prose
-    // that contradicts it is discarded, never repaired.
+    // A headline that restates a planned-state note as an observed conclusion is laundered evidence, even when the JSON shape is perfect.
     const echo = echoesExpectedNote(reasoning, input.expected, input.rows);
     if (echo !== null) {
       return {
@@ -284,8 +238,7 @@ export class NemotronReasoner implements Reasoner {
     const endpoint = `${this.config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
     const body = JSON.stringify({
       model: this.config.model,
-      // Low temperature: this stage must be a faithful reading of the evidence it
-      // was handed, not a creative one.
+      // Low temperature: this stage must be a faithful reading of the evidence it was handed, not a creative one.
       temperature: 0.1,
       max_tokens: this.config.maxTokens,
       messages: [
@@ -351,13 +304,7 @@ export class NemotronReasoner implements Reasoner {
   }
 }
 
-/**
- * Strip the fenced/preamble shapes a reasoning model sometimes emits.
- *
- * Only ever removes wrapper characters; the inner text is passed through
- * untouched, so this cannot repair or reinterpret content. If the result is
- * still not an object the caller reports MALFORMED_RESPONSE.
- */
+// Strip the fenced/preamble shapes a reasoning model sometimes emits.
 export function parseReasoningContent(
   content: string,
 ): { ok: true; value: unknown } | { ok: false; message: string } {
@@ -365,8 +312,7 @@ export function parseReasoningContent(
   const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
   const candidate = fenced !== null && fenced[1] !== undefined ? fenced[1].trim() : trimmed;
 
-  // A model that narrates before answering is a real failure mode, so the
-  // leading brace is located and the balanced object taken from there.
+  // A model that narrates before answering is a real failure mode, so the leading brace is located and the balanced.
   const start = candidate.indexOf('{');
   if (start === -1) {
     return { ok: false, message: 'The reasoning response contained no JSON object.' };
@@ -451,7 +397,7 @@ async function safeReadText(response: { text(): Promise<string> }): Promise<stri
   }
 }
 
-/** Resolve the reasoning credential without throwing at construction time. */
+// Resolve the reasoning credential without throwing at construction time.
 export function safeResolveReasoningCredentials(
   env: NodeJS.ProcessEnv,
 ): ResolvedCredentials | undefined {

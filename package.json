@@ -12,6 +12,7 @@
     "demo": "node --env-file-if-exists=.env --experimental-strip-types demo/run-demo.ts",
     "ui": "node --env-file-if-exists=.env --experimental-strip-types demo/run-ui.ts",
     "eval": "node --env-file-if-exists=.env --experimental-strip-types demo/run-eval.ts",
+    "eval:live": "node --env-file-if-exists=.env --experimental-strip-types demo/run-eval.ts --live",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "start": "node --env-file-if-exists=.env --experimental-strip-types demo/run-demo.ts"

@@ -1,16 +1,4 @@
-/**
- * The inspector client.
- *
- * Deliberately plain ES5-compatible DOM code: no framework, no bundler, no
- * dependencies. The rules it follows matter more than the code it is:
- *
- *   - an evidence box is only drawn from REAL model geometry (pixelBox)
- *   - a finding is never rendered as settled until a human has settled it
- *   - the synthetic/offline path is labelled on screen, never implied to be AI
- *   - nothing advances past an inspection that did not actually complete
- *   - the inspection language changes PRESENTATION only. It never refetches,
- *     never re-runs, and never edits the canonical view.
- */
+// The inspector client.
 
 import { clientLocalizationPayload } from '../localization.ts';
 
@@ -18,13 +6,7 @@ export const APP_JS = `'use strict';
 
 const $ = (id) => document.getElementById(id);
 
-/**
- * The inspection vocabulary, shipped from the server module that owns it.
- *
- * One source of truth: the browser renders from these strings instead of
- * keeping a second copy that would drift out of step with the projection the
- * server already computed.
- */
+// The inspection vocabulary, shipped from the server module that owns it.
 const I18N = ${JSON.stringify(clientLocalizationPayload())};
 
 const LANG_STORAGE_KEY = 'sitelens.inspectionLanguage';
@@ -50,25 +32,17 @@ const state = {
   pendingDelete: null,
   pendingReviewIntent: null,
   lang: 'en',
-  // The ordered photographs of the OPEN inspection. Length 1 in the historical
-  // case; the run target is always this whole list, never a single id.
+  // The ordered photographs of the OPEN inspection.
   captureIds: [],
-  // Photographs the server refused as byte-identical duplicates of something
-  // already open. Kept so the operator is told what happened to them.
+  // Photographs the server refused as byte-identical duplicates of something already open.
   duplicateCaptureIds: [],
-  // Which photograph of the open group the evidence stage is showing. The
-  // inspection rests on all of them at once, but only one frame can be on
-  // screen, and the boxes must follow the frame that is.
+  // Which photograph of the open group the evidence stage is showing.
   evidenceCaptureId: null,
-  // The ceiling on one inspection, read from the server that enforces it, so
-  // the masthead can never claim a different maximum than the API.
+  // The ceiling on one inspection, read from the server that enforces it, so the masthead can never claim a different.
   maxInspectionImages: null,
   // The gate the server actually enforces, read from the workspace payload.
   reviewerGate: null,
-  // Which model-prose cards are showing the authoritative original English
-  // instead of the localized presentation. Keys are stable ids like
-  // 'obs:<id>', 'fnd:<id>:<field>' or 'reason:<field>'. Cleared on language
-  // change so the switch consistently shows the translation again.
+  // Which model-prose cards are showing the authoritative original English instead of the localized presentation.
   trOriginal: new Set(),
   lastRunSecs: null,
   findingInFlight: new Set(),
@@ -77,13 +51,7 @@ const state = {
   referenceInvalidated: null
 };
 
-/**
- * Label lookup for the selected language.
- *
- * Fails closed: an unknown key, or a language with no entry, resolves to English
- * and finally to the key itself, so a missing translation shows up as itself
- * rather than as an empty label.
- */
+// Label lookup for the selected language.
 function t(key) {
   const catalog = I18N.strings[state.lang] || I18N.strings[I18N.defaultLanguage];
   const value = catalog ? catalog[key] : undefined;
@@ -93,7 +61,7 @@ function t(key) {
   return typeof english === 'string' ? english : key;
 }
 
-/** Read the persisted preference, rejecting anything unsupported. */
+// Read the persisted preference, rejecting anything unsupported.
 function readStoredLanguage() {
   try {
     const raw = window.localStorage ? window.localStorage.getItem(LANG_STORAGE_KEY) : null;
@@ -109,35 +77,11 @@ function storeLanguage(code) {
   try {
     if (window.localStorage) window.localStorage.setItem(LANG_STORAGE_KEY, code);
   } catch (error) {
-    // A blocked or full storage must not break the switch. The preference simply
-    // does not survive a reload, which is the honest outcome.
+    // A blocked or full storage must not break the switch.
   }
 }
 
-/**
- * Apply the language to the document and the DOCUMENTED localized surface.
- *
- * Five generic hooks, so no attribute can quietly bypass localization:
- *
- *   0. lang / dir on the document element itself, so menus, navigation,
- *      dialogs and every other chrome outside the result bays follow the
- *      selected language immediately, with no reload and regardless of the
- *      browser's own default language.
- *   1. lang / dir on every .i18n-surface element.
- *   2. textContent for every element carrying a data-i18n key.
- *   3. placeholder, aria-label, alt and title from their own data-i18n-* keys.
- *   4. the language control's own label and note.
- *
- * The last three are why an aria-label, a placeholder or an image caption
- * follows the language instead of staying English for a screen reader or a
- * sighted reader alike: an unlocalized alt or aria-label is invisible in a
- * screenshot and silent in a test, which is exactly how it survives.
- *
- * The document direction comes from the same vocabulary entry as the surfaces,
- * so the two can never disagree: Arabic is the only right-to-left language,
- * and Chinese stays left-to-right like English and French. The evidence
- * overlay geometry is computed in pixels and is never mirrored by this.
- */
+// Apply the language to the document and the DOCUMENTED localized surface.
 function applyLanguage() {
   const option = I18N.languages.filter((l) => l.code === state.lang)[0];
   const dir = option === undefined ? 'ltr' : option.dir;
@@ -152,8 +96,7 @@ function applyLanguage() {
     surfaces[i].setAttribute('dir', dir);
   }
 
-  // Static markup. A key with no catalog entry falls back to English inside
-  // t(), and the coverage test asserts that never happens.
+  // Static markup. A key with no catalog entry falls back to English inside t(), and the coverage test asserts that never happens.
   const translated = document.querySelectorAll('[data-i18n]');
   for (let i = 0; i < translated.length; i++) {
     const node = translated[i];
@@ -162,9 +105,7 @@ function applyLanguage() {
     node.textContent = t(key);
   }
 
-  // The other four homes for a translated string. Each is a separate selector
-  // because the attribute that carries the key is what tells the client which
-  // HTML attribute the value belongs in.
+  // The other four homes for a translated string.
   const ATTR_HOOKS = [
     ['data-i18n-ph', 'placeholder'],
     ['data-i18n-aria', 'aria-label'],
@@ -183,13 +124,10 @@ function applyLanguage() {
 
   const label = $('lang-label');
   if (label) label.textContent = t('lang.label');
-  // The presentation-only hint lives as a title tooltip on the language
-  // control (data-i18n-title="lang.hint" in the markup, applied through the
-  // generic ATTR_HOOKS above), not as visible header text. The identity strip
-  // stays compact at desktop and narrow widths.
+  // The presentation-only hint lives as a title tooltip on the language control (data-i18n-title="lang.hint" in the.
 }
 
-/** The localized projection of the current inspection, or null. */
+// The localized projection of the current inspection, or null.
 function localized() {
   const view = state.view;
   if (view === null || view === undefined) return null;
@@ -198,15 +136,7 @@ function localized() {
   return all[state.lang] || all[I18N.defaultLanguage] || null;
 }
 
-/**
- * Presentation-layer lookup for model-authored English prose.
- *
- * Reads the pre-shipped modelTranslations map (keyed by EXACT source text)
- * that arrived with the inspection payload. Pure read: never mutates the
- * canonical view, never fetches, never re-runs inference. English always
- * resolves to the original; unknown text falls back to the original with
- * translated false, never an invented string.
- */
+// Presentation-layer lookup for model-authored English prose.
 function modelTx(source) {
   const fallback = { text: source, translated: false };
   if (state.lang === 'en') return fallback;
@@ -222,7 +152,7 @@ function modelTx(source) {
   return { text: perLang.translated ? perLang.text : source, translated: !!perLang.translated };
 }
 
-/** Whether this card/field is currently showing the authoritative original. */
+// Whether this card/field is currently showing the authoritative original.
 function showingOriginal(key) {
   return state.trOriginal.has(key);
 }
@@ -232,11 +162,7 @@ function setShowingOriginal(key, show) {
   else state.trOriginal.delete(key);
 }
 
-/**
- * A small toggle button between a localized presentation and its
- * authoritative original. Labels are localized; the original English itself
- * is never altered.
- */
+// A small toggle button between a localized presentation and its authoritative original.
 function trToggle(key, isShowingOriginal) {
   const btn = el('button', 'tr-toggle', isShowingOriginal ? t('tr.viewTranslation') : t('tr.viewOriginal'));
   btn.type = 'button';
@@ -272,9 +198,7 @@ async function api(path, options) {
   if (!res.ok) {
     const err = new Error(body.message || body.error || 'request failed');
     err.status = res.status;
-    // The machine-readable code, kept so a caller can react to a SPECIFIC
-    // refusal rather than matching on English prose. REVIEWER_REQUIRED in
-    // particular has one correct response: open the reviewer setup.
+    // The machine-readable code, kept so a caller can react to a SPECIFIC refusal rather than matching on English prose.
     err.code = typeof body.error === 'string' ? body.error : '';
     throw err;
   }
@@ -301,14 +225,7 @@ function del(path) {
   return api(path, { method: 'DELETE' });
 }
 
-/**
- * Apply an authoritative workspace payload.
- *
- * Every mutation answers with the project, the project's captures and the active
- * view together, so applying one replaces the whole client state rather than
- * merging into it. That is what stops a deleted project or a capture from
- * another project surviving on screen.
- */
+// Apply an authoritative workspace payload.
 function applyWorkspace(payload) {
   if (payload === null || payload === undefined) return;
   state.project = payload.project;
@@ -317,8 +234,7 @@ function applyWorkspace(payload) {
   state.reference = payload.reference || null;
   state.storage = payload.storage || null;
   state.pipeline = payload.pipeline || null;
-  // The dataset summary arrives with every workspace payload. The full index is
-  // fetched once separately because it lists 38 entries.
+  // The dataset summary arrives with every workspace payload.
   if (payload.dataset !== undefined && payload.dataset !== null) {
     state.dataset = payload.dataset;
   }
@@ -329,8 +245,7 @@ function applyWorkspace(payload) {
   if (payload.reviewerGate !== undefined && payload.reviewerGate !== null) {
     state.reviewerGate = payload.reviewerGate;
   }
-  // The server is authoritative about which photographs are open, including the
-  // grouped order. Falls back to the single id so an older payload still works.
+  // The server is authoritative about which photographs are open, including the grouped order.
   state.captureIds = Array.isArray(payload.activeCaptureIds) && payload.activeCaptureIds.length > 0
     ? payload.activeCaptureIds.slice()
     : (payload.activeCaptureId ? [payload.activeCaptureId] : []);
@@ -350,16 +265,13 @@ function applyWorkspace(payload) {
   )) {
     state.referenceInvalidated = null;
   }
-  // The open group changed, so the frame the evidence stage was showing may no
-  // longer belong to it. renderStage repairs this on the next pass; dropping the
-  // stale id here keeps that repair from showing a box on the wrong photograph
-  // in the one render between the change and the repair.
+  // The open group changed, so the frame the evidence stage was showing may no longer belong to it.
   if (state.evidenceCaptureId !== null && !state.captureIds.includes(state.evidenceCaptureId)) {
     state.evidenceCaptureId = null;
   }
 }
 
-/** Human label for a capture source. Three cases, never collapsed into two. */
+// Human label for a capture source. Three cases, never collapsed into two.
 function sourceLabel(source) {
   if (source === 'LOCAL_DATASET') return t('capture.sourceDataset');
   if (source === 'UPLOAD') return t('capture.sourceUpload');
@@ -372,8 +284,7 @@ function sourceTitle(source) {
   return t('capture.titleFixture');
 }
 
-/** Status text is mirrored outside the tab panels, so a message raised on one
- *  step is still readable from another. */
+// Status text is mirrored outside the tab panels, so a message raised on one step is still readable from another.
 function notify(text, tone) {
   const node = $('notice');
   if (!node) return;
@@ -407,7 +318,7 @@ function band(confidence) {
   return 'HIGH';
 }
 
-/** Show one workflow step and hide the rest. */
+// Show one workflow step and hide the rest.
 function selectStep(name, options) {
   const quiet = options && options.quiet === true;
 
@@ -422,14 +333,13 @@ function selectStep(name, options) {
     panel.hidden = panel.dataset.bay !== name;
   });
 
-  // The overlay is positioned from rendered image dimensions, so it must be
-  // recomputed once the panel is actually visible.
+  // The overlay is positioned from rendered image dimensions, so it must be recomputed once the panel is actually visible.
   renderOverlay();
 
   if (!quiet) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-/** Arrow-key navigation, the expected behaviour for a tablist. */
+// Arrow-key navigation, the expected behaviour for a tablist.
 function stepFromKey(event) {
   const current = TAB_ORDER.indexOf(event.currentTarget.dataset.step);
   if (current === -1) return;
@@ -456,7 +366,7 @@ function pretty(kind) {
   return kind.toLowerCase().replace(/_/g, ' ');
 }
 
-/** The active reference, the catalogue and where the bytes actually live. */
+// The active reference, the catalogue and where the bytes actually live.
 function renderReference() {
   const select = $('expected-preset');
   const reference = state.reference;
@@ -512,19 +422,7 @@ function renderStorage() {
   node.textContent = 'Storage (process memory only — not durable): ' + state.storage.location + '. ' + state.storage.detail;
 }
 
-/**
- * The local validation dataset browser.
- *
- * Two jobs. First, let a judge put a GENUINE construction photograph into the
- * pipeline in one click instead of hunting for a file. Second, and more
- * important, keep the provenance unmistakable: the note above the grid and the
- * badge on every tile say LOCAL DATASET, because a photograph from a Wikimedia
- * archive sitting next to a synthetic fixture must never be mistakable for
- * either a project capture or a generated scene.
- *
- * Images the model endpoint demonstrably cannot accept are shown as unavailable
- * with the reason, rather than failing after the operator has chosen one.
- */
+// The local validation dataset browser.
 function renderDataset() {
   const grid = $('dataset-grid');
   if (!grid) return;
@@ -541,9 +439,7 @@ function renderDataset() {
     empty.textContent = '';
     return;
   }
-
-  // The workspace summary carries a precomputed count; the full /api/dataset
-  // index carries the entries array instead. Both are truthful — read either.
+  // The workspace summary carries a precomputed count.
   const imageCount = summary.count !== undefined && summary.count !== null
     ? summary.count
     : (summary.entries ? summary.entries.length : 0);
@@ -593,7 +489,7 @@ function renderDataset() {
   });
 }
 
-/** Fetch the dataset index once; the workspace payload only carries a summary. */
+// Fetch the dataset index once; the workspace payload only carries a summary.
 async function loadDataset() {
   try {
     const index = await api('/api/dataset');
@@ -681,8 +577,7 @@ function renderExpected() {
     count.max = '500';
     count.className = 'exp-count';
     count.value = item.expectedCount === null ? '' : String(item.expectedCount);
-    // The count box is only meaningful for a COUNT expectation; disabling it
-    // stops the UI implying a number where none applies.
+    // The count box is only meaningful for a COUNT expectation.
     count.disabled = item.expectation !== 'COUNT';
     count.setAttribute('aria-label', 'Expected count for ' + item.element);
     row.appendChild(count);
@@ -696,7 +591,7 @@ function renderExpected() {
   });
 }
 
-/** Read the editor back into an expected-state payload for the server. */
+// Read the editor back into an expected-state payload for the server.
 function collectExpected() {
   const expected = state.expected;
   if (expected === null) return null;
@@ -716,20 +611,7 @@ function collectExpected() {
   return { zone: expected.zone, items: items };
 }
 
-/**
- * Where the photograph is ACTUALLY painted inside its element.
- *
- * The stage letterboxes every capture (object-fit: contain), so the painted
- * photo is normally narrower AND shorter than the element that holds it. Scaling
- * evidence boxes by clientWidth/naturalWidth therefore used the ELEMENT width
- * rather than the painted one: on a 320x240 fixture in a 1332x620 stage the
- * horizontal scale came out 1.6x too large, and every box landed partly outside
- * the photograph it was supposed to point at. A box pointing at nothing is worse
- * than no box, so the overlay is scaled and offset against the painted rectangle.
- *
- * Returns null while the image has no intrinsic size yet, so the caller draws
- * nothing rather than guessing.
- */
+// Where the photograph is ACTUALLY painted inside its element.
 function paintedArea(image) {
   const naturalWidth = image.naturalWidth;
   const naturalHeight = image.naturalHeight;
@@ -743,10 +625,7 @@ function paintedArea(image) {
   if (fit === 'fill' || fit === undefined || fit === '') {
     return { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 };
   }
-
-  // 'contain', 'scale-down' and 'cover' all scale by the same factor and centre
-  // the result; only the visible extent differs, which the overlay's clipping
-  // already handles.
+  // 'contain', 'scale-down' and 'cover' all scale by the same factor and centre the result.
   const scale = Math.min(elementWidth / naturalWidth, elementHeight / naturalHeight);
   return {
     scaleX: scale,
@@ -756,11 +635,7 @@ function paintedArea(image) {
   };
 }
 
-/**
- * Point-reflect a pixel box through the frame: the exact mapping a 180-degree
- * display rotation demands. Extracted so the axis mapping is executable and
- * testable rather than folklore — the same reason transformBox exists upstream.
- */
+// Point-reflect a pixel box through the frame: the exact mapping a 180-degree display rotation demands.
 function flipBox180(box, frameWidth, frameHeight) {
   return {
     left: frameWidth - box.left - box.width,
@@ -770,13 +645,7 @@ function flipBox180(box, frameWidth, frameHeight) {
   };
 }
 
-/**
- * Draw evidence boxes over the reality image.
- *
- * A box is only ever drawn when the server sent REAL pixel geometry for that
- * item. Nothing is positioned by guesswork: an un-localised item is reported as
- * un-localised in its card rather than being given an invented rectangle.
- */
+// Draw evidence boxes over the reality image.
 function renderOverlay() {
   const overlay = $('overlay');
   if (!overlay) return;
@@ -789,18 +658,13 @@ function renderOverlay() {
   if (area === null) return;
 
   const findings = (view.inspectionFindings || []).filter((finding) => {
-    // A photograph that is not the one on screen must not draw its boxes onto
-    // it: a box read from another frame would be a rectangle invented out of
-    // nothing where it lands.
+    // A photograph that is not the one on screen must not draw its boxes onto it: a box read from another frame would be a.
     return state.captureIds.length <= 1
       || finding.captureId === undefined
       || finding.captureId === state.evidenceCaptureId;
   });
 
-  // A display flipped 180 degrees must carry its boxes with it. Boxes arrive in
-  // the normalized (stored-pixel) space the model read; the flip is a display
-  // rotation of that same space, so the mapping is an exact point reflection,
-  // not a guess. Without this, a flipped capture would show every box mirrored.
+  // A display flipped 180 degrees must carry its boxes with it.
   const flipped = image.classList.contains('img-flip180');
   const frameWidth = image.naturalWidth;
   const frameHeight = image.naturalHeight;
@@ -829,7 +693,7 @@ function renderOverlay() {
   });
 }
 
-/** Show one finding: open its card and light up its region on the image. */
+// Show one finding: open its card and light up its region on the image.
 function openFinding(id) {
   state.activeId = id;
   if (!state.openIds.has(id)) state.openIds.add(id);
@@ -847,8 +711,7 @@ function formatReviewerObj(rev) {
 function renderReviewer() {
   const rev = state.project ? state.project.reviewer : null;
   const formatted = formatReviewerObj(rev);
-  // The reviewer's own name and role are the reviewer's words, never
-  // translated. Only the frame around them follows the language.
+  // The reviewer's own name and role are the reviewer's words, never translated.
   const displayVal = formatted ? formatted : t('panel.reviewerUnset');
 
   const metaNode = $('meta-reviewer');
@@ -910,19 +773,7 @@ async function submitReviewerModal(event) {
   }
 }
 
-/**
- * What the open inspection consists of, in the masthead.
- *
- * A COUNT, never the file names. Forty characters of filename cannot be
- * compared at a glance and grow without bound: twelve of them would push the
- * reviewer and the project selector off the strip. The count is what the
- * identity has to carry -- what was inspected -- and it is the same width for
- * one photograph and for twelve.
- *
- * At the ceiling the count says so, because "12 photographs" otherwise reads
- * as a choice the operator made rather than the maximum the API enforces. The
- * names stay in the Capture bay's own strip, where they can be read properly.
- */
+// What the open inspection consists of, in the masthead.
 function renderCaptureSummary() {
   const open = state.captureIds;
   const node = $('meta-capture');
@@ -955,27 +806,20 @@ function renderHeader() {
   const view = state.view;
   if (view === null) return;
   const p = view.provenance;
-
-  // The masthead names the project once, in the project selector; repeating it
-  // in the meta strip doubled the same words ten centimetres apart.
+  // The masthead names the project once, in the project selector.
   setText('meta-zone', view.expected ? view.expected.zone : '-');
   renderCaptureSummary();
   if (state.pipeline === null || state.pipeline === undefined) {
     setText('hdr-model', p.model);
     setText('hdr-reasoner', '-');
   }
-  // The pipeline payload names the models but not the provider, so the provider
-  // still comes from the session's own provenance. Set here unconditionally:
-  // leaving it to a conditional left the field blank whenever a pipeline was
-  // present, which read as "unknown origin" on every load.
+  // The pipeline payload names the models but not the provider, so the provider still comes from the session's own provenance.
   setText('hdr-provenance', p.provider);
 
-  // The offline fixture is labelled loudly and permanently. A deterministic
-  // fixture must never be mistaken for a model having looked at the image.
+  // The offline fixture is labelled loudly and permanently.
   const origin = view.inferenceOrigin;
   $('hdr-synth').hidden = origin !== 'DEMO_FIXTURE';
-  // A cached answer is a real AI result but NOT a fresh one, so it carries its
-  // own badge and the time of the inference behind it.
+  // A cached answer is a real AI result but NOT a fresh one, so it carries its own badge and the time of the inference behind it.
   $('hdr-cache').hidden = origin !== 'CACHED';
   if (origin === 'CACHED') {
     const when = view.originalInferenceAt;
@@ -990,12 +834,7 @@ function renderHeader() {
   }
 }
 
-/**
- * The Inspect bay's intro line must describe the CURRENT run state, not the
- * never-inspected default. A restored result that says "the model has not been
- * asked anything yet" directly above a full result set is exactly the kind of
- * contradiction that destroys trust in an instrument.
- */
+// The Inspect bay's intro line must describe the CURRENT run state, not the never-inspected default.
 function updateInspectIntro() {
   const sub = $('run-sub');
   if (!sub) return;
@@ -1024,9 +863,7 @@ function renderRail() {
     pending: c.pending,
     verified: c.verified
   }));
-
-  // Confidence is shown as a percentage only when one exists; "no confidence"
-  // is a legitimate reading and is not rounded to zero.
+  // Confidence is shown as a percentage only when one exists.
   setText('rail-confidence', c.highestConfidence === null ? 'n/a' : Math.round(c.highestConfidence * 100) + '%');
   setText('rail-overall', l10n === null ? view.brief.overall.replace(/_/g, ' ') : l10n.brief.overallLabel);
   $('rail-verdict').dataset.overall = view.brief.overall;
@@ -1038,9 +875,7 @@ function renderBrief() {
   clear(host);
   if (view === null) return;
   const l10n = localized();
-
-  // The canonical brief lines are English sentences; the localized brief is the
-  // same facts regenerated in the selected language. Same counts, same verdict.
+  // The canonical brief lines are English sentences.
   const lines = l10n === null ? view.brief.lines : l10n.brief.lines;
   const leadPrefix = t('brief.overallPrefix').split('{')[0];
   for (const line of lines) {
@@ -1058,16 +893,9 @@ function renderBrief() {
   setText('brief-verdict', l10n === null ? view.brief.overall.replace(/_/g, ' ') : l10n.brief.overallLabel);
 }
 
-/**
- * Placeholder fill, matching the server-side projection exactly.
- *
- * A token with no value is left visible rather than blanked, so a missing
- * parameter shows on screen instead of silently shortening a sentence.
- */
+// Placeholder fill, matching the server-side projection exactly.
 function fillText(template, params) {
-  // Written without regex escapes on purpose. This file is a template literal,
-  // so a backslash-w would be consumed by the outer template and the emitted
-  // client would silently stop matching placeholders.
+  // Written without regex escapes on purpose.
   return String(template).replace(/\{([a-zA-Z]+)\}/g, (whole, token) => {
     const value = params[token];
     return value === undefined || value === null ? whole : String(value);
@@ -1103,7 +931,7 @@ function renderPriorities() {
   });
 }
 
-/** REALITY vs EXPECTED, one row per expected item. */
+// REALITY vs EXPECTED, one row per expected item.
 function renderComparison() {
   const view = state.view;
   const host = $('comparison');
@@ -1142,6 +970,14 @@ function renderComparison() {
     if (difference) pair(t('comparison.difference'), difference);
     const basisNote = localizedRow === null ? null : localizedRow.countBasisNote;
     if (basisNote !== null) pair(t('comparison.countBasis'), basisNote);
+    const statusHelp = localizedRow === null
+      ? (row.status === 'UNDETERMINED' ? t('comparisonStatus.help.UNDETERMINED') : null)
+      : localizedRow.statusHelp;
+    if (statusHelp) {
+      const help = el('p', 'cmp-help', statusHelp);
+      help.dataset.status = 'UNDETERMINED';
+      item.appendChild(help);
+    }
     item.appendChild(grid);
     host.appendChild(item);
   });
@@ -1156,22 +992,7 @@ function statusTag(status) {
   return el('span', cls, t('status.' + status));
 }
 
-/**
- * STAGE 2: Nemotron's construction reasoning.
- *
- * Rendered as its own panel with its own provenance, never folded into the
- * comparison table, because a judge must be able to see what the second model
- * actually contributed. Three states are visually distinct and none of them is
- * allowed to read as "nothing to report":
- *
- *   not run yet        neutral
- *   unavailable        amber, with the reason
- *   available          the reasoning itself, plus its certainty
- *
- * The reasoning certainty is deliberately NOT shown as a percentage bar. It is
- * a qualitative reading of evidence, and a bar would invite exactly the
- * confidence-equals-truth mistake this product exists to prevent.
- */
+// STAGE 2: Nemotron's construction reasoning.
 function renderReasoning() {
   const host = $('reason-grid');
   if (!host) return;
@@ -1197,9 +1018,7 @@ function renderReasoning() {
     stage.dataset.status = 'AVAILABLE';
     $('reason-stage').textContent = t('reason.stageLabel');
     $('reason-model').textContent = r.model;
-    // Presentation-layer translation of Nemotron's English. The original is
-    // authoritative; the display follows the selected language when the
-    // offline memory holds that sentence, otherwise it falls back honestly.
+    // Presentation-layer translation of Nemotron's English.
     const txSummary = modelTx(reasoning.summary);
     const txWhat = modelTx(reasoning.whatMatters);
     const txRat = modelTx(reasoning.rationale);
@@ -1292,13 +1111,7 @@ function renderReasoning() {
   $('reason-foot').hidden = true;
 }
 
-/**
- * The pipeline strip: which model did what, on this run.
- *
- * Four steps, because the product thesis has four verbs. Each step reports its
- * OWN state, so "Nemotron did not run" can never be read as "there was nothing
- * to reason about", and "nothing is verified" is always stated outright.
- */
+// The pipeline strip: which model did what, on this run.
 function renderPipeline() {
   const view = state.view;
   const set = (id, text) => setText(id, text);
@@ -1321,8 +1134,7 @@ function renderPipeline() {
     step3.dataset.state = 'idle';
     step4.dataset.state = 'idle';
     set('pipe-vision-note', t('pipe.notRun'));
-    // A reference can be loaded without a run having happened; claiming "no
-    // expected state" here would contradict the panel beside the grid.
+    // A reference can be loaded without a run having happened.
     set('pipe-compare-note', t('pipe.awaitingInspection'));
     set('pipe-reason-note', t('pipe.notRun'));
     set('pipe-verify-note', t('pipe.nothingVerified'));
@@ -1333,10 +1145,7 @@ function renderPipeline() {
   const p = view.provenance;
   const r = view.reasoning;
 
-  // 01 SEE
-  // Partial is checked BEFORE the outcome, deliberately. A partial analysis is
-  // its own third state: when it wins the comparison, the run is not "did not
-  // complete" and the step must not borrow the failure colour and wording.
+  // 01 SEE Partial is checked BEFORE the outcome, deliberately.
   const partial = view.failure !== null && view.failure.kind === 'PARTIAL_ANALYSIS';
   const failed = view.outcome === 'FAILED' && !partial;
   step1.dataset.state = partial ? 'partial' : failed ? 'fail' : 'done';
@@ -1348,9 +1157,7 @@ function renderPipeline() {
         })
       : partial
         ? fillText(t('pipe.partial'), (function () {
-            // Counted from the images themselves rather than derived from the
-            // open group: subtracting failures from a separately-sized list can
-            // go negative, and "-1 of 1 analysed" is worse than no number.
+            // Counted from the images themselves rather than derived from the open group: subtracting failures from a.
             const images = Array.isArray(view.images) ? view.images : [];
             return {
               analysed: images.filter((i) => i.status !== 'FAILED').length,
@@ -1390,9 +1197,9 @@ function renderPipeline() {
   } else {
     step3.dataset.state = 'fail';
     set('pipe-reason-model', r.model === 'none' ? '-' : r.model);
-    set('pipe-reason-note', r.failureKind === null
+    set('pipe-reason-note', r.failureKind === null || r.failureKind === 'DISABLED'
       ? t('pipe.notRun')
-      : t('fail.' + r.failureKind.toLowerCase()));
+      : describeFailure(r.failureKind, r.failureKind));
   }
 
   // 04 VERIFY
@@ -1417,15 +1224,7 @@ function renderPipeline() {
   updateInspectIntro();
 }
 
-/**
- * A definition row inside the finding detail.
- *
- * Returns null when there is no honest value to show. That is deliberate: an
- * empty "WHERE" is meaningful, because it means the model did not localise the
- * item and we refuse to guess. Callers MUST therefore append through
- * appendDetail(), never appendChild directly - appendChild(null) throws and
- * silently aborts the rest of the render.
- */
+// A definition row inside the finding detail.
 function detailRow(key, label, value) {
   if (value === null || value === undefined || value === '') return null;
   const row = el('div', 'fc-row');
@@ -1435,21 +1234,14 @@ function detailRow(key, label, value) {
   return row;
 }
 
-/** Append a detail row only when there is one. Never throws. */
+// Append a detail row only when there is one. Never throws.
 function appendDetail(parent, key, label, value) {
   const row = detailRow(key, label, value);
   if (row !== null) parent.appendChild(row);
   return row;
 }
 
-/**
- * Render the finding cards: WHAT / WHERE / WHY / EVIDENCE / CONFIDENCE /
- * RECOMMENDED ACTION / VERIFICATION.
- *
- * Rows with no honest value are omitted rather than filled with a placeholder,
- * because an empty "WHERE" is meaningful: it means the model did not localise
- * the item and we refuse to guess.
- */
+// Render the finding cards: WHAT / WHERE / WHY / EVIDENCE / CONFIDENCE / RECOMMENDED ACTION / VERIFICATION.
 function renderFindings() {
   const view = state.view;
   const host = $('findings-cards');
@@ -1475,8 +1267,7 @@ function renderFindings() {
   }
 
   list.forEach((finding, index) => {
-    // The canonical finding drives behaviour; the localized copy drives text.
-    // They share one id, and the id is what the human review is keyed on.
+    // The canonical finding drives behaviour.
     const f = l10n === null ? null : (l10n.findings[index] || null);
     const open = state.openIds.has(finding.id) || state.activeId === finding.id;
     const card = el('article', 'finding-card');
@@ -1488,9 +1279,9 @@ function renderFindings() {
     const head = el('div', 'fc-head');
     head.setAttribute('role', 'button');
     head.setAttribute('tabindex', '0');
+    head.setAttribute('aria-expanded', String(open));
     head.appendChild(el('span', 'fc-id', String(index + 1).padStart(2, '0')));
-    // AI-origin titles are model English; show the localized presentation when
-    // the memory holds it, with a way back to the authoritative original.
+    // AI-origin titles are model English.
     const fndKey = 'fnd:' + finding.id;
     const fndShowOrig = showingOriginal(fndKey);
     const isAiFinding = finding.origin !== 'COMPARISON';
@@ -1517,11 +1308,20 @@ function renderFindings() {
     head.appendChild(tail);
 
     const toggle = () => {
-      if (state.openIds.has(finding.id)) state.openIds.delete(finding.id);
-      else state.openIds.add(finding.id);
-      state.activeId = finding.id;
+      const wasOpen = state.openIds.has(finding.id) || state.activeId === finding.id;
+      if (wasOpen) {
+        state.openIds.delete(finding.id);
+        if (state.activeId === finding.id) state.activeId = null;
+      } else {
+        state.openIds.add(finding.id);
+        state.activeId = finding.id;
+      }
       renderFindings();
       renderOverlay();
+      if (typeof host.querySelector === 'function') {
+        const nextHead = host.querySelector('.finding-card[data-finding-id="' + finding.id + '"] .fc-head');
+        if (nextHead && typeof nextHead.focus === 'function') nextHead.focus();
+      }
     };
     head.addEventListener('click', toggle);
     head.addEventListener('keydown', (event) => {
@@ -1533,8 +1333,7 @@ function renderFindings() {
     card.appendChild(head);
 
     const body = el('div', 'fc-body');
-    // For AI-origin findings the WHAT/WHERE/WHY/EVIDENCE/ACTION are model
-    // English; show the memory translation when available, original otherwise.
+    // For AI-origin findings the WHAT/WHERE/WHY/EVIDENCE/ACTION are model English.
     const pickFnd = (orig) => {
       if (!isAiFinding || state.lang === 'en') return orig;
       const tx = modelTx(orig);
@@ -1555,8 +1354,7 @@ function renderFindings() {
     appendDetail(body, 'expected', t('finding.expected'), f === null ? finding.expected : f.expected);
     appendDetail(body, 'difference', t('finding.difference'), f === null ? finding.difference : f.difference);
 
-    // Confidence is labelled as model confidence in the visual reading, never
-    // as a measurement confidence. The NUMBER is canonical and never localized.
+    // Confidence is labelled as model confidence in the visual reading, never as a measurement confidence.
     const confidenceRow = el('div', 'fc-row');
     confidenceRow.dataset.k = 'confidence';
     confidenceRow.appendChild(el('dt', null, t('finding.confidence')));
@@ -1576,11 +1374,7 @@ function renderFindings() {
     appendDetail(body, 'action', t('finding.action'), aiAction);
     appendDetail(body, 'evidence', t('finding.evidence'), aiEvidence);
 
-    // Evidence states exactly what the image supports, and no more. A finding
-    // the model saw but did not localise is FULL-FRAME evidence: real image,
-    // real reading, no rectangle — and it is never given an invented one. A
-    // finding with no visual reading at all says so rather than borrowing the
-    // image's authority.
+    // Evidence states exactly what the image supports, and no more.
     const evidenceNote = f === null
       ? (finding.evidenceState === 'FULL_FRAME'
         ? t('finding.evidence.fullFrame')
@@ -1595,6 +1389,20 @@ function renderFindings() {
           ? t('finding.evidence.headNone')
           : '')
       : (f.evidenceNoteHead || '');
+    const evidenceHelp = f === null
+      ? (finding.evidenceState === 'LOCALIZED'
+        ? t('evidenceState.help.LOCALIZED')
+        : finding.evidenceState === 'FULL_FRAME'
+          ? t('evidenceState.help.FULL_FRAME')
+          : t('evidenceState.help.NONE'))
+      : f.evidenceStateHelp;
+    const evidenceWhy = f === null
+      ? (finding.evidenceState === 'LOCALIZED'
+        ? t('evidenceState.why.LOCALIZED')
+        : finding.evidenceState === 'FULL_FRAME'
+          ? t('evidenceState.why.FULL_FRAME')
+          : t('evidenceState.why.NONE'))
+      : f.evidenceStateWhy;
     if (evidenceNote !== null) {
       const note = el('p', 'fc-noev');
       note.dataset.state = finding.evidenceState;
@@ -1602,10 +1410,15 @@ function renderFindings() {
       note.appendChild(document.createTextNode(evidenceNote));
       body.appendChild(note);
     }
+    if (evidenceHelp) {
+      const help = el('p', 'fc-evhelp');
+      help.appendChild(el('b', null, evidenceWhy + ' '));
+      help.appendChild(document.createTextNode(evidenceHelp));
+      body.appendChild(help);
+      help.setAttribute('role', 'note');
+    }
 
-    // Translation honesty for model-authored findings. A translated finding
-    // names its translation and offers the authoritative original; an
-    // untranslated one says so and never invents text.
+    // Translation honesty for model-authored findings.
     if (f !== null && !f.translated && isAiFinding && state.lang !== 'en') {
       const txs = [modelTx(finding.title), modelTx(finding.observation),
         modelTx(finding.reason), modelTx(finding.evidence), modelTx(finding.recommendation)];
@@ -1633,13 +1446,7 @@ function renderFindings() {
   });
 }
 
-/**
- * The human-in-the-loop control.
- *
- * Until a named person acts, this shows CONFIRM / REJECT / NEEDS REVIEW over an
- * UNVERIFIED finding. Afterwards it shows the recorded decision and who made
- * it, which is the audit trail the product promises.
- */
+// The human-in-the-loop control.
 function buildVerification(finding) {
   const pct = Math.round(finding.confidence * 100);
   if (finding.verificationStatus !== 'UNVERIFIED') {
@@ -1653,8 +1460,7 @@ function buildVerification(finding) {
           reviewer: finding.review.reviewer,
           at: finding.review.reviewedAt.replace('T', ' ').slice(0, 19)
         })));
-      // A reviewer's own note is their words, in the language they wrote them.
-      // It is never translated.
+      // A reviewer's own note is their words, in the language they wrote them. It is never translated.
       if (finding.review.note) settled.appendChild(el('span', null, '"' + finding.review.note + '"'));
     }
     return settled;
@@ -1680,7 +1486,7 @@ function buildVerification(finding) {
   return acts;
 }
 
-/** Map a review decision enum to its localized past-tense label. */
+// Map a review decision enum to its localized past-tense label.
 function decisionWord(decision) {
   return decision === 'VERIFIED' ? 'confirmed' : decision === 'REJECTED' ? 'rejected' : 'deferred';
 }
@@ -1699,28 +1505,18 @@ async function submitReview(findingId, decision) {
       reviewer: currentReviewer,
       note: $('note').value.trim() || null
     });
+    renderAll();
     notify(fillText(t('review.recorded'), {
       status: t('review.' + decisionWord(decision)),
       reviewer: currentReviewer,
     }), decision === 'REJECTED' ? 'bad' : 'good');
     setLamp('done', t('review.lampRecorded'));
-    renderAll();
   } catch (error) {
     notify(error.message, 'bad');
   }
 }
 
-/**
- * The NVIDIA verdict, and the two model stages behind it.
- *
- * Three separate facts, kept separate on screen: the verdict for THIS RUN,
- * which is the headline; per stage, whether the model is an NVIDIA model at all;
- * and per stage, what that stage contributed.
- *
- * The vision model really is not an NVIDIA model and this says so, in its own
- * row, underneath the verdict. What it must never do is let that row stand in
- * for the run's qualification.
- */
+// The NVIDIA verdict, and the two model stages behind it.
 function renderQualification() {
   const host = $('qualification');
   if (host === null) return;
@@ -1737,10 +1533,7 @@ function renderQualification() {
   host.hidden = false;
   host.dataset.requirement = e.nvidiaRequirement;
 
-  // The verdict is the headline because it answers the question a judge
-  // actually asks. It is deliberately only the verdict: the platform and the
-  // qualifying stage each get their own row below, so a reader never has to
-  // parse them out of a sentence to find out which stage actually qualified.
+  // The verdict is the headline because it answers the question a judge actually asks.
   const verdict = $('qual-verdict');
   if (verdict !== null) {
     verdict.textContent = e.nvidiaRequirement === 'MET'
@@ -1748,9 +1541,7 @@ function renderQualification() {
       : e.nvidiaRequirement === 'PARTIAL' ? t('qual.partial') : t('qual.notMet');
   }
 
-  // Which shape the pipeline took. A hybrid run - an NVIDIA reasoning stage
-  // behind a non-NVIDIA vision model - is a different claim from a fully NVIDIA
-  // one, and the reader should not have to infer which from the rows underneath.
+  // Which shape the pipeline took.
   const subtitle = $('qual-subtitle');
   if (subtitle !== null) {
     subtitle.textContent = e.vision !== 'ELIGIBLE' && e.reasoning === 'ELIGIBLE'
@@ -1760,9 +1551,7 @@ function renderQualification() {
 
   if (list === null) return;
 
-  // The localized projection carries the same roles and notes in the selected
-  // language. Absent, the canonical English prose is used unchanged: the model
-  // ids and the classification never depend on it.
+  // The localized projection carries the same roles and notes in the selected language.
   const stageRole = (index, fallback) => {
     if (l10n !== null && l10n.qualification !== null) {
       const row = l10n.qualification.stages[index];
@@ -1797,9 +1586,7 @@ function renderQualification() {
   for (const row of rows) {
     const item = el('li', 'qual-row');
     item.appendChild(el('span', 'qual-row-k', t('qual.row.' + row.key)));
-    // A model id or platform name is a technical Latin run: isolated so the
-    // bidirectional algorithm cannot reorder it inside Arabic text. The
-    // localized "unavailable" fallback is prose and is left to flow.
+    // A model id or platform name is a technical Latin run: isolated so the bidirectional algorithm cannot reorder it inside Arabic text.
     const modelNode = el('code', 'qual-row-model',
       row.model === null || row.model === undefined || row.model === ''
         ? t('qual.unavailable')
@@ -1809,8 +1596,7 @@ function renderQualification() {
     }
     item.appendChild(modelNode);
 
-    // Fail-closed: only an explicit ELIGIBLE carries the positive tone, and an
-    // UNKNOWN never borrows the tone of a stage that was actually judged.
+    // Fail-closed: only an explicit ELIGIBLE carries the positive tone, and an UNKNOWN never borrows the tone of a stage.
     const tone = row.cls === 'ELIGIBLE' ? 'ok' : row.cls === 'NOT_ELIGIBLE' ? 'no' : 'unknown';
     let tagText = t('qual.tag.' + row.key);
     if (row.key === 'platform') {
@@ -1829,26 +1615,14 @@ function renderQualification() {
   if (path !== null) path.textContent = e.qualificationPath;
 }
 
-/**
- * The colour class for a stage's classification.
- *
- * Fail-closed: only an explicit ELIGIBLE reads as the positive tone, and an
- * UNKNOWN reads differently from a NOT_ELIGIBLE rather than sharing its colour.
- */
+// The colour class for a stage's classification.
 function tagTone(cls) {
   if (cls === 'ELIGIBLE') return 'ok';
   if (cls === 'NOT_ELIGIBLE') return 'no';
   return 'unknown';
 }
 
-/** Provenance and eligibility: which engine actually ran, always. */
-/**
- * State, in words, how many photographs this inspection is based on.
- *
- * A reader of the evidence must be able to tell "one photo" from "four photos"
- * without counting anything. A failed photograph is listed as failed, because
- * "based on 3 photographs" would overstate the evidence when only 2 succeeded.
- */
+// Provenance and eligibility: which engine actually ran, always.
 function renderBasis() {
   const host = $('basis-list');
   const badge = $('basis-n');
@@ -1876,8 +1650,7 @@ function renderBasis() {
     const item = el('li', 'basis-item' + (ok ? '' : ' basis-item-failed'));
     item.appendChild(el('span', 'basis-dot', ok ? t('imgs.status.done') : t('imgs.status.failed')));
     item.appendChild(el('span', 'basis-name', image.captureLabel || image.captureId));
-    // The observations array is absent on a restored or older payload, so the
-    // count is shown only when the server actually sent one.
+    // The observations array is absent on a restored or older payload, so the count is shown only when the server actually sent one.
     const observed = Array.isArray(image.observations) ? image.observations.length : null;
     if (observed !== null && observed > 0) {
       item.appendChild(el('span', 'basis-n', fillText(t('imgs.obsCount'), { count: observed })));
@@ -1900,14 +1673,12 @@ function renderProvenance() {
   clear(host);
   clear(failHost);
   renderBasis();
-  // Rendered before the early return so a cleared view cannot leave a stale
-  // verdict on screen.
+  // Rendered before the early return so a cleared view cannot leave a stale verdict on screen.
   renderQualification();
   if (view === null) return;
 
   const p = view.provenance;
-  // A restored result is real but was NOT re-run, so "inference executed: yes"
-  // plus "0 ms" would read as a broken live call. State the restoration.
+  // A restored result is real but was NOT re-run, so "inference executed: yes" plus "0 ms" would read as a broken live call.
   const restored = view.inferenceOrigin === 'CACHED';
   const persistFailed = view.persistence !== undefined && view.persistence !== null
     && view.persistence.written === false;
@@ -1918,9 +1689,7 @@ function renderProvenance() {
       : state.storage && state.storage.durable === false
         ? t('prov.persistMemory')
         : t('storage.unknown');
-  // Every VALUE here is canonical: the provider name, the model id, the counts,
-  // the latency and the timestamp are the same in every language. Only the row
-  // LABELS follow the selected language.
+  // Every VALUE here is canonical: the provider name, the model id, the counts, the latency and the timestamp are the.
   const rows = [
     [t('prov.provider'), p.provider],
     [t('prov.model'), p.model],
@@ -1973,9 +1742,7 @@ function renderProvenance() {
   if (view.failure !== null) {
     const box = el('div', 'fail');
     if (view.failure.kind === 'PARTIAL_ANALYSIS') {
-      // A partial run is not a failed run. Labelling it "INSPECTION FAILED"
-      // would throw away the evidence it did produce; the panel says how much
-      // of the inspection actually ran.
+      // A partial run is not a failed run.
       box.dataset.status = 'PARTIAL';
       box.appendChild(el('p', 'fail-h', t('prov.partialHead')));
       box.appendChild(el('p', null, view.failure.message));
@@ -1991,8 +1758,7 @@ function renderProvenance() {
     box.appendChild(el('p', 'fail-h', fillText(t('prov.rejectedHead'), { n: p.rejectionIssues.length })));
     const list = el('ul');
     for (const issue of p.rejectionIssues.slice(0, 8)) {
-      // The FIELD NAME is a machine identifier and stays verbatim; the message
-      // is a validator sentence and follows the language.
+      // The FIELD NAME is a machine identifier and stays verbatim; the message is a validator sentence and follows the language.
       list.appendChild(el('li', null, issue.field + ': ' + issue.message));
     }
     box.appendChild(list);
@@ -2000,16 +1766,7 @@ function renderProvenance() {
   }
 }
 
-/**
- * Render the Verified-Finding Ledger (view.findings) and the raw visual
- * observations (view.observations) that feed it when human-verified.
- *
- * Inspection findings (fnd_*, rendered in renderFindings) and verified
- * ledger findings (find_*, rendered here) have distinct IDs and lifecycle
- * contracts:
- *   - obs_*  -> reviewed via POST /api/review -> raises/removes find_*
- *   - find_* -> triaged via POST /api/finding-state (OPEN / ACKNOWLEDGED / CLOSED)
- */
+// Render the Verified-Finding Ledger (view.findings) and the raw visual observations (view.observations) that feed it.
 function renderObservations() {
   const host = $('findings');
   clear(host);
@@ -2035,8 +1792,7 @@ function renderObservations() {
       : (view.provenance && view.provenance.captureId ? [view.provenance.captureId] : []));
 
   const rawLedger = Array.isArray(view.findings) ? view.findings : [];
-  // Scope guard: only display ledger findings owned by the active project and
-  // within the open capture selection.
+  // Scope guard: only display ledger findings owned by the active project and within the open capture selection.
   const ledgerFindings = rawLedger.filter((item) => {
     if (!item || typeof item.id !== 'string') return false;
     if (activeProjectId !== null && item.projectId && item.projectId !== activeProjectId) return false;
@@ -2229,9 +1985,7 @@ function renderObservations() {
       row.appendChild(raisedTag);
     }
 
-    // Which photograph this observation came from. Over a group, an evidence
-    // line without its photograph is not auditable, so the source is always
-    // shown even for a single image.
+    // Which photograph this observation came from.
     const photo = el('span', 'obs-photo', fillText(t('obs.from'), {
       label: observation.captureLabel || observation.captureId,
     }));
@@ -2245,7 +1999,6 @@ function renderObservations() {
     track.appendChild(fill);
     conf.appendChild(track);
     // The band is a qualitative reading of model confidence, not a severity.
-    // Saying so in the label stops "HIGH" being read as an alert level.
     conf.appendChild(el('span', null,
       fillText(t('obs.band'), {
         value: observation.confidence.toFixed(2),
@@ -2253,8 +2006,7 @@ function renderObservations() {
       })));
     row.appendChild(conf);
 
-    // MiniCPM's English with a localized presentation when the memory holds
-    // it. The original stays authoritative and reachable via View original.
+    // MiniCPM's English with a localized presentation when the memory holds it.
     const obsKey = 'obs:' + observation.id;
     const obsShowOrig = showingOriginal(obsKey);
     const txObs = modelTx(observation.observation);
@@ -2340,12 +2092,12 @@ async function submitObservationReview(observationId, decision) {
       note: $('note') ? ($('note').value.trim() || null) : null
     });
     state.obsReviewInFlight.delete(observationId);
+    renderAll();
     notify(fillText(t('review.recordedObservation'), {
       status: t('review.' + decisionWord(decision)),
       reviewer: currentReviewer,
     }), decision === 'REJECTED' ? 'bad' : 'good');
     setLamp('done', t('review.lampRecorded'));
-    renderAll();
   } catch (error) {
     state.obsReviewInFlight.delete(observationId);
     renderObservations();
@@ -2364,8 +2116,7 @@ async function updateFindingState(findingId, nextState) {
     return;
   }
 
-  // Scope guard: refuse to mutate a finding that does not belong to the active
-  // project and open capture selection.
+  // Scope guard: refuse to mutate a finding that does not belong to the active project and open capture selection.
   const activeProjectId = state.project ? state.project.id : null;
   const openCaptures = Array.isArray(state.captureIds) && state.captureIds.length > 0
     ? state.captureIds
@@ -2406,9 +2157,9 @@ async function updateFindingState(findingId, nextState) {
       tone: durable ? 'good' : 'warn',
       message: confirmMsg,
     };
+    renderAll();
     notify(confirmMsg, 'good');
     setLamp('done', t('review.lampRecorded'));
-    renderAll();
   } catch (error) {
     state.findingInFlight.delete(findingId);
     // Preserve last confirmed state and never report the rejected transition as saved.
@@ -2427,8 +2178,7 @@ function renderStage() {
   const view = state.view;
   if (view === null) return;
   const p = view.provenance;
-  // The photograph on screen is the selected one when the open inspection has
-  // several, and the provenance photograph otherwise.
+  // The photograph on screen is the selected one when the open inspection has several, and the provenance photograph otherwise.
   const shown = state.captureIds.length > 1 && state.evidenceCaptureId !== null
     && state.captureIds.includes(state.evidenceCaptureId)
     ? state.evidenceCaptureId
@@ -2440,8 +2190,7 @@ function renderStage() {
     image.dataset.src = src;
     image.src = src;
   }
-  // Keep the evidence stage in the same display orientation as the capture
-  // stage, so the operator never compares two different rotations of a site.
+  // Keep the evidence stage in the same display orientation as the capture stage, so the operator never compares two.
   const capture = state.captures.filter((c) => c.id === shown)[0];
   const flip = capture !== undefined
     ? displayNeedsFlip(capture.exifOrientation)
@@ -2456,16 +2205,7 @@ function renderStage() {
     + ' - ' + p.mediaType + basis;
 }
 
-/**
- * Run one render step, isolating its failures.
- *
- * The first version of this file called each render function directly, so a
- * single unguarded appendChild(null) threw and aborted every later step: the
- * rail painted but the evidence image never got a src and the caption kept its
- * placeholder text, with no indication of what had gone wrong. Isolating each
- * step means one malformed finding can no longer blank the instrument, and the
- * fault is reported where the operator can see it.
- */
+// Run one render step, isolating its failures.
 function safeRender(name, fn) {
   try {
     fn();
@@ -2499,11 +2239,7 @@ function renderAll() {
   safeRender('outcome', renderRunOutcome);
 }
 
-/**
- * Re-localize the lamp, status bar, and notice banner after a completed run so
- * applyLanguage() in renderAll() does not overwrite them with idle copy and
- * switching languages translates the run summary in place.
- */
+// Re-localize the lamp, status bar, and notice banner after a completed run so applyLanguage() in renderAll() does not.
 function renderRunOutcome() {
   const view = state.view;
   if (view === null || view.outcome !== 'COMPLETED' || state.lastRunSecs === null) return;
@@ -2577,29 +2313,19 @@ function renderRunOutcome() {
   }
 }
 
-/**
- * The reviewer gate.
- *
- * A finding can only be moved out of UNVERIFIED by a named person, so until
- * the project names one the human half of the workflow is genuinely closed.
- * The banner is placed above the pipeline because a workflow that cannot
- * complete has to say so before the operator invests in it.
- */
+// The reviewer gate.
 function renderReviewerGate() {
   const banner = $('reviewer-gate');
   if (!banner) return;
   const server = state.reviewerGate;
-  // The server's own verdict, not a recomputation here. The banner used to read
-  // the project and decide for itself, which meant it could assert a gate the
-  // API would not enforce; now the banner and the routes share one definition.
+  // The server's own verdict, not a recomputation here.
   const closed = server !== null && server !== undefined
     ? server.required === true
     : reviewerMissingLocally();
   banner.hidden = !closed;
   const reason = $('reviewer-gate-reason');
   if (reason !== null) {
-    // A server-authored reason is canonical system text and is shown verbatim,
-    // even when it is not the default sentence the catalog knows.
+    // A server-authored reason is canonical system text and is shown verbatim, even when it is not the default sentence the.
     reason.textContent = server !== null && server !== undefined
       && typeof server.reason === 'string' && server.reason.length > 0
       ? server.reason
@@ -2607,13 +2333,7 @@ function renderReviewerGate() {
   }
 }
 
-/**
- * Whether this client copy believes the gate is closed, before any payload.
- *
- * Fail-closed, and only a fallback: it covers the window before the first
- * workspace payload arrives, so the banner never flashes "open" and then invites
- * a request the server will refuse. Once a payload lands, the server decides.
- */
+// Whether this client copy believes the gate is closed, before any payload.
 function reviewerMissingLocally() {
   const project = state.project;
   if (project === null || project === undefined) return false;
@@ -2623,15 +2343,7 @@ function reviewerMissingLocally() {
     || reviewer.name.trim().length === 0;
 }
 
-/**
- * Which photograph of the open inspection the evidence stage shows.
- *
- * An inspection can rest on several photographs at once, and each carries its
- * own evidence boxes. Only one frame can be on screen, so this selects the
- * frame and the overlay follows it. A single-photo inspection needs no
- * switcher: it would be a tab named after the only thing that could be on
- * screen.
- */
+// Which photograph of the open inspection the evidence stage shows.
 function renderPhotoSwitcher() {
   const switcher = $('photo-switcher');
   if (!switcher) return;
@@ -2666,8 +2378,7 @@ function renderFixtures() {
   const host = $('fixture-list');
   clear(host);
   $('capture-empty').hidden = state.captures.length > 0 || state.project === null;
-  // Bulk actions over a single row would be no-ops, so they wait until there is
-  // a group to act on.
+  // Bulk actions over a single row would be no-ops, so they wait until there is a group to act on.
   $('fixtures-acts').hidden = state.captures.length <= 1;
 
   state.captures.forEach((capture) => {
@@ -2702,14 +2413,7 @@ function renderFixtures() {
   });
 }
 
-/**
- * Render the strip of photographs belonging to the open inspection.
- *
- * The count is stated in words because "3 photographs" and "1 photograph" read
- * very differently to an operator deciding whether they have covered the level.
- * Failed photographs stay visible with a failed status: hiding them would let a
- * partial inspection look complete.
- */
+// Render the strip of photographs belonging to the open inspection.
 function renderImages() {
   const section = $('imgs');
   if (!section) return;
@@ -2770,13 +2474,7 @@ async function removeCaptureFromGroup(captureId) {
   }
 }
 
-/**
- * Open every capture of the project as ONE inspection.
- *
- * The server already accepts a whole group in one selection, so this is the
- * same call the per-photo controls make, once. Selecting all is not the same as
- * inspecting all: the group is stated before the operator commits to a run.
- */
+// Open every capture of the project as ONE inspection.
 async function selectAllCaptures() {
   if (state.captures.length === 0) return;
   const ids = state.captures.map((capture) => capture.id);
@@ -2794,13 +2492,7 @@ async function selectAllCaptures() {
   }
 }
 
-/**
- * Fall back to a single photograph.
- *
- * It narrows to the first capture rather than to nothing, because a capture bay
- * with no open photograph has no inspection to run and no caption to show, which
- * reads as a broken screen instead of a cleared selection.
- */
+// Fall back to a single photograph.
 async function clearCaptureSelection() {
   const first = state.captures[0];
   if (first === undefined) return;
@@ -2822,9 +2514,7 @@ function showLoaded(label) {
     return;
   }
   $('loaded').hidden = false;
-  // A loaded capture makes the large drop target redundant vertical space; the
-  // Replace action opens the same file picker. The drop zone returns when the
-  // capture is removed.
+  // A loaded capture makes the large drop target redundant vertical space.
   $('drop').hidden = true;
   const image = $('capture-image');
   image.src = '/api/capture-image/' + encodeURIComponent(state.currentCaptureId);
@@ -2833,47 +2523,12 @@ function showLoaded(label) {
   image.classList.toggle('img-flip180', capture !== undefined && displayNeedsFlip(capture.exifOrientation));
 }
 
-/**
- * Whether this capture must be DISPLAYED rotated 180 degrees.
- *
- * The pipeline stores orientation-normalized bytes (EXIF tag rewritten to 1,
- * pixels untouched), so the browser paints exactly the pixels the model saw and
- * every coordinate lives in one space. For most re-oriented files that is the
- * whole fix: the five dataset images tagged orientation 6 ('007', '009', '015',
- * '017', '021') carry pixels that are ALREADY upright — their tag was stale, so
- * displaying the stored pixels as-is is what makes them upright.
- *
- * Orientation 3 is the measured exception (dataset '004' and '027'): their tags
- * were accurate and the stored pixels really are 180 degrees from the scene, so
- * tag normalization alone leaves them upside down. The display — and only the
- * display — is rotated back here, and renderOverlay maps every evidence box
- * through the same 180-degree flip, so a genuine box stays attached to the
- * correct physical region. No byte is re-encoded and the model's coordinate
- * space is untouched: the model still reads the same normalized bytes it is
- * given everywhere else.
- *
- * Keyed on the ORIGINAL orientation the server records per capture. Orientation
- * 4 (upside-down mirror) is grouped with 3 because both are axis-preserving
- * 180-degree display rotations; no dataset image carries it. Axis-swapping
- * orientations (5-8) are deliberately NOT honoured at display time: this
- * dataset's tags of that class were measured stale, and honouring them would
- * rotate upright images back to sideways. Revisit per file if the dataset ever
- * gains images whose 5-8 tags are proven accurate.
- */
+// Whether this capture must be DISPLAYED rotated 180 degrees.
 function displayNeedsFlip(orientation) {
   return orientation === 3 || orientation === 4;
 }
 
-/**
- * Select a capture WITHOUT running the model.
- *
- * Selecting is a view change. It used to post to /api/run, which spent a real
- * vision inference on every click, burned provider quota, and reported a fresh
- * "result" for a capture nobody asked to inspect - while the documented flow is
- * select, then inspect. The selection endpoint returns the whole workspace, so
- * a capture that was already inspected comes back with its result and its human
- * verifications intact.
- */
+// Select a capture WITHOUT running the model.
 async function loadCapture(captureId) {
   state.activeId = null;
   state.openIds.clear();
@@ -2881,8 +2536,6 @@ async function loadCapture(captureId) {
   notify('');
   try {
     // Selecting one row opens exactly that photograph as its own inspection.
-    // Selecting several is done by adding photos, not by clicking rows, so
-    // there is no ambiguous multi-select state to explain here.
     applyWorkspace(await post('/api/captures/select', { captureId: captureId }));
     renderWorkspace();
     const inspected = state.view !== null && state.view.outcome !== 'PENDING';
@@ -2898,13 +2551,7 @@ async function loadCapture(captureId) {
   }
 }
 
-/**
- * Upload one or more photographs into the OPEN inspection.
- *
- * Sequential, and the status line says so, because that is literally what
- * happens: each file is its own request and its own vision call later. A
- * multi-file picker that silently took files[0] is the defect this replaces.
- */
+// Upload one or more photographs into the OPEN inspection.
 async function uploadFiles(files) {
   if (!files || files.length === 0) return;
   const list = Array.prototype.slice.call(files);
@@ -2927,8 +2574,6 @@ async function uploadFiles(files) {
       const payload = await body.json();
       if (!body.ok) {
         // A closed gate is one refusal for the whole batch, not one per file.
-        // Repeating it twelve times would bury the single actionable message
-        // and read as twelve separate problems.
         if (payload.error === 'REVIEWER_REQUIRED') {
           error.textContent = payload.message || t('gate.reason');
           error.hidden = false;
@@ -2962,9 +2607,7 @@ async function uploadFiles(files) {
   if (lastPayload !== null) {
     showLoaded(lastPayload.capture ? lastPayload.capture.label : '');
   }
-  // Duplicates are reported by the server, so the operator learns that two of
-  // their three photographs were the same frame rather than wondering why only
-  // two were analysed.
+  // Duplicates are reported by the server, so the operator learns that two of their three photographs were the same frame.
   const duplicates = state.duplicateCaptureIds || [];
   if (duplicates.length > 0) {
     notify(fillText(t('imgs.duplicates'), { count: duplicates.length, total: accepted + duplicates.length }), 'bad');
@@ -2982,13 +2625,7 @@ async function uploadFile(file) {
   return uploadFiles(file === undefined ? [] : [file]);
 }
 
-/**
- * Run the inspection.
- *
- * Only a genuinely COMPLETED run advances to Evidence. A failed or empty run
- * leaves the operator on the message that explains what happened, rather than
- * on an empty evidence panel that reads like a working inspection.
- */
+// Run the inspection. Only a genuinely COMPLETED run advances to Evidence.
 async function runInspection() {
   if (state.running) return;
   state.running = true;
@@ -3010,9 +2647,7 @@ async function runInspection() {
   setStatus(fillText(t('run.brief'), { count: photos.length }), 'working');
   notify(fillText(t('run.notify'), { count: photos.length }));
 
-  // An honest elapsed clock. NOT a fake progress bar: there is no way to know
-  // how far through a vision call we are, so the UI must not invent one. The
-  // counts in the message are real: N vision calls, then one reasoning call.
+  // An honest elapsed clock.
   const startedAt = Date.now();
   const tick = setInterval(() => {
     const secs = Math.round((Date.now() - startedAt) / 1000);
@@ -3034,8 +2669,7 @@ async function runInspection() {
       const origin = view.inferenceOrigin;
       const took = Math.round((Date.now() - startedAt) / 1000);
       state.lastRunSecs = took;
-      // State the provenance of the result explicitly. "Complete" alone would
-      // be ambiguous between a live call, a cache hit and a fixture.
+      // State the provenance of the result explicitly.
       const how = origin === 'CACHED'
         ? t('origin.cached')
         : origin === 'DEMO_FIXTURE'
@@ -3047,12 +2681,7 @@ async function runInspection() {
         'good',
       );
 
-      // Report BOTH stages, and say plainly if one of them produced nothing. A
-      // silent reasoning failure here would leave the judge believing Nemotron
-      // contributed when it did not.
-      // Truthfulness about partial failure comes BEFORE the pleasant summary.
-      // An inspection over 3 photos where 1 failed is not a clean pass, and the
-      // operator must hear which photograph was skipped and why.
+      // Report BOTH stages, and say plainly if one of them produced nothing.
       const failedImages = Array.isArray(view.images)
         ? view.images.filter((image) => image.status === 'FAILED')
         : [];
@@ -3110,8 +2739,7 @@ async function runInspection() {
       }
     } else {
       state.lastRunSecs = null;
-      // Distinguish WHY it failed. A provider outage, a malformed model answer
-      // and an empty-but-valid answer are three different operational problems.
+      // Distinguish WHY it failed.
       setLamp('problem', 'Inspection did not complete');
       const why = view.failure !== null
         ? describeFailure(view.failure.kind, view.failure.message)
@@ -3125,9 +2753,7 @@ async function runInspection() {
     }
     renderAll();
   } catch (error) {
-    // A closed reviewer gate is not a provider failure and must not read as
-    // one: the run never reached a model, and no evidence was produced. Say so,
-    // and route to the one action that opens the gate.
+    // A closed reviewer gate is not a provider failure and must not read as one: the run never reached a model, and no.
     if (error.code === 'REVIEWER_REQUIRED') {
       setLamp('problem', 'REVIEWER REQUIRED');
       setStatus(t('gate.reason'), 'bad');
@@ -3135,10 +2761,7 @@ async function runInspection() {
       openReviewerModal();
       return;
     }
-    // A stale or foreign capture selection is application state, not a model
-    // failure: the run never reached a provider, so it must not read as one.
-    // Show the server's own words and refresh the workspace, which carries the
-    // reconciled selection, instead of leaving the deleted photograph open.
+    // A stale or foreign capture selection is application state, not a model failure: the run never reached a provider, so.
     if (error.code === 'UNKNOWN_CAPTURE' || error.code === 'NOT_OWNED'
       || error.code === 'UNKNOWN_PROJECT' || error.code === 'NO_ACTIVE_PROJECT'
       || error.code === 'TOO_MANY_IMAGES' || error.code === 'no capture selected'
@@ -3165,24 +2788,22 @@ async function runInspection() {
   }
 }
 
-/**
- * Map a provider failure kind to an operator-facing sentence.
- *
- * Each kind is a different operational problem, so each gets its own message
- * rather than one generic "something went wrong".
- */
+// Map a provider failure kind to an operator-facing sentence.
 function describeFailure(kind, message) {
-  // Routed through the catalog by failure kind, so a failure notice speaks the
-  // operator's language. An unrecognised kind falls through to the raw message
-  // rather than being invented into a sentence that never happened.
+  // Routed through the catalog by failure kind, so a failure notice speaks the operator's language.
   switch (kind) {
     case 'TIMEOUT':
+      return t('fail.timeout');
     case 'UNAVAILABLE':
+      return t('fail.unavailable');
     case 'AUTHENTICATION':
+      return t('fail.authentication');
     case 'RATE_LIMITED':
+      return t('fail.rateLimited');
     case 'NOT_CONFIGURED':
+      return t('fail.notConfigured');
     case 'MALFORMED_RESPONSE':
-      return t('fail.' + kind.toLowerCase());
+      return t('fail.malformed');
     default:
       return t('fail.error') + ' (' + kind + '): ' + message;
   }
@@ -3236,17 +2857,19 @@ async function applyExpected(presetId) {
         project: projName,
         count: prevReviews,
       });
+      renderExpected();
+      renderAll();
       setLamp('ready', t('ref.invalidatedLamp'));
       setStatus(invMsg, null);
       notify(invMsg, 'good');
     } else {
+      renderExpected();
+      renderAll();
       notify(
         'Reference applied. Re-run the inspection to compare against it.',
         'good'
       );
     }
-    renderExpected();
-    renderAll();
   } catch (error) {
     notify(error.message, 'bad');
   }
@@ -3269,20 +2892,22 @@ async function applyExpectedEdits() {
         project: projName,
         count: prevReviews,
       });
+      renderExpected();
+      renderAll();
       setLamp('ready', t('ref.invalidatedLamp'));
       setStatus(invMsg, null);
       notify(invMsg, 'good');
     } else {
+      renderExpected();
+      renderAll();
       notify('Reference updated. Re-run the inspection to recompute the comparison.', 'good');
     }
-    renderExpected();
-    renderAll();
   } catch (error) {
     notify(error.message, 'bad');
   }
 }
 
-/** Project selector: which project is active, and what can be done to it. */
+// Project selector: which project is active, and what can be done to it.
 function renderProjects() {
   setText('proj-name', state.project ? state.project.name : 'No project');
   $('proj-delete').disabled = state.project === null;
@@ -3319,11 +2944,17 @@ function renderProjects() {
 }
 
 function setMenu(open) {
-  $('proj-menu').hidden = !open;
+  const menu = $('proj-menu');
+  const wasOpen = !menu.hidden;
+  menu.hidden = !open;
   $('proj-btn').setAttribute('aria-expanded', String(open));
+  // Closing the menu (Escape, a switch, a cancel) must never strand keyboard focus inside an element that is now hidden.
+  if (wasOpen && !open && document.activeElement && menu.contains(document.activeElement)) {
+    $('proj-btn').focus();
+  }
 }
 
-/** Re-render everything that depends on which project and capture are active. */
+// Re-render everything that depends on which project and capture are active.
 function renderWorkspace() {
   renderProjects();
   renderFixtures();
@@ -3392,12 +3023,7 @@ async function submitProjectModal(event) {
   }
 }
 
-/**
- * Deletion is confirmed before anything is removed.
- *
- * The dialog names exactly what goes, because "delete project" is destructive and
- * an operator should never have to guess whether their captures survive.
- */
+// Deletion is confirmed before anything is removed.
 function openDeleteModal(kind, subject) {
   state.pendingDelete = { kind: kind, subject: subject };
   const titles = { project: 'Delete project', capture: 'Delete capture', preset: 'Delete reference' };
@@ -3463,7 +3089,7 @@ async function commitDelete() {
   }
 }
 
-/** One editable expected-element row inside the reference dialog. */
+// One editable expected-element row inside the reference dialog.
 function presetRow(item) {
   const row = el('div', 'preset-item');
 
@@ -3577,13 +3203,7 @@ async function submitPresetModal(event) {
   }
 }
 
-/**
- * Report a boot failure honestly and VISIBLY.
- *
- * #status lives inside the Inspect bay, so writing an error there is invisible
- * to anyone sitting on Capture or Evidence. #notice sits above the stage and is
- * always on screen, so a real failure can never be hidden behind a tab.
- */
+// Report a boot failure honestly and VISIBLY.
 function reportBootFailure(error) {
   const isNetwork = error instanceof TypeError || /fetch|network|Failed to fetch/i.test(error.message);
   const what = isNetwork
@@ -3594,18 +3214,7 @@ function reportBootFailure(error) {
   notify(what, 'bad');
 }
 
-/**
- * The inspection-language control.
- *
- * Populated from the server's own vocabulary, labelled by endonym, and
- * keyboard-operable as a native <select>. No flags: a flag names a country, and
- * one flag cannot express four languages.
- *
- * On change: remember the preference, re-render, and stop. There is no request
- * here and there must never be one. Every language of this inspection already
- * arrived with the payload, so switching cannot re-run MiniCPM, cannot re-run
- * Nemotron, cannot touch Nebius, and cannot alter a single canonical fact.
- */
+// The inspection-language control.
 function wireLanguage() {
   const select = $('lang-select');
   if (select === null) return;
@@ -3614,8 +3223,7 @@ function wireLanguage() {
 
   while (select.firstChild) select.removeChild(select.firstChild);
   for (const option of I18N.languages) {
-    // Each option carries its own lang/dir so a screen reader and the native
-    // picker both announce the language correctly inside an RTL list.
+    // Each option carries its own lang/dir so a screen reader and the native picker both announce the language correctly.
     const node = document.createElement('option');
     node.value = option.code;
     node.textContent = option.label;
@@ -3628,12 +3236,10 @@ function wireLanguage() {
   select.addEventListener('change', (event) => {
     const chosen = event.target.value;
     const match = I18N.languages.filter((l) => l.code === chosen)[0];
-    // An unsupported value falls back to English rather than rendering a
-    // half-translated surface.
+    // An unsupported value falls back to English rather than rendering a half-translated surface.
     state.lang = match === undefined ? I18N.defaultLanguage : match.code;
     storeLanguage(state.lang);
-    // A new language shows its translation again, not a stale per-card
-    // "show original" choice from the previous one.
+    // A new language shows its translation again, not a stale per-card "show original" choice from the previous one.
     state.trOriginal.clear();
     // Presentation only: no request, deliberately.
     renderAll();
@@ -3735,8 +3341,7 @@ function wire() {
   });
 
   $('expected-apply').addEventListener('click', () => {
-    // Apply whatever is currently in the editor: an edited count, or the
-    // selected preset when nothing has been touched.
+    // Apply whatever is currently in the editor: an edited count, or the selected preset when nothing has been touched.
     const edited = collectExpected();
     const preset = $('expected-preset').value;
     const dirty = edited !== null && state.expected !== null
@@ -3746,11 +3351,9 @@ function wire() {
   });
   $('expected-preset').addEventListener('change', () => applyExpected($('expected-preset').value));
 
-  // Evidence geometry is positioned from the rendered image size, so the
-  // overlay has to be recomputed whenever the image loads or the window resizes.
+  // Evidence geometry is positioned from the rendered image size, so the overlay has to be recomputed whenever the image.
   $('evidence-image').addEventListener('load', renderOverlay);
-  // A failed image must SAY SO. A silent broken-image icon is indistinguishable
-  // from an empty capture, which is how this fault hid in the first place.
+  // A failed image must SAY SO.
   $('evidence-image').addEventListener('error', () => {
     setStatus('The capture image could not be loaded from the server.', 'bad');
     notify('Capture image failed to load. The capture record is intact; re-select the capture.', 'bad');
@@ -3770,13 +3373,10 @@ async function boot() {
     renderExpected();
 
     renderWorkspace();
-    // The dataset index is separate from the workspace payload because it lists
-    // every file. Fetched after the workspace so the first paint is never blocked
-    // on a directory scan.
+    // The dataset index is separate from the workspace payload because it lists every file.
     await loadDataset();
 
-    // The lamp must describe the restored state, not a generic idle: a capture
-    // with open findings is not "capture ready", it is awaiting review.
+    // The lamp must describe the restored state, not a generic idle: a capture with open findings is not "capture ready".
     const view = state.view;
     const pending = view !== null && view.counters ? view.counters.pending : 0;
     if (view !== null && view.outcome !== 'PENDING' && view.outcome !== 'FAILED') {
@@ -3788,8 +3388,7 @@ async function boot() {
       setLamp('ready', 'Capture ready');
     }
     const hasDataset = state.dataset !== null && state.dataset.present;
-    // The status line must describe what is actually on screen: a restored
-    // inspection is not an empty "choose a capture" state.
+    // The status line must describe what is actually on screen: a restored inspection is not an empty "choose a capture" state.
     const restored = state.view !== null && state.view.outcome !== 'PENDING'
       && state.view.outcome !== 'FAILED';
     setStatus(
@@ -3803,10 +3402,7 @@ async function boot() {
       null
     );
   } catch (error) {
-    // A render fault and a transport fault must not both claim the server is
-    // unreachable. The earlier version said "Could not reach the inspector" for
-    // ANY throw, including a bug in rendering, which sent me looking at the
-    // network when the real fault was in this file.
+    // A render fault and a transport fault must not both claim the server is unreachable.
     reportBootFailure(error);
   }
 }

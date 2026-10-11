@@ -1,12 +1,4 @@
-/**
- * Uploaded capture validation tests.
- *
- * An operator upload must be a genuine PNG or JPEG before it is stored or sent
- * to the provider. These lock in that the header, not the filename or the
- * client-declared type, decides acceptance: a renamed text file, a truncated
- * upload and an empty file are each refused with their own reason, and a real
- * image yields real dimensions.
- */
+// Uploaded capture validation tests.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,11 +9,7 @@ import { INDEX_HTML, APP_JS, APP_CSS } from '../src/ui-assets.ts';
 
 const REAL_PNG = demoCaptures()[0]!.bytes;
 
-/**
- * The client assets are template strings, so `tsc` cannot see a syntax error
- * inside them. Parsing the script here is what catches the nested-function and
- * stray-parenthesis defects that previously shipped as a silently dead UI.
- */
+// The client assets are template strings, so `tsc` cannot see a syntax error inside them.
 test('the inline app script parses', () => {
   assert.doesNotThrow(() => new vm.Script(APP_JS));
 });
@@ -47,8 +35,7 @@ test('the workflow nav is a real tablist wired to real panels', () => {
     assert.match(INDEX_HTML, new RegExp('role="tabpanel"'), 'panels need role="tabpanel"');
   }
 
-  // Exactly one tab starts selected; the rest are reachable only via the
-  // roving tabindex that selectStep maintains.
+  // Exactly one tab starts selected; the rest are reachable only via the roving tabindex that selectStep maintains.
   const selected = INDEX_HTML.match(/aria-selected="true"/g) || [];
   assert.equal(selected.length, 1);
   assert.equal((INDEX_HTML.match(/tabindex="-1"/g) || []).length, names.length - 1);
@@ -93,8 +80,7 @@ test('an inspection only advances to Evidence when it actually completed', () =>
 });
 
 test('status messages are mirrored outside the tab panels', () => {
-  // #status lives in the Inspect panel, so an upload result on the Capture tab
-  // would otherwise be invisible.
+  // #status lives in the Inspect panel, so an upload result on the Capture tab would otherwise be invisible.
   assert.match(INDEX_HTML, /id="notice"[^>]*role="status"/);
   assert.match(APP_JS, /\$\('notice'\)/);
 });
@@ -150,8 +136,7 @@ test('refuses a capture over the size ceiling', () => {
 });
 
 test('accepts a .jpeg extension as a JPEG', () => {
-  // The bytes are a PNG, but the extension drives the declared media type and
-  // the header check is what authorises storage, so this must still resolve.
+  // The bytes are a PNG, but the extension drives the declared media type and the header check is what authorises.
   const result = acceptCapture({ bytes: REAL_PNG, filename: 'photo.jpeg' });
   assert.equal(result.ok, true);
   if (!result.ok) return;

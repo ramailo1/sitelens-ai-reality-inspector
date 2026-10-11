@@ -1,8 +1,4 @@
-/**
- * Provider and inspector tests: missing API key, Nebius HTTP failures,
- * malformed model output, timeout, request validation, and human verification.
- * fetchImpl is always injected, so no test performs real network I/O.
- */
+// Provider and inspector tests: missing API key, Nebius HTTP failures, malformed model output, timeout, request.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,7 +23,7 @@ const IMAGE = {
   captureId: 'cap_test_001',
 };
 
-/** Build a provider with a stubbed fetch that returns one HTTP response. */
+// Build a provider with a stubbed fetch that returns one HTTP response.
 function makeProvider(options: {
   status?: number;
   body?: string;
@@ -52,7 +48,7 @@ function makeProvider(options: {
   return { provider, calls };
 }
 
-/** A valid OpenAI-compatible envelope wrapping the given content string. */
+// A valid OpenAI-compatible envelope wrapping the given content string.
 function envelope(content: string): string {
   return JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] });
 }
@@ -256,11 +252,9 @@ test('sends the credential as a bearer header and the image as a data URL', asyn
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.headers['Authorization'], 'Bearer test-key-1234567890');
   const sent = JSON.parse(calls[0]?.body ?? '{}');
-  // The default model is asserted via the exported constant rather than
-  // hard-coded, so changing it (with the documented evidence) is one edit.
+  // The default model is asserted via the exported constant rather than hard-coded, so changing it (with the documented.
   assert.equal(sent.model, DEFAULT_NEBIUS_MODEL);
-  // The response must be bounded, or a reasoning model can burn the whole
-  // deadline and the inspector hangs instead of failing closed.
+  // The response must be bounded, or a reasoning model can burn the whole deadline and the inspector hangs instead of failing closed.
   assert.ok(typeof sent.max_tokens === 'number' && sent.max_tokens > 0);
   const userMessage = sent.messages[1];
   assert.equal(userMessage.content[1].type, 'image_url');
@@ -268,26 +262,15 @@ test('sends the credential as a bearer header and the image as a data URL', asyn
 });
 
 test('the default model is the bake-off winner, not a text-only NVIDIA id', () => {
-  // Locked in because it is an evidence-backed finding, not a preference. A
-  // controlled bake-off ran the same five real construction photographs through
-  // all three vision-capable models with a byte-identical prompt and schema, at
-  // max_tokens=3000:
-  //
-  //   gemma-3-27b-it     2/5 usable images,  5 valid elements, avg 5897 ms
-  //   Qwen3.8-27B        1/5 usable images,  5 valid elements, avg 12863 ms
-  //   MiniCPM-V-4_5      4/5 usable images, 16 valid elements, avg  6228 ms
-  //
-  // MiniCPM won on inspection yield and comparison usefulness, not on speed.
+  // Locked in because it is an evidence-backed finding, not a preference.
   assert.equal(DEFAULT_NEBIUS_MODEL, 'openbmb/MiniCPM-V-4_5');
-  // It is still a real call on real imagery, just not an NVIDIA one, so the
-  // product must never claim hackathon eligibility.
+  // It is still a real call on real imagery, just not an NVIDIA one, so the product must never claim hackathon eligibility.
   assert.equal(classifyEligibility({ provider: 'nebius-nvidia', model: DEFAULT_NEBIUS_MODEL }),
     ELIGIBILITY_NOT_ELIGIBLE);
 });
 
 test('every NVIDIA model in the catalogue is classified text-only by evidence, not by name', () => {
-  // An NVIDIA id is NOT_VERIFIED (intended for the requirement, not proven
-  // callable). Eligibility follows the model that actually ran.
+  // An NVIDIA id is NOT_VERIFIED (intended for the requirement, not proven callable).
   for (const nvidia of [
     'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
     'nvidia/nemotron-3-super-120b-a12b',

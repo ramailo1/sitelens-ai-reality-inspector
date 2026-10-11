@@ -1,23 +1,4 @@
-/**
- * Document direction: Arabic RTL, Chinese LTR, menus and navigation in both.
- *
- * Translating labels was never the whole job: until this change the document
- * element kept `lang="en"` and no `dir` at all, so the header, the project
- * menu, dialogs and every other chrome outside the three result bays stayed
- * left-to-right in every language. These tests prove, against the REAL client
- * script and the REAL stylesheet:
- *
- *   - the locale-to-direction mapping (ar is the only RTL language);
- *   - document lang/dir update immediately on switch, with no reload and no
- *     dependence on browser defaults;
- *   - chrome placement is direction-aware (logical properties, explicit
- *     mirrors only where geometry is genuinely directional);
- *   - directional indicators mirror while imagery, evidence geometry and
- *     status symbols do not;
- *   - technical Latin runs stay readable inside Arabic;
- *   - switching repeatedly accumulates no stale layout state and costs no
- *     request.
- */
+// Document direction: Arabic RTL, Chinese LTR, menus and navigation in both.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,9 +11,7 @@ import {
 } from '../src/localization.ts';
 import { APP_CSS, APP_JS, INDEX_HTML } from '../src/ui-assets.ts';
 
-/* ------------------------------------------------------------------ *
- * Mapping: one RTL language, and it is Arabic.
- * ------------------------------------------------------------------ */
+// Mapping: one RTL language, and it is Arabic.
 
 test('exactly Arabic is right-to-left and the document codes match', () => {
   assert.deepEqual({ ...LANGUAGE_DIRECTION }, { en: 'ltr', fr: 'ltr', ar: 'rtl', zh: 'ltr' });
@@ -40,10 +19,7 @@ test('exactly Arabic is right-to-left and the document codes match', () => {
   assert.deepEqual([...INSPECTION_LANGUAGES], ['en', 'fr', 'ar', 'zh']);
 });
 
-/* ------------------------------------------------------------------ *
- * Harness: the real client script against a stub document that, like a
- * real one, has a documentElement carrying lang and dir.
- * ------------------------------------------------------------------ */
+// Harness: the real client script against a stub document that, like a real one, has a documentElement carrying lang and dir.
 
 interface HNode {
   tagName: string;
@@ -178,9 +154,7 @@ function directionHarness() {
   };
 }
 
-/* ------------------------------------------------------------------ *
- * Dynamic document updates.
- * ------------------------------------------------------------------ */
+// Dynamic document updates.
 
 test('switching language updates the document element immediately', () => {
   const h = directionHarness();
@@ -218,14 +192,11 @@ test('an unknown language falls back to English on the document, not to nothing'
   const h = directionHarness();
   h.setLang('de');
   h.apply();
-  // t() falls back per key and the option lookup falls back for dir; the
-  // document must end up English LTR rather than half-set.
+  // t() falls back per key and the option lookup falls back for dir.
   assert.equal(h.root.getAttribute('dir'), 'ltr');
 });
 
-/* ------------------------------------------------------------------ *
- * Menus and navigation under both directions.
- * ------------------------------------------------------------------ */
+// Menus and navigation under both directions.
 
 test('the project menu opens with the same content in RTL and LTR', () => {
   for (const code of ['ar', 'zh'] as const) {
@@ -251,8 +222,7 @@ test('the project menu opens with the same content in RTL and LTR', () => {
 });
 
 test('menu and dialog anchoring is direction-aware in the stylesheet', () => {
-  // Absolutely positioned chrome anchors to the inline start, so the project
-  // menu and the capture disclosure open under their controls in RTL too.
+  // Absolutely positioned chrome anchors to the inline start, so the project menu and the capture disclosure open under.
   assert.match(APP_CSS, /\.proj-menu\s*\{[^}]*inset-inline-start:\s*0/);
   assert.match(APP_CSS, /\.rig-disclose-list\s*\{[^}]*inset-inline-start:\s*0/);
   assert.doesNotMatch(APP_CSS, /\.proj-menu\s*\{[^}]*\bleft:\s*0/);
@@ -263,10 +233,7 @@ test('menu and dialog anchoring is direction-aware in the stylesheet', () => {
 });
 
 test('the pipeline strip stays connected in both directions', () => {
-  // Dividers live at the inline end with a transparent inline-start leader,
-  // so the four steps read as one strip whether it runs left-to-right or
-  // right-to-left. A physical border-right would stack every divider on the
-  // wrong side in Arabic.
+  // Dividers live at the inline end with a transparent inline-start leader, so the four steps read as one strip whether.
   assert.match(APP_CSS, /\.pipe-step\s*\{[^}]*border-inline-end:/);
   assert.match(APP_CSS, /\.pipe-step:last-child\s*\{\s*border-inline-end:\s*0/);
   assert.doesNotMatch(APP_CSS, /\.pipe-step\s*\{[^}]*border-right:/);
@@ -278,17 +245,13 @@ test('active-item indicators sit at the reading-start edge in both directions', 
   assert.match(APP_CSS, /html\[dir="rtl"\] \.capture-row\[aria-current="true"\] \.capture-main/);
 });
 
-/* ------------------------------------------------------------------ *
- * Directional versus non-directional icons and geometry.
- * ------------------------------------------------------------------ */
+// Directional versus non-directional icons and geometry.
 
 test('only genuinely directional chrome mirrors', () => {
-  // The custom select chevron sits at the inline end; background-position has
-  // no logical form so the RTL mirror is explicit and scoped to selects.
+  // The custom select chevron sits at the inline end.
   assert.match(APP_CSS, /html\[dir="rtl"\] \.field select/);
   assert.doesNotMatch(APP_CSS, /html\[dir="rtl"\][^{]*\.sheet-cal/);
-  // Evidence geometry is pixels, never direction: the overlay math and its
-  // badge offsets contain no direction branching.
+  // Evidence geometry is pixels, never direction: the overlay math and its badge offsets contain no direction branching.
   assert.match(APP_CSS, /\.ev-n\s*\{[^}]*top:\s*-9px;\s*left:\s*-9px/);
   assert.doesNotMatch(APP_JS, /dir === 'rtl' \? [^\n]*flipBox180/);
   assert.match(APP_JS, /function paintedArea\(/);
@@ -307,9 +270,7 @@ test('status and finding accents follow the reading start', () => {
   }
 });
 
-/* ------------------------------------------------------------------ *
- * Mixed technical content and long labels.
- * ------------------------------------------------------------------ */
+// Mixed technical content and long labels.
 
 test('technical values are marked for LTR isolation in the markup', () => {
   for (const id of ['hdr-model', 'hdr-reasoner', 'pipe-vision-model', 'pipe-reason-model', 'reason-model']) {
@@ -339,15 +300,12 @@ test('long Arabic labels wrap instead of clipping at narrow widths', () => {
   assert.match(APP_CSS, /overflow-wrap:\s*anywhere/);
   assert.match(APP_CSS, /@media \(max-width: 900px\)/);
   assert.match(APP_CSS, /@media \(max-width: 820px\)/);
-  // The header never grows with content: counts, not names, plus an
-  // absolutely positioned disclosure list that cannot widen the strip.
+  // The header never grows with content: counts, not names, plus an absolutely positioned disclosure list that cannot widen the strip.
   assert.match(APP_CSS, /\.rig-disclose-list\s*\{[^}]*position:\s*absolute/);
   assert.doesNotMatch(INDEX_HTML, /id="lang-note"/);
 });
 
-/* ------------------------------------------------------------------ *
- * Translation rendering, toggling and honesty in both directions.
- * ------------------------------------------------------------------ */
+// Translation rendering, toggling and honesty in both directions.
 
 test('the translation badge and toggle read correctly in RTL and LTR', () => {
   assert.equal(UI_STRINGS.ar['tr.viewOriginal'], 'عرض الأصل');

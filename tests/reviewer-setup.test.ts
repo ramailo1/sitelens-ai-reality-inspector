@@ -1,13 +1,4 @@
-/**
- * Comprehensive automated tests for Reviewer Identity Setup & Finding Review UX.
- *
- * Verifies:
- * - Reviewer setup via API (configuring name & role, rejecting blank names, updating identity)
- * - Review actions using stored reviewer identity (VERIFIED, NEEDS_REVIEW, REJECTED)
- * - Behavior when reviewer identity is missing (refuses review with REVIEWER_NOT_CONFIGURED)
- * - Persistence of reviewer identity across process reloads
- * - Workspace/project isolation of reviewer identity
- */
+// Comprehensive automated tests for Reviewer Identity Setup & Finding Review UX.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -116,17 +107,13 @@ test('reviewer setup: reviewer identity can be changed later', async () => {
 
 test('review actions: nothing that creates evidence is possible without a reviewer identity', async () => {
   await withTestServer({}, async (call) => {
-    // No reviewer has been named. Every route that would produce or attribute
-    // evidence must refuse, and must refuse BEFORE the work happens.
+    // No reviewer has been named.
     const run = await call.json('POST', '/api/run', {});
     assert.equal(run.status, 409);
     assert.equal(run.body.error, 'REVIEWER_REQUIRED');
     assert.match(run.body.message, /inspection reviewer/i);
 
-    // Refusing to run must leave nothing behind. The session still reports its
-    // seeded PENDING placeholder, which is what it was before the refused call;
-    // what must NOT appear is any finding, provenance or inference a run would
-    // have produced.
+    // Refusing to run must leave nothing behind.
     const session = await call.json('GET', '/api/session');
     assert.equal(session.body.outcome, 'PENDING',
       'a refused run must not produce a result of any kind');
@@ -147,9 +134,6 @@ test('review actions: nothing that creates evidence is possible without a review
 test('review actions: a reviewer named in the request body does not open the gate', async () => {
   await withTestServer({}, async (call) => {
     // The attribution this product exists to protect is the reviewer's NAME.
-    // If a request could supply its own, any caller could attribute a decision
-    // to a person the project never recorded, so identity comes from the
-    // project alone and a body-supplied name is refused with it.
     const res = await call.json('POST', '/api/review-finding', {
       findingId: 'anything',
       decision: 'VERIFIED',
@@ -213,11 +197,7 @@ test('review actions: NEEDS REVIEW and REJECTED use stored reviewer identity', a
 test('persistence: reviewer identity survives server restart', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sitelens-reviewer-test-'));
   try {
-    // A real project, not the seeded demo one. Demo projects are re-seeded
-    // rather than restored, so a reviewer named on one is expected to be gone.
-    // This used to name the demo project and appear to pass, but only because
-    // the persistence directory option was being ignored and it was reading the
-    // repository's own data/ directory.
+    // A real project, not the seeded demo one.
     const persistence1 = new WorkspacePersistence({ directory: dir });
     let findingId = '';
     await withTestServer({ persistence: persistence1 }, async (call) => {
@@ -228,9 +208,7 @@ test('persistence: reviewer identity survives server restart', async () => {
       const up = await call.raw('POST', '/api/upload?name=site.png&type=image/png', PNG, 'application/octet-stream');
       assert.equal(up.status, 200, 'the capture must be stored in the named directory');
       const uploaded = JSON.parse(up.body.toString('utf8')).capture.id;
-      // Select it explicitly. Uploading appends to the open group, but a project
-      // created here starts with no selection at all, and a run with nothing
-      // open is refused before it reaches the model.
+      // Select it explicitly.
       const selected = await call.json('POST', '/api/captures/select', { captureId: uploaded });
       assert.equal(selected.status, 200);
 
@@ -254,8 +232,7 @@ test('persistence: reviewer identity survives server restart', async () => {
         name: 'Takou Rah',
         role: 'Site Engineer',
       });
-      // The gate state must be restored too, or the banner would claim the gate
-      // is shut after a restart that has just shown a named reviewer.
+      // The gate state must be restored too, or the banner would claim the gate is shut after a restart that has just shown a.
       assert.equal(ws.body.reviewerGate.required, false);
       assert.ok(ws.body.view);
       const reviewed = ws.body.view.inspectionFindings.find((f: any) => f.id === findingId);
@@ -276,8 +253,7 @@ test('persistence: the named directory is the only one written', async () => {
       await call.json('POST', '/api/projects', { name: 'Isolated' });
       await call.json('POST', '/api/reviewer', { name: 'Takou Rah' });
     });
-    // The point of honouring the option: a test that named somewhere else must
-    // not have written to the repository's own data/ directory.
+    // The point of honouring the option: a test that named somewhere else must not have written to the repository's own data/ directory.
     assert.ok(existsSync(join(dir, 'workspace.json')),
       'state must be written to the directory the caller named');
   } finally {
@@ -357,4 +333,3 @@ test('historical attribution: changing project reviewer does not rewrite previou
     assert.equal(finalA.review.reviewer, 'Reviewer One · Inspector 1');
   });
 });
-

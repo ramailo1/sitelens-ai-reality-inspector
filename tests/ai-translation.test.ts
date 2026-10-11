@@ -1,13 +1,4 @@
-/**
- * AI observation / finding / reasoning localization.
- *
- * The header must be compact (no long presentation-only disclaimer as visible
- * text); the hint survives only as a tooltip. Model-authored English must be
- * understandable in the selected language through an offline, deterministic
- * translation memory, with the original always preserved and reachable via a
- * View-original control, honest fallback when the memory has no entry, and no
- * mutation of inspection truth.
- */
+// AI observation / finding / reasoning localization.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,9 +28,7 @@ import { defaultExpectedState } from '../src/expected-state.ts';
 import { demoCaptures } from '../src/captures.ts';
 import { APP_CSS, APP_JS, INDEX_HTML } from '../src/ui-assets.ts';
 
-/* ------------------------------------------------------------------ *
- * Fixtures: one real inspection with stubbed network, no paid calls.
- * ------------------------------------------------------------------ */
+// Fixtures: one real inspection with stubbed network, no paid calls.
 
 const VISION_BODY = {
   choices: [
@@ -169,16 +158,13 @@ async function runInspection() {
   return { session, view, visionCalls: vision.calls, reasonCalls: reasoning.calls };
 }
 
-/* ------------------------------------------------------------------ *
- * Header: compact, no long disclaimer as visible text.
- * ------------------------------------------------------------------ */
+// Header: compact, no long disclaimer as visible text.
 
 test('the long presentation-only disclaimer is not visible header text', () => {
   assert.doesNotMatch(INDEX_HTML, /id="lang-note"/);
   assert.doesNotMatch(INDEX_HTML, /class="lang-note"/);
   assert.doesNotMatch(APP_CSS, /\.lang-note\s*\{/);
   // Neither the old nor the current wording may appear as visible header copy.
-  // The hint survives only inside a title attribute (tooltip).
   const withoutTitles = INDEX_HTML.replace(/title="[^"]*"/g, '');
   assert.doesNotMatch(withoutTitles, /Presentation only/);
   assert.doesNotMatch(withoutTitles, /unchangeable/);
@@ -197,16 +183,13 @@ test('the header keeps its identity, navigation, status and language control', (
 });
 
 test('the identity strip stays compact and responsive', () => {
-  // No visible note element that could grow the strip; the control is
-  // inline-flex with a small gap, and the meta strip hides on narrow widths.
+  // No visible note element that could grow the strip.
   assert.match(APP_CSS, /\.lang-sel\s*\{[^}]*display:\s*inline-flex/);
   assert.match(APP_CSS, /@media \(max-width: 900px\)/);
   assert.match(APP_CSS, /\.rig-meta\s*\{\s*display:\s*none/);
 });
 
-/* ------------------------------------------------------------------ *
- * Memory: exact, honest, cached, no invention.
- * ------------------------------------------------------------------ */
+// Memory: exact, honest, cached, no invention.
 
 test('known model sentences translate in all three languages', () => {
   clearModelTranslationCache();
@@ -268,16 +251,13 @@ test('a changed source never serves an outdated translation', () => {
   const a = translateModelText('Walk the trench edge and confirm the barrier is in place.', 'fr');
   assert.equal(a.translated, true);
   const b = translateModelText('Walk the trench edge and confirm the barrier is in place! ', 'fr');
-  // Trailing punctuation/whitespace changes the key only by trim; an actually
-  // different sentence misses the memory and falls back honestly.
+  // Trailing punctuation/whitespace changes the key only by trim.
   const c = translateModelText('Walk the trench edge tomorrow and confirm the barrier.', 'fr');
   assert.equal(c.translated, false);
   assert.equal(c.text, 'Walk the trench edge tomorrow and confirm the barrier.');
 });
 
-/* ------------------------------------------------------------------ *
- * Inspection integration: shipped with the view, no new inference.
- * ------------------------------------------------------------------ */
+// Inspection integration: shipped with the view, no new inference.
 
 test('the inspection ships model translations without extra inference', async () => {
   clearModelTranslationCache();
@@ -288,8 +268,7 @@ test('the inspection ships model translations without extra inference', async ()
   assert.equal(reasonBefore, 1);
   assert.ok(view.modelTranslations !== undefined && view.modelTranslations !== null);
 
-  // The conduit observation, the excavation finding and the reasoning summary
-  // all resolve in French.
+  // The conduit observation, the excavation finding and the reasoning summary all resolve in French.
   const conduit = 'Embedded electrical conduit is visible along the wall.';
   assert.equal(view.modelTranslations[conduit]?.fr.translated, true);
   assert.match(view.modelTranslations[conduit]?.fr.text ?? '', /conduit électrique encastré/);
@@ -338,8 +317,7 @@ test('the original English stays intact and available', async () => {
 
 test('cached and restored inspections carry the same translations', async () => {
   const { view } = await runInspection();
-  // JSON round-trip stands in for disk persistence: the map is data, so it
-  // survives, and the same source still resolves to the same translation.
+  // JSON round-trip stands in for disk persistence: the map is data, so it survives, and the same source still resolves.
   const restored = JSON.parse(JSON.stringify(view.modelTranslations)) as typeof view.modelTranslations;
   const source = 'Embedded electrical conduit is visible along the wall.';
   assert.equal(restored[source]?.fr.text, view.modelTranslations[source]?.fr.text);
@@ -397,8 +375,7 @@ test('all supported languages resolve consistently', async () => {
 });
 
 test('the client renders translated prose with a view-original control', () => {
-  // Structural guards on the shipped client: the lookup reads the pre-shipped
-  // map, the toggle exists, and the switch still issues no request.
+  // Structural guards on the shipped client: the lookup reads the pre-shipped map, the toggle exists, and the switch.
   assert.match(APP_JS, /function modelTx\(source\)/);
   assert.match(APP_JS, /view\.modelTranslations/);
   assert.match(APP_JS, /function trToggle\(/);

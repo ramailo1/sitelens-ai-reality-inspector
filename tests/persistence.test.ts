@@ -1,15 +1,4 @@
-﻿/**
- * Durable state: what survives a restart, and what must not.
- *
- * The claim this file has to defend is specific. It is not "the app saves
- * things". It is: after a restart, the operator's VERIFIED and REJECTED
- * decisions are still there, and a restored result is never presented as a fresh
- * model call or re-attributed to a model that did not run.
- *
- * A real temporary data directory is used throughout, and the server is actually
- * stopped and a new one started against the same directory, because "the file
- * round-trips" and "the product restores correctly" are different claims.
- */
+﻿// Durable state: what survives a restart, and what must not.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -63,8 +52,7 @@ test('with persistence the store reports the real directory', () => {
     assert.ok(existsSync(fixture.dir) || storage.location.includes('sitelens-data-'));
     assert.ok(storage.location.length > 0);
     assert.match(storage.detail, /written to this directory/);
-    // And it must say what is NOT persisted, or a restored result could be
-    // mistaken for a live inference.
+    // And it must say what is NOT persisted, or a restored result could be mistaken for a live inference.
     assert.match(storage.detail, /NOT persisted/);
   } finally {
     fixture.cleanup();
@@ -72,10 +60,7 @@ test('with persistence the store reports the real directory', () => {
 });
 
 test('an explicit directory option is used, not silently ignored', () => {
-  // The constructor accepted a `directory` and read only the environment, so a
-  // caller passing a temporary directory still wrote to the process default.
-  // A test believing it had isolated its writes was in fact reading and
-  // overwriting the real one.
+  // The constructor accepted a `directory` and read only the environment, so a caller passing a temporary directory still.
   const fixture = tempDataDir();
   const other = tempDataDir();
   try {
@@ -120,8 +105,7 @@ test('the environment is used when no explicit directory is given', () => {
 test('a blank explicit directory falls back to the environment rather than the cwd', () => {
   const fixture = tempDataDir();
   try {
-    // A blank string is not a directory. Resolving it would silently send every
-    // write to the process working directory.
+    // A blank string is not a directory. Resolving it would silently send every write to the process working directory.
     const store = new WorkspacePersistence({
       directory: '   ',
       env: { ...process.env, SITELENS_DATA_DIR: fixture.dir },
@@ -155,8 +139,6 @@ test('a project and its reference survive a restart', () => {
     assert.ok(existsSync(join(fixture.dir, 'workspace.json')), 'state must be written');
 
     // A genuinely new store against the same directory: this is the restart.
-    // `restore()` MUST come before any seeding: seeding persists, and persisting
-    // an empty store would overwrite the state this test is about to prove.
     const second = newStore(fixture.env);
     const report = second.restore();
     if (second.list().length === 0) second.seedDemoProject('Demo', 'Somewhere');
@@ -180,9 +162,7 @@ test('an uploaded capture survives a restart WITH its bytes', () => {
   const fixture = tempDataDir();
   try {
     const first = newStore(fixture.env);
-    // A REAL project, not the generated demo: the demo is deliberately never
-    // persisted, so a capture owned by it could never come back and asserting
-    // otherwise would be asserting the wrong thing.
+    // A REAL project, not the generated demo: the demo is deliberately never persisted, so a capture owned by it could.
     const created = first.create({ name: 'Tower B', location: 'Level 04' });
     assert.equal(created.ok, true);
     if (!created.ok) return;
@@ -246,15 +226,13 @@ test('a human verification survives a restart and stays a human verification', a
   const fixture = tempDataDir();
   try {
     const first = newStore(fixture.env);
-    // A real project: the demo shell is not persisted, so a decision about one
-    // of its captures could not meaningfully survive a restart.
+    // A real project: the demo shell is not persisted, so a decision about one of its captures could not meaningfully survive a restart.
     const created = first.create({ name: 'Tower B', location: 'Level 04' });
     assert.equal(created.ok, true);
     if (!created.ok) return;
     const project = created.value;
 
-    // A REAL uploaded capture, because the whole point of the test is that a
-    // decision about a real image survives, so the image has to be durable too.
+    // A REAL uploaded capture, because the whole point of the test is that a decision about a real image survives, so the.
     const uploaded = first.addCapture({
       id: 'cap_upload_review01',
       label: 'site photo.png',
@@ -279,7 +257,7 @@ test('a human verification survives a restart and stays a human verification', a
     });
     first.persistInspection(uploaded.id);
 
-    // --- restart ---
+    // restart
     const second = newStore(fixture.env);
     const report = second.restore();
     if (second.list().length === 0) second.seedDemoProject('Demo', 'Somewhere');
@@ -299,9 +277,7 @@ test('a human verification survives a restart and stays a human verification', a
     assert.equal(restoredFinding.review?.reviewer, 'K. Field Engineer');
     assert.equal(restoredFinding.review?.note, 'walked the bay, confirmed');
 
-    // And it is still labelled for exactly what it was. This run used the
-    // deterministic offline fixture, so a restart must NOT relabel it as a live
-    // or cached AI inference: `synthetic` outranks the restore path.
+    // And it is still labelled for exactly what it was.
     assert.equal(view.inferenceOrigin, 'DEMO_FIXTURE');
     assert.equal(view.isDemoFixture, true);
     assert.ok(view.provenance.humanReviewPerformed, 'the review must still be recorded');
@@ -327,8 +303,7 @@ test('deleting a capture removes its persisted record and uploaded bytes', async
     const bytesPath = stored.bytesPath;
     assert.ok(bytesPath && existsSync(bytesPath));
 
-    // Run an inspection first: only a capture that actually produced a usable
-    // result has a persisted record, which is exactly the rule being relied on.
+    // Run an inspection first: only a capture that actually produced a usable result has a persisted record, which is.
     await store.sessionFor(stored).run();
     store.persistInspection(stored.id);
     const persistence = new WorkspacePersistence({ env: fixture.env });
@@ -412,19 +387,13 @@ test('a tampered dataset path cannot read outside the dataset directory', () => 
 });
 
 test('a restored dataset capture is orientation-normalized and the source file is untouched', () => {
-  // A dataset capture is stored as a PATH, and the dataset file itself is never
-  // rewritten. So after a restart the raw bytes come back off the disk carrying
-  // their original EXIF rotation, and the restore path must re-apply the same
-  // normalization import applied â€” otherwise a capture that displayed upright
-  // before the restart would come back sideways, with model, display and
-  // evidence overlay in disagreement again.
+  // A dataset capture is stored as a PATH, and the dataset file itself is never rewritten.
   const fixture = tempDataDir();
   try {
     const datasetDir = join(fixture.dir, 'sample');
     mkdirSync(datasetDir, { recursive: true });
 
-    // A minimal JPEG carrying EXIF orientation 6, built the same way the exif
-    // geometry tests build theirs: real markers, real TIFF walk.
+    // A minimal JPEG carrying EXIF orientation 6, built the same way the exif geometry tests build theirs: real markers, real TIFF walk.
     const parts: Buffer[] = [Buffer.from([0xff, 0xd8])];
     const tiff = Buffer.alloc(8);
     tiff.write('MM', 0, 'latin1');
@@ -492,9 +461,7 @@ test('deleting an upload cannot reach outside the uploads directory', () => {
     const stateFile = join(fixture.dir, 'workspace.json');
     assert.ok(existsSync(stateFile));
 
-    // An escaping path, and a sibling of the uploads directory. Neither may be
-    // removed: only files inside this instance's own uploads directory are ever
-    // deleted, and an unresolvable path is refused outright.
+    // An escaping path, and a sibling of the uploads directory.
     persistence.deleteUpload(join(fixture.dir, '..', 'escaped.jpg'));
     persistence.deleteUpload(join(fixture.dir, 'workspace.json'));
     persistence.deleteUpload('relative/path.jpg');

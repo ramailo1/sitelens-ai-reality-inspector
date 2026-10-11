@@ -1,34 +1,4 @@
-/**
- * Local file-backed persistence.
- *
- * The inspection surface used to hold everything in process memory and said so
- * honestly. That is defensible, but it makes the product worse at the one thing
- * a demo has to demonstrate: that an inspection is a RECORD. A human confirms a
- * finding, the process restarts, and the confirmation is gone — which teaches a
- * judge the opposite of what this product is claiming.
- *
- * So this adds the smallest durable thing that fixes it: JSON files under
- * `data/`, written atomically. No database, no ORM, no migration, no queue.
- *
- * WHAT SURVIVES A RESTART
- *   projects, their expected-state reference and operator edits
- *   capture metadata (dataset captures by relative path, uploads by file)
- *   inspection results: the raw validated provider payload
- *   human review: verified, rejected and deferred findings, by reviewer
- *   the selected project and capture
- *
- * WHAT DOES NOT
- *   the generated synthetic demo fixtures are rebuilt on start, exactly as before
- *   in-process caches: the result cache and the reasoning-stage cache are
- *   deliberately NOT persisted, so a "CACHED" badge can never describe something
- *   from a previous run of a different process
- *
- * HONESTY CONSTRAINT
- *   `WorkspacePersistence.location` / `.durable` are read by the API and shown in
- *   the UI. When persistence is absent the server keeps reporting process memory,
- *   and when it is present it reports the directory. There is no code path that
- *   claims durability it does not have.
- */
+// Local file-backed persistence.
 
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { join, resolve, dirname, relative, isAbsolute } from 'node:path';
@@ -37,13 +7,13 @@ import { normalizeOrientation } from './image-metadata.ts';
 
 export const DEFAULT_DATA_DIR = 'data';
 
-/** Bumped when the on-disk shape changes so an old file is ignored, not misread. */
+// Bumped when the on-disk shape changes so an old file is ignored, not misread.
 export const PERSISTENCE_SCHEMA_VERSION = 1;
 
-/** Ceiling on the JSON we are willing to read back, so a corrupt file cannot exhaust memory. */
+// Ceiling on the JSON we are willing to read back, so a corrupt file cannot exhaust memory.
 const MAX_STATE_BYTES = 64 * 1024 * 1024;
 
-/** Per-capture inspection record. Raw provider payload plus human decisions. */
+// Per-capture inspection record. Raw provider payload plus human decisions.
 export interface PersistedInspection {
   readonly captureId: string;
   readonly savedAt: string;
@@ -53,20 +23,13 @@ export interface PersistedInspection {
   readonly inferenceOrigin: string;
   readonly originalInferenceAt: string | null;
   readonly originalLatencyMs: number | null;
-  /** Exactly what the provider returned, unvalidated: re-validated on read. */
+  // Exactly what the provider returned, unvalidated: re-validated on read.
   readonly payload: {
     readonly observations: readonly unknown[];
     readonly elements: readonly unknown[];
     readonly findings: readonly unknown[];
   };
-  /**
-   * Per-image payloads for a consolidated inspection.
-   *
-   * Optional: an inspection written from one photograph has exactly one entry
-   * and never reaches this field. When present it is the authoritative record,
-   * because it is the only shape that says WHICH photograph produced which
-   * observation.
-   */
+  // Per-image payloads for a consolidated inspection.
   readonly payloads?: readonly {
     readonly captureId: string;
     readonly captureLabel: string;
@@ -77,9 +40,9 @@ export interface PersistedInspection {
       readonly findings: readonly unknown[];
     };
   }[] | undefined;
-  /** Original observation ids aligned with the primary payload's observations. */
+  // Original observation ids aligned with the primary payload's observations.
   readonly observationIds?: readonly string[] | undefined;
-  /** Human decisions, keyed by the finding's stable content key. */
+  // Human decisions, keyed by the finding's stable content key.
   readonly reviews: readonly {
     readonly key: string;
     readonly status: string;
@@ -87,7 +50,7 @@ export interface PersistedInspection {
     readonly reviewedAt: string;
     readonly note: string | null;
   }[];
-  /** Human decisions on raw AI observations, keyed by observation id and stable content key. */
+  // Human decisions on raw AI observations, keyed by observation id and stable content key.
   readonly observationReviews?: readonly {
     readonly observationId: string;
     readonly key: string;
@@ -96,7 +59,7 @@ export interface PersistedInspection {
     readonly reviewedAt: string;
     readonly note: string | null;
   }[] | undefined;
-  /** Human-verified actionable findings in the session ledger, including triage state. */
+  // Human-verified actionable findings in the session ledger, including triage state.
   readonly ledgerFindings?: readonly {
     readonly id: string;
     readonly sourceObservationId: string;
@@ -113,21 +76,9 @@ export interface PersistedInspection {
     readonly state: string;
     readonly target: string;
   }[] | undefined;
-  /**
-   * The comparison reference this inspection was judged against.
-   *
-   * Recorded so a restore can REFUSE an inspection produced against a
-   * reference the project has since replaced, without destroying the record.
-   * The record is the audit trail for a real model call and the human
-   * decisions made against its output, so an inspection invalidated by a
-   * reference change is superseded on read rather than deleted on write.
-   *
-   * Absent on records written before this field existed; those are restored
-   * as they always were, because a missing stamp is not evidence of a
-   * mismatch and must not silently discard the operator's own history.
-   */
+  // The comparison reference this inspection was judged against.
   readonly referencePresetId?: string | null | undefined;
-  /** Reasoning provenance, so a restored result is not credited to a model that did not run. */
+  // Reasoning provenance, so a restored result is not credited to a model that did not run.
   readonly reasoning: {
     readonly status: string;
     readonly kind: string | null;
@@ -137,7 +88,7 @@ export interface PersistedInspection {
   } | null;
 }
 
-/** A capture's metadata. Bytes are referenced, never inlined. */
+// A capture's metadata. Bytes are referenced, never inlined.
 export interface PersistedCapture {
   readonly id: string;
   readonly projectId: string;
@@ -150,15 +101,15 @@ export interface PersistedCapture {
   readonly source: 'UPLOAD' | 'DEMO_FIXTURE' | 'LOCAL_DATASET';
   readonly zoneId: string | null;
   readonly createdAt: string;
-  /** Absolute path for an upload on disk, or a dataset path relative to the dataset dir. */
+  // Absolute path for an upload on disk, or a dataset path relative to the dataset dir.
   readonly bytesPath: string;
-  /** True when bytesPath is relative to the dataset directory. */
+  // True when bytesPath is relative to the dataset directory.
   readonly relativeToDataset: boolean;
   readonly exifOrientation: number | null;
   readonly geometryNormalized: boolean;
 }
 
-/** Operator-authored expected-state references. System presets are not persisted. */
+// Operator-authored expected-state references. System presets are not persisted.
 export interface PersistedPreset {
   readonly id: string;
   readonly name: string;
@@ -172,13 +123,7 @@ export interface PersistedWorkspace {
   readonly savedAt: string;
   readonly activeProjectId: string | null;
   readonly activeCaptureId: string | null;
-  /**
-   * The ordered photographs of the open inspection group.
-   *
-   * Absent in every workspace file written before multi-image existed; the reader
-   * then falls back to `[activeCaptureId]`, so an old file restores exactly as it
-   * always did.
-   */
+  // The ordered photographs of the open inspection group.
   readonly activeCaptureIds?: readonly string[] | undefined;
   readonly projects: readonly {
     readonly id: string;
@@ -203,16 +148,10 @@ function readStringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-/**
- * Small, honest, atomic JSON persistence.
- *
- * Writes go to a sibling `.tmp` file and are renamed into place, so a process
- * killed mid-write leaves the previous good state intact rather than a
- * truncated file that would silently lose every verification on the machine.
- */
+// Small, honest, atomic JSON persistence.
 export class WorkspacePersistence {
   public readonly directory: string;
-  /** Absolute, because the API and the UI must be able to state where data lives. */
+  // Absolute, because the API and the UI must be able to state where data lives.
   public readonly location: string;
   public readonly durable = true;
 
@@ -224,12 +163,6 @@ export class WorkspacePersistence {
   } = {}) {
     const env = options.env ?? process.env;
     // Precedence: an explicit option, then the environment, then the default.
-    //
-    // The explicit option is read at all because a constructor argument that is
-    // silently ignored is worse than no argument: callers passing a temporary
-    // directory believe they have isolated their writes, while the store keeps
-    // using the process default and they read and overwrite the real one. A
-    // caller who names a directory means that directory.
     const explicit = typeof options.directory === 'string' && options.directory.trim().length > 0
       ? options.directory.trim()
       : null;
@@ -240,11 +173,7 @@ export class WorkspacePersistence {
     const raw = explicit ?? fromEnv ?? DEFAULT_DATA_DIR;
     this.directory = resolve(process.cwd(), raw);
     this.location = this.directory;
-    // Resolved through the DATASET module rather than reimplemented here. When
-    // this read only SITELENS_DATASET_DIR it defaulted to null, and a dataset
-    // capture then became un-resolvable after a restart: it was silently skipped,
-    // so the operator's own project came back looking empty. Two modules must
-    // never disagree about where the dataset lives.
+    // Resolved through the DATASET module rather than reimplemented here.
     this.datasetDirectory = datasetDirectory(env);
   }
 
@@ -260,7 +189,7 @@ export class WorkspacePersistence {
     return join(this.directory, 'uploads');
   }
 
-  /** Statement shown wherever the UI currently reports storage truth. */
+  // Statement shown wherever the UI currently reports storage truth.
   public describe(): { location: string; durable: boolean; detail: string } {
     return {
       location: this.directory,
@@ -277,8 +206,7 @@ export class WorkspacePersistence {
     try {
       mkdirSync(path, { recursive: true });
     } catch {
-      // A read-only working directory must not take the server down; the caller
-      // finds out through `durable` reporting only, so surface it honestly.
+      // A read-only working directory must not take the server down.
     }
   }
 
@@ -296,8 +224,7 @@ export class WorkspacePersistence {
       if (stat.length > MAX_STATE_BYTES) return null;
       return JSON.parse(stat.toString('utf8')) as unknown;
     } catch {
-      // A corrupt or unreadable state file is treated as absent. Refusing to
-      // start would be worse than starting empty, and nothing is deleted.
+      // A corrupt or unreadable state file is treated as absent.
       return null;
     }
   }
@@ -353,8 +280,7 @@ export class WorkspacePersistence {
   }
 
   public inspectionFile(captureId: string): string {
-    // Capture ids and group keys (`grp_id1+id2`) are generated internally; the
-    // fallback keeps a hostile id from escaping the directory regardless.
+    // Capture ids and group keys (`grp_id1+id2`) are generated internally.
     const safe = /^[A-Za-z0-9_+-]+$/.test(captureId) ? captureId : 'unknown';
     return join(this.inspectionsDir, `${safe}.json`);
   }
@@ -386,9 +312,7 @@ export class WorkspacePersistence {
       originalLatencyMs:
         typeof record['originalLatencyMs'] === 'number' ? record['originalLatencyMs'] : null,
       payload: payload as PersistedInspection['payload'],
-      // Absent on a single-image record, which is exactly how the reader knows
-      // to use the merged payload instead. Spread rather than assigned as
-      // `undefined`, because this project compiles with exactOptionalPropertyTypes.
+      // Absent on a single-image record, which is exactly how the reader knows to use the merged payload instead.
       ...(Array.isArray(record['payloads'])
         ? { payloads: record['payloads'] as PersistedInspection['payloads'] }
         : {}),
@@ -404,8 +328,7 @@ export class WorkspacePersistence {
       ...(Array.isArray(record['ledgerFindings'])
         ? { ledgerFindings: record['ledgerFindings'] as PersistedInspection['ledgerFindings'] }
         : {}),
-      // Read as `undefined` when absent, so an old record is distinguishable
-      // from one that genuinely stamped a null reference.
+      // Read as `undefined` when absent, so an old record is distinguishable from one that genuinely stamped a null reference.
       ...('referencePresetId' in record
         ? { referencePresetId: readStringOrNull(record['referencePresetId']) }
         : {}),
@@ -437,7 +360,7 @@ export class WorkspacePersistence {
     }
   }
 
-  /** Write uploaded bytes to disk and return the absolute path to record. */
+  // Write uploaded bytes to disk and return the absolute path to record.
   public saveUpload(captureId: string, extension: string, bytes: Buffer): string | null {
     const safeId = /^[A-Za-z0-9_-]+$/.test(captureId) ? captureId : 'capture';
     const safeExt = extension === '.png' ? '.png' : '.jpg';
@@ -463,19 +386,7 @@ export class WorkspacePersistence {
     }
   }
 
-  /**
-   * Resolve a persisted capture's bytes back into memory on startup.
-   *
-   * A dataset capture is stored as a path RELATIVE to the dataset directory, so
-   * moving the repository (or running from a different root) still resolves. An
-   * upload is stored as an absolute path because it is this machine's file.
-   *
-   * The dataset file itself is NEVER modified, so a restored capture re-applies
-   * the orientation normalization (see image-metadata.ts) that import applied.
-   * Without this, a capture that displayed correctly before a restart would come
-   * back carrying its raw EXIF rotation, and the model, the browser and the
-   * evidence overlay would no longer share one coordinate system.
-   */
+  // Resolve a persisted capture's bytes back into memory on startup.
   public resolveCaptureBytes(capture: PersistedCapture): Buffer | null {
     try {
       const path = capture.relativeToDataset
@@ -489,8 +400,7 @@ export class WorkspacePersistence {
   }
 
   private resolveDatasetPath(relativePath: string): string | null {
-    // Defence in depth: a relative path that escapes the dataset directory is
-    // refused rather than resolved, so a tampered state file cannot read the disk.
+    // Defence in depth: a relative path that escapes the dataset directory is refused rather than resolved, so a tampered.
     const rel = relativePath.replace(/\\/g, '/');
     if (rel.startsWith('..') || isAbsolute(relativePath)) return null;
     const base = this.datasetDirectory;

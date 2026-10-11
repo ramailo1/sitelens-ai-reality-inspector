@@ -1,12 +1,4 @@
-/**
- * Expected-state request validation.
- *
- * The browser is an untrusted client even on a loopback-only server. These lock
- * in that an untrusted expected-state payload is re-validated server-side, and
- * - most importantly - that provenance is never laundered: a preset stays a
- * PRESET and an operator edit is always marked OPERATOR, so the UI can never
- * show a demo reference as if it were the project's own programme.
- */
+// Expected-state request validation.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

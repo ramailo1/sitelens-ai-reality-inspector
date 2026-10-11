@@ -1,18 +1,4 @@
-/**
- * Multi-image inspection, over the real HTTP API.
- *
- * The unit suite proves the pipeline shape. This file proves the PRODUCT: a real
- * server, a real data directory, real dataset photographs sent over HTTP, and
- * every assertion read back from a server response. A green run here is evidence
- * about the running application, not about a harness.
- *
- * The provider is the deterministic offline fixture and there is no network. That
- * is stated plainly rather than dressed up: what is verified here is the wiring
- * and the reported truth, not that MiniCPM or Nemotron were reachable. The live
- * Nebius run is reported separately.
- *
- * Nothing is left behind: the server is closed and the data directory removed.
- */
+// Multi-image inspection, over the real HTTP API.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -94,15 +80,13 @@ test('three real photographs become ONE inspection, through the running server',
   const view = async (): Promise<RunBody> =>
     (await (await fetch(base + '/api/session')).json()) as RunBody;
 
-  // --- a project ---------------------------------------------------------
+  // a project
   assert.equal(await postWorkspace('/api/projects', { name: 'Level 02 re-shoot', location: 'North core' }), 201);
-  // Uploading and running both produce evidence attributed to the project's
-  // reviewer, so the gate has to be open before either. Closed-gate behaviour
-  // is covered in reviewer-gate.test.ts.
+  // Uploading and running both produce evidence attributed to the project's reviewer, so the gate has to be open before either.
   assert.equal(await postWorkspace('/api/reviewer', { name: 'Multi Image Tester', role: 'QA' }), 200);
   assert.ok((await workspace()).project !== null);
 
-  // --- three REAL dataset photographs ------------------------------------
+  // three REAL dataset photographs
   const photos = demoCaptures().slice(0, 3);
   const ids: string[] = [];
   for (const photo of photos) {
@@ -111,7 +95,7 @@ test('three real photographs become ONE inspection, through the running server',
   }
   assert.equal(ids.length, 3, 'all three real photographs must be accepted');
 
-  // --- ONE group, ONE run, ONE result -----------------------------------
+  // ONE group, ONE run, ONE result
   assert.equal(await postWorkspace('/api/captures/select', { captureIds: ids }), 200);
   assert.equal((await workspace()).activeCaptureIds.length, 3,
     'the workspace must report all three as ONE open group');
@@ -131,8 +115,7 @@ test('three real photographs become ONE inspection, through the running server',
     'observations must stay attributed to their own photograph over HTTP',
   );
 
-  // A finding citing SEVERAL photographs is the observable proof that the
-  // combined evidence, not the first image alone, produced this result.
+  // A finding citing SEVERAL photographs is the observable proof that the combined evidence, not the first image alone.
   const multi = result.inspectionFindings.filter((f) => f.sourceCaptureIds.length > 1);
   assert.ok(multi.length > 0, 'at least one finding must cite more than one photograph');
   for (const finding of multi) {
@@ -140,7 +123,7 @@ test('three real photographs become ONE inspection, through the running server',
       'every source id must carry a label the operator can read');
   }
 
-  // --- a byte-identical copy is refused, and SAID so ---------------------
+  // a byte-identical copy is refused, and SAID so
   await upload(photos[0]!);
   const after = await workspace();
   assert.equal(after.duplicateCaptureIds.length, 1,
@@ -148,7 +131,7 @@ test('three real photographs become ONE inspection, through the running server',
   assert.equal(after.activeCaptureIds.length, 3,
     'a refused duplicate must not change the open group');
 
-  // --- a selection naming something that does not exist is refused --------
+  // a selection naming something that does not exist is refused
   assert.notEqual(await postWorkspace('/api/run', { captureIds: [ids[0], 'cap_does_not_exist'] }), 200,
     'an unknown photograph must not produce an inspection');
 });

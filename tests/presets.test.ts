@@ -1,10 +1,4 @@
-/**
- * Reference (preset) management.
- *
- * The point of these tests is that a comparison can always be traced back to a
- * named reference, and that changing that reference never leaves old rows on
- * screen pretending the new one produced them.
- */
+// Reference (preset) management.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

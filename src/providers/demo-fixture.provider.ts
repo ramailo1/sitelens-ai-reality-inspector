@@ -1,13 +1,4 @@
-/**
- * Deterministic offline provider so the full flow can be run without a Nebius
- * account or network access.
- *
- * Returns fixed synthetic content that passes through the same validation as a
- * real model response and still starts UNVERIFIED.
- *
- * The fixture is not AI inference. Every result derived from it is marked
- * `synthetic: true` all the way to the UI, which labels it on screen.
- */
+// Deterministic offline provider so the full flow can be run without a Nebius account or network access.
 
 import type { AIProvider, InspectRequest, RawProviderResult } from './provider.ts';
 import type { RawModelObservation } from '../types/observation.ts';
@@ -15,13 +6,7 @@ import type { RawModelObservation } from '../types/observation.ts';
 export const DEMO_PROVIDER_NAME = 'demo-fixture' as const;
 export const DEMO_MODEL_ID = 'demo-fixture-vision-v1' as const;
 
-/**
- * Fixed synthetic content. Deterministic: the same input always yields this.
- *
- * These numbers are chosen to demonstrate all three comparison outcomes at once
- * - a match, a clear numeric shortfall, and an item the capture cannot settle -
- * so the demo shows a credible mixed result rather than a flattering one.
- */
+// Fixed synthetic content.
 const DEMO_ELEMENTS: readonly unknown[] = Object.freeze([
   {
     element: 'COLUMN',
@@ -49,8 +34,7 @@ const DEMO_ELEMENTS: readonly unknown[] = Object.freeze([
   },
   {
     element: 'MEP_ROUGH_IN',
-    // Deliberately omitted count: this is the honest "I can see services but I
-    // will not put a number on them" case the product is built to handle.
+    // Deliberately omitted count: this is the honest "I can see services but I will not put a number on them" case the.
     confidence: 0.41,
     evidence: 'Services are partially visible behind the frame; extent is unclear.',
     present: true,
@@ -131,7 +115,7 @@ const DEMO_OBSERVATIONS: readonly RawModelObservation[] = Object.freeze([
   },
 ]);
 
-/** Deterministic, offline, credential-free provider used for demos and tests. */
+// Deterministic, offline, credential-free provider used for demos and tests.
 export class DemoFixtureProvider implements AIProvider {
   public readonly name = DEMO_PROVIDER_NAME;
   public readonly model = DEMO_MODEL_ID;

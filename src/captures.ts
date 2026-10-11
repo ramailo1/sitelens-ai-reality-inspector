@@ -1,15 +1,4 @@
-/**
- * Demo capture assets.
- *
- * Deterministic synthetic construction scenes, generated in code so the
- * repository carries no binary imagery and no customer data. Each scene is
- * drawn as simple geometry with clear, checkable content: a reviewer can see
- * what the model was looking at, which is what makes the observations
- * auditable.
- *
- * These are fixtures. They prove the pipeline and the evidence overlay; they are
- * not photographs and are not evidence of real-world accuracy.
- */
+// Demo capture assets.
 
 import { deflateSync } from 'node:zlib';
 import type { ImageDimensions } from './image-metadata.ts';
@@ -20,14 +9,11 @@ export interface DemoCapture {
   readonly bytes: Buffer;
   readonly mediaType: string;
   readonly dimensions: ImageDimensions;
-  /** What the scene deliberately contains, for documentation and review. */
+  // What the scene deliberately contains, for documentation and review.
   readonly content: string;
 }
 
-/**
- * CRC-32 (IEEE 802.3), computed directly so PNG chunk integrity does not
- * depend on a Node version-specific zlib export.
- */
+// CRC-32 (IEEE 802.3), computed directly so PNG chunk integrity does not depend on a Node version-specific zlib export.
 const CRC_TABLE: readonly number[] = (() => {
   const table: number[] = [];
   for (let n = 0; n < 256; n++) {
@@ -111,7 +97,7 @@ export const PALETTE = {
 export const SCENE_WIDTH = 320;
 export const SCENE_HEIGHT = 240;
 
-/** Sky gradient above a horizon line; null below it. */
+// Sky gradient above a horizon line; null below it.
 export function skyAt(y: number, horizon: number): Rgb | null {
   if (y >= horizon) return null;
   const g = y / horizon;

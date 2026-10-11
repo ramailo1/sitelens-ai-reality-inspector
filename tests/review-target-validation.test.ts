@@ -1,18 +1,4 @@
-/**
- * A review that names something this inspection does not hold must be REFUSED.
- *
- * These three routes (/api/review, /api/review-finding, /api/finding-state)
- * answer with the full session view on success AND on a silent no-op, so a 200
- * is the only signal the client has. Answering 200 for an id that does not
- * exist therefore tells the operator their human decision was recorded when
- * nothing was — a false confirmation about the one thing this product claims is
- * human-verified. The domain layer already refuses to invent a review; this
- * file proves the HTTP surface reports that refusal instead of hiding it.
- *
- * Every server runs against its own temporary data directory. Nothing here
- * reads or writes the repository's data/ directory, and no provider is called
- * beyond the deterministic offline fixture.
- */
+// A review that names something this inspection does not hold must be REFUSED.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +15,7 @@ interface Harness {
   close(): Promise<void>;
 }
 
-/** A 1x1 PNG. Enough to be a real, valid capture for the deterministic fixture. */
+// A 1x1 PNG. Enough to be a real, valid capture for the deterministic fixture.
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
@@ -71,13 +57,7 @@ async function startServer(): Promise<Harness> {
   };
 }
 
-/**
- * Open a project, name a reviewer, add a real capture, run a real inspection.
- *
- * The capture is uploaded rather than seeded: these assertions are about review
- * of an inspection that actually ran, so the setup has to produce one. A tiny
- * valid PNG is enough for the deterministic fixture, and no provider is called.
- */
+// Open a project, name a reviewer, add a real capture, run a real inspection.
 async function inspectedWorkspace(h: Harness & {
   raw(method: string, path: string, bytes: Buffer, contentType: string):
     Promise<{ status: number; body: Buffer }>;
@@ -203,8 +183,7 @@ test('a verified finding can then be acknowledged through finding-state', async 
   const h = await startServer();
   try {
     const view = await inspectedWorkspace(h);
-    // finding-state operates on the LEDGER, which only holds findings raised
-    // from a human-verified observation. Verify one to populate it.
+    // finding-state operates on the LEDGER, which only holds findings raised from a human-verified observation.
     const reviewed = await h.call('POST', '/api/review', {
       observationId: view.observations[0].id,
       decision: 'VERIFIED',
@@ -229,9 +208,7 @@ test('a verified finding can then be acknowledged through finding-state', async 
   }
 });
 
-// ---------------------------------------------------------------------------
 // Extended review integrity, project/capture isolation & persistence audit
-// ---------------------------------------------------------------------------
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { demoCaptures } from '../src/captures.ts';
@@ -1006,9 +983,7 @@ test('Scenario C: missing uploaded capture file on disk during restore is skippe
   }
 });
 
-// ---------------------------------------------------------------------------
 // Rollback, ledger lifecycle, group isolation and tamper resistance
-// ---------------------------------------------------------------------------
 
 test('a failed persistence also rolls back an inspection-finding review', async () => {
   const h = await startServerWithDir({ durable: true });
@@ -1219,8 +1194,7 @@ test('a tampered state file cannot inject an observation review or a ledger find
     await h1.stopServer();
     h1 = null;
 
-    // A hostile record: a review for an observation this inspection never produced,
-    // and a ledger finding raised from an observation that was never verified.
+    // A hostile record: a review for an observation this inspection never produced, and a ledger finding raised from an.
     const record = JSON.parse(readFileSync(inspPath, 'utf8')) as Record<string, unknown>;
     record['observationReviews'] = [
       {
@@ -1319,8 +1293,7 @@ test('a run whose durable write failed says so instead of answering as though it
       'a durably written run must not warn about durability',
     );
 
-    // Now every durable write fails. The inspection still really ran, so the
-    // findings stay — but the response must not claim they are saved.
+    // Now every durable write fails.
     h.persistence.saveInspection = () => false;
     const lost = await h.call('POST', '/api/run', { captureId: capId });
     assert.equal(lost.status, 200, 'a run that succeeded is still a successful run');
@@ -1338,8 +1311,7 @@ test('a run whose durable write failed says so instead of answering as though it
 test('a run that produced nothing usable is not reported as a storage failure', async () => {
   const h = await startServerWithDir({ durable: true });
   try {
-    // A capture that has never been inspected has no inspection record to write,
-    // which is the legitimate reason a persistence call returns false.
+    // A capture that has never been inspected has no inspection record to write, which is the legitimate reason a.
     await h.call('POST', '/api/projects', { name: 'Nothing Yet' });
     await h.call('POST', '/api/reviewer', { name: 'Nadia Mansour' });
     await h.upload('fresh.png', demoCaptures()[0]!.bytes);

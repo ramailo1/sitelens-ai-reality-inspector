@@ -1,10 +1,4 @@
-/**
- * Failure-mode coverage.
- *
- * Every case here asserts the same invariant: a failure NEVER produces an
- * observation and NEVER produces verified project truth. These are the paths a
- * reviewer is least likely to click but most likely to be judged on.
- */
+// Failure-mode coverage.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,7 +31,7 @@ function providerReturning(options: {
   });
 }
 
-/** Envelope helper for model responses. */
+// Envelope helper for model responses.
 function envelope(content: string): string {
   return JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] });
 }
@@ -51,7 +45,7 @@ const VALID_ENTRY = {
   suggested_action: 'NO_ACTION',
 };
 
-/** Assert that a failing run yields zero observations and no fabricated truth. */
+// Assert that a failing run yields zero observations and no fabricated truth.
 async function assertNoTruthFromFailure(provider: unknown): Promise<void> {
   const inspector = new RealityInspector({ provider: provider as never });
   await assert.rejects(() => inspector.inspectCapture({ image: IMAGE }), ProviderError);
@@ -61,7 +55,7 @@ async function assertNoTruthFromFailure(provider: unknown): Promise<void> {
   assert.equal(inspector.listObservations(IMAGE.captureId).length, 0);
 }
 
-// ---- request-level failures ----------------------------------------------
+// request-level failures
 
 test('missing image yields no observation', async () => {
   const inspector = new RealityInspector({ provider: providerReturning({ body: '{}' }) });
@@ -326,7 +320,7 @@ test('anonymous review is refused rather than recorded unattributed', () => {
   assert.equal(reviewed, null);
 });
 
-// ---- session completion status is about usable output, not observations ----
+// session completion status is about usable output, not observations
 
 test('elements-only response is COMPLETED, not VALIDATION_EMPTY', async () => {
   const capture = demoCaptures()[0];

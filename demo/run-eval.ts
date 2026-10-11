@@ -1,65 +1,42 @@
-/**
- * Entry point for the compatibility evaluation.
- *
- *   npm run eval
- *
- * Runs every scenario through the configured provider and reports what
- * happened. This is a reliability report, not an accuracy benchmark: there is
- * no ground truth, so no correctness score is produced.
- */
+// Entry point for the evaluation harness.
 
-import { runEvaluation, summarizeEvaluation } from '../src/evaluation.ts';
-import { createProvider, ProviderError } from '../src/providers/factory.ts';
+import {
+  formatEvaluationReport,
+  runLiveEvaluation,
+  runOfflineEvaluation,
+} from '../src/evaluation-harness.ts';
 
-let providerName: string;
-let modelName: string;
-try {
-  const provider = createProvider(process.env);
-  providerName = provider.name;
-  modelName = provider.model;
-} catch (error: unknown) {
-  // A misconfiguration is a hard stop: there is no honest way to report a
-  // reliability run when no provider was ever reached. The ProviderError branch
-  // explains why in the operator's terms before the error is rethrown.
-  if (error instanceof ProviderError) {
-    console.error(`  CONFIGURATION ERROR (${error.kind}): ${error.message}`);
+const liveRequested = process.argv.includes('--live');
+
+if (!liveRequested) {
+  console.log('\n  SiteLens evaluation — OFFLINE mode (deterministic, no network, no cost)\n');
+  const report = await runOfflineEvaluation();
+  console.log(formatEvaluationReport(report));
+  const { correct, total } = report.metrics.comparisonCorrectness;
+  const ok = report.metrics.trustConformance === 1
+    && correct === total
+    && report.metrics.regressionPassed.passed === report.metrics.regressionPassed.total;
+  console.log(`  verdict: ${ok ? 'SPECIFICATION CONFORMANCE HELD' : 'SPECIFICATION VIOLATION DETECTED'}\n`);
+  process.exitCode = ok ? 0 : 1;
+} else {
+  // Live mode is strictly opt-in: the provider is built here, from the same configured environment the application.
+  const { createProvider, ProviderError } = await import('../src/providers/factory.ts');
+  let provider;
+  try {
+    provider = createProvider(process.env);
+  } catch (error: unknown) {
+    if (error instanceof ProviderError) {
+      console.error(`  CONFIGURATION ERROR (${error.kind}): ${error.message}`);
+    }
+    throw error;
   }
-  throw error;
+  console.log('\n  SiteLens evaluation — LIVE mode (real inference; costs will be incurred)\n');
+  console.log(`  provider : ${provider.name}`);
+  console.log(`  model    : ${provider.model}`);
+  console.log('  NOTE     : small labelled sample; metrics are descriptive, not conclusive.\n');
+  const report = await runLiveEvaluation(provider);
+  console.log(formatEvaluationReport(report));
+  process.exitCode = report.metrics.regressionPassed.passed === report.metrics.regressionPassed.total
+    ? 0
+    : 1;
 }
-
-console.log('\n  SiteLens AI Reality Inspector - compatibility evaluation');
-console.log(`  provider : ${providerName}`);
-console.log(`  model    : ${modelName}`);
-console.log('  NOTE     : reliability report, not an accuracy benchmark.\n');
-
-const outcomes = await runEvaluation();
-const summary = summarizeEvaluation(outcomes);
-
-for (const outcome of outcomes) {
-  console.log(`  ${outcome.caseId}`);
-  console.log(`      conditions   : ${outcome.focus.join(', ')}`);
-  if (outcome.requestSucceeded) {
-    console.log(
-      `      result       : ${outcome.accepted} accepted, ${outcome.rejected} rejected, ${outcome.latencyMs} ms`,
-    );
-    console.log(`      trust held   : AI_GENERATED=${outcome.allAiGenerated} UNVERIFIED=${outcome.allUnverified}`);
-  } else {
-    console.log(`      result       : request failed - ${outcome.error}`);
-    console.log('      trust held   : no observations produced');
-  }
-  console.log(`      as specified : ${outcome.behavedAsSpecified ? 'yes' : 'NO'}`);
-  console.log('');
-}
-
-console.log('  -----------------------------------------------------');
-console.log(`  cases                    : ${summary.cases}`);
-console.log(`  requests succeeded       : ${summary.requestsSucceeded}`);
-console.log(`  cases with observations  : ${summary.casesWithObservations}`);
-console.log(`  observations accepted    : ${summary.totalAccepted}`);
-console.log(`  observations rejected    : ${summary.totalRejected}`);
-console.log(`  specification respected  : ${summary.allSpecificationRespected ? 'yes' : 'NO'}`);
-console.log('  -----------------------------------------------------\n');
-console.log('  Latencies above are single samples, not benchmarks. No accuracy,\n');
-console.log('  precision or model ranking is claimed or implied.\n');
-
-process.exitCode = summary.allSpecificationRespected ? 0 : 1;

@@ -1,39 +1,16 @@
-/**
- * Deterministic localization of a FINISHED inspection.
- *
- * This module is a projection, never a mutation. It takes the canonical view a
- * run produced and returns a second object describing that same run in another
- * language. Given the same input it always returns the same output, which is
- * what makes it safe to compute four of them up front and hand the browser a
- * choice.
- *
- * It is derived from canonical fields only: the comparison rows, the detected
- * elements, the expected-state items, the finding set and the counters. Nothing
- * here re-reads a model, and nothing here can change what the inspection found.
- *
- * The one thing it will not do is invent a translation. Text that MiniCPM or
- * Nemotron wrote as free English has no structured slot to localize and this
- * product has no translation model, so that text is carried through verbatim
- * and flagged as model-authored. See `src/localization.ts` for why.
- */
+// Deterministic localization of a FINISHED inspection.
 
 import { fill, sentenceCase, translatorFor } from './localization.ts';
 import type { InspectionLanguage, TextDirection, Translator } from './localization.ts';
 import { INSPECTION_LANGUAGES } from './localization.ts';
 
-/* ------------------------------------------------------------------ *
- * Structural inputs
- *
- * Declared structurally rather than imported from session.ts so this module
- * has no dependency on the pipeline. `SessionView` and its nested views satisfy
- * these shapes exactly; a test can satisfy them with a literal.
- * ------------------------------------------------------------------ */
+// Structural inputs Declared structurally rather than imported from session.ts so this module has no dependency on the pipeline.
 
 export interface LocalizableDetection {
   readonly element: string;
   readonly present: boolean;
   readonly count: number | null;
-  /** Carried so "highest confidence wins" matches compare.ts exactly. */
+  // Carried so "highest confidence wins" matches compare.ts exactly.
   readonly confidence: number;
 }
 
@@ -56,7 +33,7 @@ export interface LocalizableExpectedItem {
   readonly element: string;
   readonly expectation: string;
   readonly expectedCount: number | null;
-  /** Operator free text. Carried verbatim into every language, never translated. */
+  // Operator free text. Carried verbatim into every language, never translated.
   readonly note: string;
 }
 
@@ -101,7 +78,7 @@ export interface LocalizableCounters {
 }
 
 export interface LocalizedQualificationStage {
-  /** Canonical stage enum. Unchanged. */
+  // Canonical stage enum. Unchanged.
   readonly stage: string;
   readonly role: string;
   readonly note: string;
@@ -109,7 +86,7 @@ export interface LocalizedQualificationStage {
 
 export interface LocalizedQualification {
   readonly verdict: 'MET' | 'PARTIAL' | 'NOT_MET';
-  /** The end-to-end path sentence, in the selected language. */
+  // The end-to-end path sentence, in the selected language.
   readonly path: string;
   readonly stages: readonly LocalizedQualificationStage[];
 }
@@ -134,19 +111,19 @@ export interface LocalizableInspectionInput {
   readonly priorities: readonly LocalizablePriority[];
   readonly counters: LocalizableCounters;
   readonly isDemoFixture: boolean;
-  /** The NVIDIA qualification facts, regenerated per language. */
+  // The NVIDIA qualification facts, regenerated per language.
   readonly qualification: LocalizableQualificationInput;
 }
 
-/* ------------------------------------------------------------------ *
- * Localized output
- * ------------------------------------------------------------------ */
+// Localized output
 
 export interface LocalizedComparisonRow {
-  /** Canonical row id. Unchanged in every language. */
+  // Canonical row id. Unchanged in every language.
   readonly id: string;
   readonly elementLabel: string;
   readonly statusLabel: string;
+  // Present only for UNDETERMINED rows: what the state means and does not mean.
+  readonly statusHelp: string | null;
   readonly expectedText: string;
   readonly observedText: string;
   readonly difference: string | null;
@@ -155,7 +132,7 @@ export interface LocalizedComparisonRow {
 }
 
 export interface LocalizedFinding {
-  /** Canonical finding id. Unchanged in every language. */
+  // Canonical finding id. Unchanged in every language.
   readonly id: string;
   readonly title: string;
   readonly what: string;
@@ -166,18 +143,18 @@ export interface LocalizedFinding {
   readonly evidence: string;
   readonly recommendation: string;
   readonly evidenceStateLabel: string;
-  /** FULL_FRAME / NONE disclosure, or null when the model localized a region. */
+  // FULL_FRAME / NONE disclosure, or null when the model localized a region.
   readonly evidenceNote: string | null;
   readonly evidenceNoteHead: string | null;
+  // Why the finding carries its evidence state, from derivation facts only.
+  readonly evidenceStateHelp: string;
+  readonly evidenceStateWhy: string;
   readonly originLabel: string;
   readonly severityLabel: string;
   readonly statusLabel: string;
   readonly categoryLabel: string;
   readonly attentionLabel: string;
-  /**
-   * False when the body is model-authored English shown untranslated. The UI
-   * uses this to label the text honestly rather than implying it was translated.
-   */
+  // False when the body is model-authored English shown untranslated.
   readonly translated: boolean;
 }
 
@@ -202,20 +179,13 @@ export interface LocalizedInspection {
   readonly priorities: readonly LocalizedPriority[];
   readonly comparison: readonly LocalizedComparisonRow[];
   readonly findings: readonly LocalizedFinding[];
-  /** The NVIDIA requirement panel, in the selected language. */
+  // The NVIDIA requirement panel, in the selected language.
   readonly qualification: LocalizedQualification;
 }
 
-/* ------------------------------------------------------------------ *
- * Regeneration of derived prose
- * ------------------------------------------------------------------ */
+// Regeneration of derived prose
 
-/**
- * Index detections by element kind, highest confidence wins.
- *
- * Mirrors `compareExpectedState` in compare.ts exactly, so the localized view
- * and the canonical view are looking at the same detection.
- */
+// Index detections by element kind, highest confidence wins.
 function indexDetections(
   detections: readonly LocalizableDetection[],
 ): Map<string, LocalizableDetection> {
@@ -246,8 +216,7 @@ function expectedText(
     n: item.expectedCount ?? 0,
     note,
   };
-  // An empty operator note must leave the parentheses out entirely, not render
-  // an empty pair: "12 columns expected ()" reads as a missing value.
+  // An empty operator note must leave the parentheses out entirely, not render an empty pair: "12 columns expected ()".
   const key = (withNote: string, withoutNote: string): string =>
     note.length > 0 ? withNote : withoutNote;
 
@@ -285,12 +254,7 @@ function observedText(
   return fill(t.t('comparison.observed.present'), { element: unit });
 }
 
-/**
- * The difference sentence, regenerated from the two canonical counts.
- *
- * Only reached for a COUNT row, so `expectedCount` and `observedCount` are both
- * present by construction. The numbers are interpolated verbatim.
- */
+// The difference sentence, regenerated from the two canonical counts.
 function differenceText(
   t: Translator,
   row: LocalizableComparisonRow,
@@ -317,9 +281,7 @@ function differenceText(
   return fill(t.t('comparison.diff.missing'), { element: unit });
 }
 
-/* ------------------------------------------------------------------ *
- * Finding prose
- * ------------------------------------------------------------------ */
+// Finding prose
 
 function findingTitle(t: Translator, row: LocalizableComparisonRow, item: LocalizableExpectedItem | undefined): string {
   const element = sentenceCase(t.element(row.element));
@@ -364,9 +326,7 @@ function comparisonRecommendation(
   return fill(t.t('cf.rec.missing'), { element });
 }
 
-/* ------------------------------------------------------------------ *
- * Brief
- * ------------------------------------------------------------------ */
+// Brief
 
 function localizedBrief(
   t: Translator,
@@ -435,27 +395,16 @@ function localizedBrief(
   };
 }
 
-/**
- * The same verdict the canonical brief derives, from the same inputs.
- * Never taken from the model, and never inferred from language.
- */
+// The same verdict the canonical brief derives, from the same inputs.
 function deriveOverall(attentionFindings: number, comparisonAttention: number): string {
   if (attentionFindings > 0) return 'ATTENTION_REQUIRED';
   if (comparisonAttention > 0) return 'REVIEW_SUGGESTED';
   return 'NO_ATTENTION';
 }
 
-/* ------------------------------------------------------------------ *
- * Entry point
- * ------------------------------------------------------------------ */
+// Entry point
 
-/**
- * The NVIDIA requirement panel, regenerated in the target language.
- *
- * The VERDICT is canonical and is passed through untouched: only the sentences
- * around it are re-rendered. Model ids, the platform name and the stage enums
- * are machine facts and are interpolated verbatim.
- */
+// The NVIDIA requirement panel, regenerated in the target language.
 function localizedQualification(
   t: Translator,
   input: LocalizableQualificationInput,
@@ -473,8 +422,7 @@ function localizedQualification(
   ): LocalizedQualificationStage => {
     let note: string;
     if (classification === 'ELIGIBLE') {
-      // The ROLE is supplied here, not left to the template: an unfilled
-      // placeholder reaching the screen is a visible defect.
+      // The ROLE is supplied here, not left to the template: an unfilled placeholder reaching the screen is a visible defect.
       note = fill(t.t('qual.stageEligible'), { role, platform: input.platform ?? '' });
     } else if (!isNvidia) {
       note = fill(t.t('qual.stageNotNvidia'), { model });
@@ -510,14 +458,7 @@ function localizedQualification(
   };
 }
 
-/**
- * Project one finished inspection into one language.
- *
- * Pure: the input is read, never written. Deterministic: the same input and the
- * same language always give the same output. Total: an unexpected shape
- * degrades to the canonical English text rather than throwing, because a
- * presentation fault must never take the inspection down with it.
- */
+// Project one finished inspection into one language.
 export function localizeInspection(
   input: LocalizableInspectionInput,
   language: InspectionLanguage,
@@ -530,9 +471,7 @@ export function localizeInspection(
   const rowsById = new Map<string, LocalizableComparisonRow>();
   for (const row of input.comparison) rowsById.set(row.id, row);
 
-  // Expected and observed text are produced ONCE per row and reused by the
-  // comparison table and by every finding that rests on that row, so the two
-  // surfaces can never disagree about what was expected.
+  // Expected and observed text are produced ONCE per row and reused by the comparison table and by every finding that.
   const expectedByRowId = new Map<string, string>();
   const observedByRowId = new Map<string, string>();
   for (const row of input.comparison) {
@@ -550,6 +489,7 @@ export function localizeInspection(
       id: row.id,
       elementLabel: t.element(row.element),
       statusLabel: t.t(`comparisonStatus.${row.status}`),
+      statusHelp: row.status === 'UNDETERMINED' ? t.t('comparisonStatus.help.UNDETERMINED') : null,
       expectedText: expectedByRowId.get(row.id) ?? row.id,
       observedText: observedByRowId.get(row.id) ?? '',
       difference: differenceText(t, row, itemsById.get(row.expectedId)),
@@ -588,6 +528,8 @@ export function localizeInspection(
       evidence: derived ? comparisonEvidence(t, row) : finding.evidence,
       recommendation: derived ? comparisonRecommendation(t, row) : finding.recommendation,
       evidenceStateLabel: t.t(`evidenceState.${finding.evidenceState}`),
+      evidenceStateHelp: t.t(`evidenceState.help.${finding.evidenceState}`),
+      evidenceStateWhy: t.t(`evidenceState.why.${finding.evidenceState}`),
       evidenceNote: finding.evidenceState === 'FULL_FRAME'
         ? t.t('finding.evidence.fullFrame')
         : finding.evidenceState === 'NONE'
@@ -617,8 +559,7 @@ export function localizeInspection(
   const priorities: LocalizedPriority[] = input.priorities.map((priority) => {
     const localized = findingTitles.get(priority.findingId) ?? null;
     const canonical = canonicalById.get(priority.findingId) ?? null;
-    // Origin and confidence come from the canonical finding, never from the
-    // localized copy, so the priority basis is computed from machine facts.
+    // Origin and confidence come from the canonical finding, never from the localized copy, so the priority basis is.
     const originIsComparison = canonical !== null
       ? canonical.origin === 'COMPARISON'
       : priority.basis.indexOf('Expected-state') === 0;
@@ -646,12 +587,7 @@ export function localizeInspection(
   };
 }
 
-/**
- * Every supported language, computed from the SAME canonical input.
- *
- * The browser receives all of them in one payload, so switching language is a
- * local read: no request, no re-run, no second opinion.
- */
+// Every supported language, computed from the SAME canonical input.
 export function localizeInspectionAll(
   input: LocalizableInspectionInput,
 ): Record<InspectionLanguage, LocalizedInspection> {
@@ -666,13 +602,7 @@ function attentionFor(severity: string): string {
   return 'LOW';
 }
 
-/**
- * A stand-in item for a row whose expected item is missing.
- *
- * Should be unreachable: a row always carries an `expectedId` that came from the
- * reference. Built rather than skipped so a row is never rendered with an empty
- * expected column, and it changes no canonical value.
- */
+// A stand-in item for a row whose expected item is missing.
 function fallbackItem(row: LocalizableComparisonRow): LocalizableExpectedItem {
   return {
     id: row.expectedId,

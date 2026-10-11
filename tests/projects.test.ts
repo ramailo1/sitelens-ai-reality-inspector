@@ -1,10 +1,4 @@
-/**
- * Project and capture ownership.
- *
- * These assert the store, not the markup: the point of a project is that data is
- * genuinely partitioned, so a passing test here means a capture, its findings and
- * its reference cannot be reached from another project.
- */
+// Project and capture ownership.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -202,8 +196,7 @@ test('returning to a project lands on its last INSPECTED capture, not a newer un
   addTo(s, 'cap_first');
   s.selectCapture('cap_first');
   await s.sessionFor(capture(s, 'cap_first')).run();
-  // Uploaded afterwards, never inspected: the newest capture is NOT where the
-  // operator's results live.
+  // Uploaded afterwards, never inspected: the newest capture is NOT where the operator's results live.
   addTo(s, 'cap_second');
   s.create({ name: 'Project B' });
 

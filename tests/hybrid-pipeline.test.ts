@@ -1,22 +1,4 @@
-/**
- * The hybrid pipeline end to end, with the network replaced.
- *
- * This is the test that would have caught the placeholder defect at the point
- * that matters: not "the validator rejects a bad entry" (unit level) but "a
- * fabricated MATCH cannot survive a whole run into the comparison table a judge
- * reads".
- *
- * Stage 1 (MiniCPM-V) and stage 2 (Nemotron) are driven through injected fetch
- * implementations, so the real request shape, the real envelope parsing, the real
- * validators and the real deterministic comparison all execute. No network, no
- * key, no nondeterminism.
- *
- * The assertions are about TRUST BOUNDARIES, not about model quality:
- *   - reasoning cannot change a comparison status
- *   - a reasoning outage leaves the comparison intact
- *   - a model confidence never verifies anything
- *   - provenance names which model actually produced which stage
- */
+// The hybrid pipeline end to end, with the network replaced.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,7 +14,7 @@ import { VERIFIED_REASONING_MODELS } from '../src/eligibility.ts';
 
 const CREDENTIAL = { apiKey: 'test-key-not-real' };
 
-/** A vision response that describes what is genuinely visible. */
+// A vision response that describes what is genuinely visible.
 const VISION_BODY = {
   provider: 'nebius-nvidia',
   model: 'openbmb/MiniCPM-V-4_5',
@@ -87,7 +69,7 @@ const VISION_BODY = {
   ],
 };
 
-/** The echoed-placeholder response the live model actually returned. */
+// The echoed-placeholder response the live model actually returned.
 const ECHO_BODY = {
   choices: [
     {
@@ -130,7 +112,7 @@ const REASONING_BODY = {
   ],
 };
 
-/** Build a fetch that answers one body and records what it was asked. */
+// Build a fetch that answers one body and records what it was asked.
 function stubFetch(body: unknown, status = 200): {
   fetchImpl: (input: string, init: { body: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
   calls: { url: string; body: Record<string, unknown> }[];
@@ -379,8 +361,6 @@ test('an echoed-placeholder response cannot manufacture a comparison', async () 
   assert.equal(view.detections.length, 0, 'no placeholder may become a detection');
 
   // No PRESENT or COUNT expectation may resolve on a rejected placeholder.
-  // Those are the rows where a template echo previously produced a fabricated
-  // MATCH or a fabricated ATTENTION.
   const asserted = view.comparison.filter((r) => r.expectation !== 'ABSENT');
   assert.ok(asserted.length > 0);
   for (const row of asserted) {
@@ -396,12 +376,7 @@ test('an echoed-placeholder response cannot manufacture a comparison', async () 
     /asserted no reading/,
   );
 
-  // NOTED, not overlooked: the single remaining row is the `EXCAVATION ABSENT`
-  // expectation, which compares to MATCH because the model reported nothing about
-  // excavations. That is the pre-existing ABSENT semantics (a declined report
-  // satisfies "should be absent"), not a consequence of the placeholder being
-  // accepted. The row's own text says "none seen in this capture", so the
-  // operator sees what actually happened.
+  // NOTED, not overlooked: the single remaining row is the `EXCAVATION ABSENT` expectation, which compares to MATCH.
   const absent = view.comparison.filter((r) => r.expectation === 'ABSENT');
   for (const row of absent) {
     assert.match(row.observedText, /none seen in this capture/);
@@ -410,10 +385,7 @@ test('an echoed-placeholder response cannot manufacture a comparison', async () 
 });
 
 test('findings carry an evidence state: localized, full-frame or none', async () => {
-  // Three detections exercise all three states against the default expected
-  // state: a column count shortfall WITH a box (LOCALIZED), a slab reported
-  // present-but-absent with NO box (FULL_FRAME — real reading, no region), and
-  // an opening the model says nothing about (NONE — no visual evidence at all).
+  // Three detections exercise all three states against the default expected state: a column count shortfall WITH a box.
   const body = {
     choices: [
       {
@@ -466,8 +438,7 @@ test('findings carry an evidence state: localized, full-frame or none', async ()
 });
 
 test('a fully-rejected response leaves every finding with no visual evidence', async () => {
-  // The placeholder echo rejects every element, so no finding may claim the
-  // image supports it — full-frame or otherwise.
+  // The placeholder echo rejects every element, so no finding may claim the image supports it — full-frame or otherwise.
   const { session } = sessionWith({ vision: ECHO_BODY });
   const view = await session.run();
 
@@ -581,8 +552,7 @@ test('eligibility is NOT claimed when the reasoning stage produced nothing', () 
 });
 
 test('the verified reasoning set excludes a model that cannot actually answer', () => {
-  // `nvidia/Nemotron-3_5-Lightning` answers HTTP 200 but exhausts its budget
-  // reasoning and returns no JSON. Callable is not the same as usable.
+  // `nvidia/Nemotron-3_5-Lightning` answers HTTP 200 but exhausts its budget reasoning and returns no JSON.
   assert.ok(VERIFIED_REASONING_MODELS.has('nvidia/nemotron-3-ultra-550b-a55b'));
   assert.ok(!VERIFIED_REASONING_MODELS.has('nvidia/nemotron-3_5-lightning'));
 });

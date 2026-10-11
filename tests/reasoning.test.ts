@@ -1,22 +1,4 @@
-/**
- * The template-echo placeholder defect, and the reasoning stage's trust boundary.
- *
- * Both live in this file because they are the same class of failure: a model
- * response that is STRUCTURALLY VALID and MEANINGLESS, which a permissive
- * validator would let into the product as if it were a reading.
- *
- * The measured defect, from a real run against the live endpoint: the vision
- * model returned one entry for every item on the expected-state list, each with
- * the prompt's own numeric placeholders copied verbatim.
- *
- *   { "element": "COLUMN", "present": true, "confidence": 0.0,
- *     "evidence": "no visible columns",
- *     "bounding_box": { "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0 } }
- *
- * Every field is a legal reading. The deterministic comparison then reported
- * five fabricated MATCHes and one fabricated ATTENTION on a photograph of a
- * worker tying rebar. These tests exist so that can never come back.
- */
+// The template-echo placeholder defect, and the reasoning stage's trust boundary.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +18,7 @@ import {
 } from '../src/reasoning.ts';
 import type { ExpectedState } from '../src/types/inspection.ts';
 
-/** The exact placeholder shape the live model returned. */
+// The exact placeholder shape the live model returned.
 const ECHOED_ELEMENT = {
   element: 'COLUMN',
   present: true,
@@ -82,8 +64,7 @@ test('an element that denies its own presence is rejected', () => {
 });
 
 test('a negation later in the sentence does not condemn a real reading', () => {
-  // Anchoring matters: this evidence reports a genuine rebar observation and
-  // must survive even though it contains the word "no".
+  // Anchoring matters: this evidence reports a genuine rebar observation and must survive even though it contains the word "no".
   const result = validateDetectedElement({
     element: 'REBAR',
     present: true,
@@ -134,8 +115,7 @@ test('a zero-confidence model finding is discarded rather than shown', () => {
 });
 
 test('rejected placeholders cannot manufacture a comparison', () => {
-  // The end-to-end consequence: with every element rejected, every
-  // PRESENT/COUNT expectation must be UNDETERMINED, never MATCH.
+  // The end-to-end consequence: with every element rejected, every PRESENT/COUNT expectation must be UNDETERMINED, never MATCH.
   const expected: ExpectedState = {
     zone: 'North Core',
     source: 'PRESET',
@@ -170,9 +150,7 @@ test('rejected placeholders cannot manufacture a comparison', () => {
 test('the inspection prompt no longer contains a copyable numeric placeholder', () => {
   const prompt = buildInspectionPrompt();
 
-  // The defect was caused by the template's own `0.0` and all-zero box. Any
-  // concrete number in a JSON example is something the model can copy verbatim,
-  // so the template now shows only the closed-vocabulary string fields.
+  // The defect was caused by the template's own `0.0` and all-zero box.
   assert.doesNotMatch(
     prompt,
     /"confidence":\s*0\.0/,
@@ -194,7 +172,7 @@ test('the prompt states the anti-echo rule explicitly', () => {
   assert.match(prompt, /LEAVE IT OUT/i);
 });
 
-// --- the reasoning stage ---------------------------------------------------
+// the reasoning stage
 
 test('a well-formed reasoning payload is accepted', () => {
   const result = validateReasoning({
@@ -210,8 +188,7 @@ test('a well-formed reasoning payload is accepted', () => {
 });
 
 test('reasoning without a stated certainty is rejected', () => {
-  // The single most important rule in the reasoning stage: an answer that never
-  // says how sure it is cannot reach the product.
+  // The single most important rule in the reasoning stage: an answer that never says how sure it is cannot reach the product.
   const result = validateReasoning({
     summary: 's', whatMatters: 'w', rationale: 'r', recommendation: 'rec', verification: 'v',
   });
@@ -257,8 +234,7 @@ test('reasoning confidence is optional but must be a real number', () => {
 });
 
 test('reasoning confidence is not a verification', () => {
-  // A reasoning confidence of 1.0 must not settle anything: certainty and
-  // confidence are advisory, and only a human moves a finding.
+  // A reasoning confidence of 1.0 must not settle anything: certainty and confidence are advisory, and only a human moves a finding.
   const result = validateReasoning({
     summary: 's', whatMatters: 'w', rationale: 'r',
     recommendation: 'rec', verification: 'v', certainty: 'SUPPORTED', confidence: 1.0,

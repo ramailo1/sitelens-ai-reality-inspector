@@ -1,10 +1,4 @@
-/**
- * The inspector markup.
- *
- * One screen, four workflow bays. The masthead carries the session identity
- * (project / zone / capture) so a screenshot always says what was inspected,
- * and the engine strip permanently states which model produced the result.
- */
+// Inspector HTML shell: masthead identity, four workflow bays, and accessible dialogs.
 
 export const INDEX_HTML = `<!doctype html>
 <html lang="en">
@@ -14,10 +8,6 @@ export const INDEX_HTML = `<!doctype html>
 <meta name="description" content="SiteLens AI Reality Inspector - construction reality capture, visual inspection, expected-state comparison and human verification.">
 <meta name="color-scheme" content="light">
 <title>AI Reality Inspector - SiteLens</title>
-<!-- The identity fonts, actually delivered. Without this the CSS stacks were a
-     promise kept only on machines that happened to have both installed; on any
-     other laptop the page silently fell back to Segoe UI + Consolas. An offline
-     machine fails the link harmlessly, to those same fallbacks. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap">
@@ -32,19 +22,6 @@ export const INDEX_HTML = `<!doctype html>
     <span class="rig-name">AI REALITY INSPECTOR</span>
     <span class="rig-org">SiteLens</span>
   </div>
-
-  <!--
-    The meta strip names what is open, never the file names themselves. A
-    filename is forty characters that an operator has to scan and cannot
-    compare at a glance; how MANY photographs the inspection rests on is the
-    fact this strip has to carry, and it is a fixed width whatever that count
-    is. The names stay in the Capture bay, one click away, where they can be
-    read properly.
-
-    The counts live in <details> so the identity strip cannot grow: an inline
-    disclosure is the browser's own affordance and survives keyboard, RTL and
-    high-contrast modes without any script.
-  -->
   <div class="rig-meta" id="rig-meta">
     <span class="rig-meta-i"><b data-i18n="meta.zone">ZONE</b><span id="meta-zone">-</span></span>
     <span class="rig-meta-i">
@@ -115,44 +92,16 @@ export const INDEX_HTML = `<!doctype html>
     <input type="checkbox" id="cache-toggle">
     <span>reuse cached AI</span>
   </label>
-
-  <!--
-    Inspection language.
-
-    A presentation control, not an engine control: switching it re-renders the
-    SAME canonical inspection in the selected language and never triggers a
-    model call. Language names are written in their own language on purpose -
-    they identify themselves without flags.
-
-    It sits in the identity strip rather than inside one bay, because a language
-    reachable only on the Inspect step cannot be used to read the evidence it
-    was chosen for. The options are generated from the server vocabulary in
-    wireLanguage(), so the list and the catalog cannot drift.
-  -->
   <label class="lang-sel" for="lang-select" dir="ltr" data-i18n-title="lang.hint" title="Presentation only. The inspection, its evidence and its provenance are unchanged.">
     <span class="lang-k" id="lang-label" data-i18n="lang.label">Inspection language</span>
     <select id="lang-select" aria-label="Inspection language"></select>
   </label>
 </div>
-
-<!--
-  The reviewer gate, shown above the pipeline so it is the first thing read on
-  every step rather than a message that only appears once something is clicked.
-  It states the real reason the workflow is unavailable, and it is the route to
-  the one action that resolves it.
--->
 <div class="gate" id="reviewer-gate" role="status" hidden>
   <span class="gate-k" data-i18n="gate.required">REVIEWER REQUIRED</span>
   <span class="gate-b" id="reviewer-gate-reason" data-i18n="gate.reason">Name the inspection reviewer to record a human verification. Until then every finding stays UNVERIFIED.</span>
   <button type="button" class="btn btn-xs" id="reviewer-gate-btn" data-i18n="gate.setup">SET UP REVIEWER</button>
 </div>
-
-<!--
-  The pipeline, always visible.
-  Two models do different jobs and the UI must never blur them into one
-  "AI" claim. Each stage names the model that actually ran it, and the
-  reasoning stage says so explicitly when it contributed nothing.
--->
 <div class="pipe" id="pipe" aria-label="Model pipeline" data-i18n-aria="aria.pipeline">
   <ol class="pipe-steps">
     <li class="pipe-step" id="pipe-1">
@@ -282,15 +231,6 @@ export const INDEX_HTML = `<!doctype html>
             <p class="drop-hint">PNG or JPEG, up to 12 MB each — select one or multiple files</p>
           </div>
         </div>
-
-        <!--
-          The photographs of the OPEN inspection.
-
-          This is one inspection, not several. The count is stated so the
-          operator can see what they are about to inspect, and each photograph
-          can be removed individually. Truth over convenience: a photograph that
-          failed is shown as failed rather than dropped from the strip.
-        -->
         <section class="imgs" id="imgs" aria-labelledby="imgs-h" hidden>
           <div class="imgs-head">
             <span class="imgs-h" id="imgs-h" data-i18n="imgs.head">Inspection photos</span>
@@ -321,9 +261,6 @@ export const INDEX_HTML = `<!doctype html>
         <div class="fixtures">
           <div class="fixtures-head">
             <p class="fixtures-h">Captures in this project</p>
-            <!-- Bulk actions over the project's captures. With one capture, or
-                 none, they would be no-ops, so they only appear once there is
-                 something to select. -->
             <div class="fixtures-acts" id="fixtures-acts" hidden>
               <button type="button" class="btn btn-ghost btn-xs" id="select-all-captures" data-i18n="imgs.selectAll">Select all</button>
               <button type="button" class="btn btn-ghost btn-xs" id="clear-capture-selection" data-i18n="imgs.clear">Clear</button>
@@ -335,16 +272,6 @@ export const INDEX_HTML = `<!doctype html>
             local dataset image below, or choose a demo capture.
           </p>
         </div>
-
-        <!--
-          The local validation dataset.
-
-          This is the path that makes the demo run on REAL construction reality
-          rather than a synthetic scene. The labelling is the point: these are
-          genuine photographs held on this machine, and importing one makes it a
-          real input to a real inspection. It does NOT make it project evidence,
-          and nothing in this panel claims it was captured on this site.
-        -->
         <section class="dataset" id="dataset" aria-labelledby="dataset-h">
           <div class="dataset-head">
             <h3 class="dataset-h" id="dataset-h">Local dataset</h3>
@@ -434,15 +361,6 @@ export const INDEX_HTML = `<!doctype html>
         <ol class="prio-list" id="priorities"></ol>
       </div>
     </div>
-
-    <!--
-      Which photographs this inspection rests on, and how it was qualified.
-
-      Both belong in one panel because both are provenance: one says what was
-      read, the other says which model stage satisfied the NVIDIA requirement.
-      The photograph list comes first because it is the thing an auditor checks
-      before looking at any number below.
-    -->
     <div class="panel">
       <div class="panel-head">
         <h3 class="panel-h" data-i18n="panel.provenance">Provenance &amp; Eligibility</h3>
@@ -451,15 +369,6 @@ export const INDEX_HTML = `<!doctype html>
       <ul class="basis" id="basis-list"></ul>
       <dl class="tape tape-wide" id="provenance"></dl>
       <p class="geom" id="geometry-note" hidden></p>
-      <!--
-        The NVIDIA verdict, and the two model stages behind it.
-
-        The verdict is the headline because it answers the question a judge
-        actually asks. Each row underneath names the model that actually ran
-        and says plainly whether that row is the qualifying inference: the
-        vision model here is genuinely not an NVIDIA model, and this panel says
-        so, but that fact never gets to stand in for the run's qualification.
-      -->
       <section class="qual" id="qualification" aria-labelledby="qual-h"
                data-requirement="UNKNOWN" hidden>
         <div class="qual-head">
@@ -484,10 +393,6 @@ export const INDEX_HTML = `<!doctype html>
 
     <div class="stage-grid">
       <div class="stage-l">
-        <!-- Which photograph of a multi-photo inspection is on screen. The
-             inspection rests on all of them at once, so each has to reachable
-             with its own evidence boxes; without this the rest of the group is
-             invisible even though its evidence is in the result. -->
         <div class="photo-switcher" id="photo-switcher" hidden>
           <span class="photo-switcher-lbl" data-i18n="imgs.evidencePhotos">Inspection photos:</span>
           <div class="photo-switcher-tabs" id="photo-switcher-tabs" role="tablist"></div>
@@ -549,15 +454,6 @@ export const INDEX_HTML = `<!doctype html>
       <span class="trust-tag" id="trust-state" data-i18n="panel.trustUnverified">UNVERIFIED</span>
       <span class="trust-note" data-i18n="panel.trustNote">Confidence never verifies itself.</span>
     </div>
-
-    <!--
-      Stage 2, and the reason this product is more than an object detector.
-
-      WHAT IT MEANS comes from Nemotron and is shown as its own stage with its own
-      provenance, never merged into the comparison. When the stage could not run,
-      that is stated here in as many words: a missing reasoning stage must never
-      read as an absence of problems.
-    -->
     <section class="reason" id="reason" aria-labelledby="reason-h" data-status="UNAVAILABLE">
       <div class="reason-head">
         <h3 class="reason-h" id="reason-h" data-i18n="panel.stageReasoningHeading">Construction reasoning</h3>

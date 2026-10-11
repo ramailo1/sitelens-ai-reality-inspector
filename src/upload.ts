@@ -1,29 +1,13 @@
-/**
- * Uploaded captures.
- *
- * Holds image bytes supplied by the operator for the life of the process and
- * wraps them in the same DemoCapture shape the generated fixtures use, so the
- * inspection path is identical for an uploaded photograph and a synthetic
- * scene. No file ever touches disk.
- *
- * Validation happens before storage: a capture is accepted only when it is
- * genuinely a PNG or JPEG whose header yields real dimensions, so an unreadable
- * capture can never reach the provider.
- */
+// Uploaded captures.
 
 import { randomUUID } from 'node:crypto';
 import { readImageDimensions } from './image-metadata.ts';
 import type { DemoCapture } from './captures.ts';
 
-/** Formats the provider accepts and the header parser can read. */
+// Formats the provider accepts and the header parser can read.
 export const ACCEPTED_MEDIA_TYPES = ['image/png', 'image/jpeg'] as const;
 export type AcceptedMediaType = (typeof ACCEPTED_MEDIA_TYPES)[number];
-
-/**
- * 12 MB ceiling. A site photograph is comfortably inside this; anything larger
- * is refused before it is buffered further, so a hostile upload cannot exhaust
- * memory. The limit is surfaced to the browser rather than guessed at.
- */
+// 12 MB ceiling. A site photograph is comfortably inside this.
 export const MAX_CAPTURE_BYTES = 12 * 1024 * 1024;
 
 export type CaptureRejectionReason =
@@ -39,7 +23,7 @@ export type CaptureUploadResult =
 export interface CaptureUploadInput {
   readonly bytes: Buffer;
   readonly filename: string;
-  /** Declared by the client; never trusted on its own. */
+  // Declared by the client; never trusted on its own.
   readonly declaredMediaType?: string | undefined;
 }
 
@@ -54,11 +38,7 @@ function extensionOf(filename: string): string {
   return dot === -1 ? '' : filename.slice(dot).toLowerCase();
 }
 
-/**
- * Decide the media type from the extension, falling back to what the client
- * declared. The declared type is only accepted when it names a real format;
- * readImageDimensions then decides against the actual bytes.
- */
+// Decide the media type from the extension, falling back to what the client declared.
 function resolveMediaType(
   filename: string,
   declared: string | undefined,
@@ -75,12 +55,7 @@ function resolveMediaType(
   return null;
 }
 
-/**
- * Validate an upload and, only when it passes, store it.
- *
- * Returns the reason rather than throwing so the interface can explain what to
- * fix, in the product's voice, next to the capture surface.
- */
+// Validate an upload and, only when it passes, store it.
 export function acceptCapture(input: CaptureUploadInput): CaptureUploadResult {
   const { bytes, filename, declaredMediaType } = input;
 
@@ -109,8 +84,7 @@ export function acceptCapture(input: CaptureUploadInput): CaptureUploadResult {
     };
   }
 
-  // The header is the authority. A renamed file or a truncated upload fails here
-  // rather than being stored and later failing inside the provider.
+  // The header is the authority.
   const dimensions = readImageDimensions(bytes);
   if (dimensions === null) {
     return {

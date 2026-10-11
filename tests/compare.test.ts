@@ -1,14 +1,4 @@
-/**
- * Reality vs expectation: the deterministic comparison engine.
- *
- * These tests pin the honesty rules that make this product credible:
- *
- *   - a matching count is MATCH, a differing count is ATTENTION
- *   - an element the model could not count is UNDETERMINED, never a shortfall
- *   - an element the model never mentioned is UNDETERMINED, never "missing"
- *   - "reported absent" and "never reported" are different answers
- *   - nothing here is ever allowed to invent a number
- */
+// Reality vs expectation: the deterministic comparison engine.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,8 +43,7 @@ test('a surplus count is ATTENTION and says "more", not "fewer"', () => {
 });
 
 test('an element the model would not count is UNDETERMINED, never a shortfall', () => {
-  // The honesty-critical case: the element is visible but no defensible number
-  // exists. Turning that into "8 columns missing" would invent the measurement.
+  // The honesty-critical case: the element is visible but no defensible number exists.
   const row = compareItem(
     expected({ expectedCount: 12 }),
     detection({ count: null, countBasis: 'NOT_DETERMINABLE' }),
@@ -98,8 +87,7 @@ test('ABSENT fails when the element is visible and passes when it is not', () =>
     detection({ element: 'EXCAVATION' }),
   );
 test('a row records whether the model reported the element at all', () => {
-  // This flag is what separates full-frame evidence from no visual evidence
-  // downstream, so both sides of it are pinned here.
+  // This flag is what separates full-frame evidence from no visual evidence downstream, so both sides of it are pinned here.
   const reported = compareItem(expected({ expectedCount: 12 }), detection({ count: 4 }));
   assert.equal(reported.detectionReported, true);
 

@@ -1,22 +1,4 @@
-/**
- * Live reasoning translation: novel Nemotron prose in Arabic, French and Chinese.
- *
- * The 47-entry offline memory cannot translate what it has never seen, and live
- * Nemotron reasoning is novel on every run - so without a live tier the Arabic
- * interface showed English reasoning with an honest "translation unavailable"
- * fallback. This file proves the live tier added for it:
- *
- *   - novel reasoning translates to ar/fr/zh through the already-configured
- *     Nebius chat path (stubbed fetch: no paid calls, deterministic);
- *   - the whole reasoning section is localized, with the original reachable;
- *   - misses fall back honestly; failures corrupt nothing and fail no run;
- *   - language switches and re-renders cost no vision, reasoning or
- *     translation call; restores reuse the cache; changed sources invalidate;
- *   - technical tokens (ATTENTION, grid refs, counts) survive translation;
- *   - a reasoning headline that launders a planned-state note ("substantially
- *     complete") into apparent fact is rejected at the source while the
- *     deterministic comparison stays exactly as computed.
- */
+// Live reasoning translation: novel Nemotron prose in Arabic, French and Chinese.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,12 +43,7 @@ import type { ExpectedState } from '../src/types/inspection.ts';
 import { demoCaptures } from '../src/captures.ts';
 import { APP_JS } from '../src/ui-assets.ts';
 
-/* ------------------------------------------------------------------ *
- * Novel fixtures. Every sentence below is absent from the offline memory
- * on purpose: these tests prove the LIVE tier, so a memory hit would be a
- * false pass. Distinct wording per area keeps the shared live cache from
- * leaking between tests.
- * ------------------------------------------------------------------ */
+// Novel fixtures. Every sentence below is absent from the offline memory on purpose: these tests prove the LIVE tier.
 
 const NOVEL_OBSERVATION = 'A tower crane jib extends over the northern edge of the deck.';
 const NOVEL_EVIDENCE = 'The horizontal jib is visible against the sky above the deck edge.';
@@ -161,7 +138,7 @@ class StubReasoner implements Reasoner {
   }
 }
 
-/** Deterministic stand-in for the live translator: canned hits, honest misses. */
+// Deterministic stand-in for the live translator: canned hits, honest misses.
 class StubTranslator implements ModelTranslator {
   public readonly name = 'stub-translator';
   public readonly calls: { texts: readonly string[]; target: ModelTranslationTarget }[] = [];
@@ -242,9 +219,7 @@ async function runNovelInspection(translator: ModelTranslator | null) {
   return { session, view, visionCalls };
 }
 
-/* ------------------------------------------------------------------ *
- * The live translator itself: one validated call, honest failures.
- * ------------------------------------------------------------------ */
+// The live translator itself: one validated call, honest failures.
 
 test('a novel batch translates in one call with a validated structure', async () => {
   const requests: { url: string; body: string }[] = [];
@@ -326,9 +301,7 @@ test('the configuration boundary is explicit: no credential or disabled reasonin
   assert.equal(live.name, LIVE_TRANSLATION_VERSION);
 });
 
-/* ------------------------------------------------------------------ *
- * Session integration: novel reasoning reaches Arabic, French, Chinese.
- * ------------------------------------------------------------------ */
+// Session integration: novel reasoning reaches Arabic, French, Chinese.
 
 test('novel Nemotron reasoning translates to Arabic, French and Chinese', async () => {
   clearLiveTranslationCache();
@@ -370,8 +343,7 @@ test('novel Nemotron reasoning translates to Arabic, French and Chinese', async 
 test('the offline memory is preferred: known sentences cost no live call', async () => {
   clearLiveTranslationCache();
   const translator = new StubTranslator(arabicDictionary());
-  // 'Column casting is part way across the bay.' lives in the memory; the
-  // novel set does not. One call per language covers exactly the misses.
+  // 'Column casting is part way across the bay.' lives in the memory.
   await translateModelTextsLive(
     ['Column casting is part way across the bay.', NOVEL_SUMMARY],
     translator,
@@ -482,10 +454,7 @@ test('a restored inspection reuses cached live translations with no translator',
   const payload = first.session.getPersistedPayload();
   assert.ok(payload !== null, 'the run must leave a persistable payload');
 
-  // A fresh session with NO translator configured, restoring from disk the
-  // way hydrateFromPersistence does after a restart. The provider is never
-  // called on this path; only the offline memory and the shared live cache
-  // may serve.
+  // A fresh session with NO translator configured, restoring from disk the way hydrateFromPersistence does after a restart.
   const second = new InspectionSession(
     new DemoFixtureProvider(),
     demoCaptures()[0]!,
@@ -534,9 +503,7 @@ test('a changed source invalidates its cached translation', async () => {
   assert.equal(resolveDisplayTranslation(edited, 'ar').text, edited);
 });
 
-/* ------------------------------------------------------------------ *
- * Content truth: planned-state notes must not become observed facts.
- * ------------------------------------------------------------------ */
+// Content truth: planned-state notes must not become observed facts.
 
 test('the reasoning context marks expected notes as operator declarations', () => {
   const expected: ExpectedState = {
@@ -629,10 +596,7 @@ test('an echoing Nemotron response is discarded while the comparison stands', as
     credentials: { apiKey: 'test-key-not-real' },
     fetchImpl: stubVisionFetch(visionCalls),
   });
-  // Novel vision prose, but a real Nemotron reasoner fed a response that
-  // launders the slab plan note ("substantially complete") into a conclusion.
-  // The guard under test lives in the reasoner itself, so the response must
-  // travel the real validation path rather than a stubbed outcome.
+  // Novel vision prose, but a real Nemotron reasoner fed a response that launders the slab plan note ("substantially.
   const echoBody = {
     choices: [
       {
@@ -679,8 +643,7 @@ test('an echoing Nemotron response is discarded while the comparison stands', as
   // The prose is gone; the facts are exactly as computed.
   assert.equal(view.reasoning.status, 'UNAVAILABLE');
   assert.equal(view.reasoning.failureKind, 'REJECTED_BY_VALIDATION');
-  // Discarded prose is never translated either: it cannot reach the map, so
-  // no language can present it and translation cannot launder it back.
+  // Discarded prose is never translated either: it cannot reach the map, so no language can present it and translation.
   assert.equal(
     view.modelTranslations['The slab is substantially complete across the zone.'],
     undefined,
@@ -693,9 +656,7 @@ test('an echoing Nemotron response is discarded while the comparison stands', as
   }
 });
 
-/* ------------------------------------------------------------------ *
- * The Arabic surface: the whole reasoning section, original in reach.
- * ------------------------------------------------------------------ */
+// The Arabic surface: the whole reasoning section, original in reach.
 
 interface StubNode {
   tagName: string;
@@ -831,8 +792,7 @@ test('the Arabic reasoning section reads in Arabic with the original one toggle 
 });
 
 test('every new catalog key stays out of the translation memory path', () => {
-  // The tr.* labels are interface chrome in all four languages, present and
-  // placeholder-free, so the toggle and badges read correctly everywhere.
+  // The tr.* labels are interface chrome in all four languages, present and placeholder-free, so the toggle and badges.
   for (const key of ['tr.viewOriginal', 'tr.viewTranslation', 'tr.translatedBadge', 'tr.fallbackNote'] as const) {
     for (const lang of INSPECTION_LANGUAGES) {
       const value = UI_STRINGS[lang][key];
@@ -840,8 +800,7 @@ test('every new catalog key stays out of the translation memory path', () => {
       assert.ok(value.trim().length > 0);
     }
   }
-  // Memory lookups never claim English as translated, and a sentence no tier
-  // has ever seen falls back honestly in every language.
+  // Memory lookups never claim English as translated, and a sentence no tier has ever seen falls back honestly in every language.
   const unseen = 'A sentence no tier has ever translated, mentioning nothing.';
   assert.equal(translateModelText(unseen, 'en').translated, false);
   for (const lang of ['fr', 'ar', 'zh'] as const) {
@@ -880,8 +839,7 @@ test('construction terminology guidance and oversail normalization handle domain
     'Un survol de la grue dépasse la limite nord.',
   );
 
-  // Uniform per language: no caller-shaped exemptions, and a leading capital
-  // is preserved deterministically. Unrelated text passes through untouched.
+  // Uniform per language: no caller-shaped exemptions, and a leading capital is preserved deterministically.
   assert.equal(
     normalizeTranslatedConstructionTerms('FR: Un oversail de la grue dépasse.', 'fr'),
     'FR: Un survol de la grue dépasse.',

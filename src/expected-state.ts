@@ -1,24 +1,4 @@
-/**
- * Expected-state presets.
- *
- * This is deliberately NOT a BIM model and NOT a schedule of works. It is a
- * short, editable inspection reference - the "what should I see if this zone is
- * where it should be" list that makes REALITY vs EXPECTATION possible without
- * a perfect model.
- *
- * A reference always carries a `presetId` so the UI can state exactly which
- * reference produced a comparison. The built-in presets are SYSTEM references
- * and cannot be deleted: without one of them the product would have no valid
- * comparison reference at all. Operator-authored presets are custom and are
- * removed like any other project data.
- *
- * The catalogue is global by design - a reference describes a zone condition,
- * not a tenant. What a project owns is its choice of reference and its operator
- * edits, and those never cross a project boundary.
- *
- * State is in memory for the life of the process, matching the observation
- * store and result cache. This is a demonstration surface, not persistence.
- */
+// Expected-state presets.
 
 import { randomUUID } from 'node:crypto';
 import type { ExpectedItem, ExpectedState } from './types/inspection.ts';
@@ -66,8 +46,7 @@ function item(
   expectedCount: number | null,
   note: string,
 ): ExpectedItem {
-  // The presets are compile-time constants, but they are validated anyway so a
-  // typo becomes a loud failure rather than a silently wrong reference.
+  // The presets are compile-time constants, but they are validated anyway so a typo becomes a loud failure rather than a.
   if (!isElementKind(element)) throw new Error(`bad element in expected state: ${element}`);
   if (!isExpectation(expectation)) {
     throw new Error(`bad expectation in expected state: ${expectation}`);
@@ -75,14 +54,7 @@ function item(
   return { id, element, expectation, expectedCount, note };
 }
 
-/**
- * The hackathon demo reference: North Core, mid-structure.
- *
- * Chosen because it produces a genuinely mixed result rather than a flattering
- * one: some items match, one is a clear numeric shortfall, and several cannot
- * be settled from a single photograph. That mix is what a credible inspection
- * tool looks like.
- */
+// The hackathon demo reference: North Core, mid-structure.
 export const NORTH_CORE_EXPECTED: ExpectedState = {
   zone: 'North Core',
   source: 'PRESET',
@@ -96,7 +68,7 @@ export const NORTH_CORE_EXPECTED: ExpectedState = {
   ],
 };
 
-/** A calm reference condition, used to show a clean comparison. */
+// A calm reference condition, used to show a clean comparison.
 export const SOUTH_WING_EXPECTED: ExpectedState = {
   zone: 'South Wing',
   source: 'PRESET',
@@ -107,15 +79,10 @@ export const SOUTH_WING_EXPECTED: ExpectedState = {
   ],
 };
 
-/** The reference a new project starts from. */
+// The reference a new project starts from.
 export const DEFAULT_EXPECTED_PRESET_ID = 'north-core';
 
-/**
- * The reference catalogue every project selects from.
- *
- * A project records the preset id it uses plus any operator edits, so changing a
- * project never changes another project's reference.
- */
+// The reference catalogue every project selects from.
 export class PresetStore {
   private readonly presets = new Map<string, Preset>();
 
@@ -147,7 +114,7 @@ export class PresetStore {
     return DEFAULT_EXPECTED_PRESET_ID;
   }
 
-  /** The reference a new project starts from. */
+  // The reference a new project starts from.
   public defaultExpectedState(): ExpectedState {
     const preset = this.presets.get(DEFAULT_EXPECTED_PRESET_ID);
     return preset === undefined
@@ -194,12 +161,7 @@ export class PresetStore {
     return { ok: true, value: { ...updated } };
   }
 
-  /**
-   * Delete a custom preset.
-   *
-   * A system preset is refused rather than removed: the product would otherwise
-   * be left with no valid reference to compare against.
-   */
+  // Delete a custom preset.
   public delete(id: string): PresetResult<Preset> {
     const preset = this.presets.get(id);
     if (!preset) return fail('UNKNOWN_PRESET', 'That reference no longer exists.');
@@ -231,7 +193,7 @@ function cleanZone(raw: unknown): PresetResult<string> {
   return { ok: true, value: zone };
 }
 
-/** Validate a client-supplied expected-element list against the domain vocabulary. */
+// Validate a client-supplied expected-element list against the domain vocabulary.
 export function cleanItems(raw: unknown): PresetResult<ExpectedItem[]> {
   if (!Array.isArray(raw)) return fail('EMPTY_ITEMS', 'Expected elements must be a list.');
   if (raw.length === 0) return fail('EMPTY_ITEMS', 'A reference needs at least one expected element.');
@@ -277,7 +239,7 @@ export function cleanItems(raw: unknown): PresetResult<ExpectedItem[]> {
   return { ok: true, value: out };
 }
 
-/** Project a preset onto the expected state the comparison engine consumes. */
+// Project a preset onto the expected state the comparison engine consumes.
 export function presetToState(preset: Preset): ExpectedState {
   return {
     zone: preset.zone,
@@ -286,28 +248,17 @@ export function presetToState(preset: Preset): ExpectedState {
   };
 }
 
-/**
- * The reference used when nothing else applies.
- *
- * A clone, never the shared constant: a caller that mutates the result must not
- * be able to corrupt the catalogue for every other project.
- */
+// The reference used when nothing else applies.
 export function defaultExpectedState(): ExpectedState {
   return cloneExpectedState(NORTH_CORE_EXPECTED);
 }
 
-/** Clone a preset so an operator edit can never mutate the shared constant. */
+// Clone a preset so an operator edit can never mutate the shared constant.
 export function cloneExpectedState(state: ExpectedState): ExpectedState {
   return { ...state, items: state.items.map((i) => ({ ...i })) };
 }
 
-/**
- * Render an expected state as the short plain-text list sent to the model.
- *
- * This is LOOK-FOR context only. The model is told explicitly not to compare:
- * the deterministic comparison happens in compare.ts, so the numbers the judge
- * sees on screen are arithmetic, not a model's opinion.
- */
+// Render an expected state as the short plain-text list sent to the model.
 export function expectedSummaryFor(state: ExpectedState): string {
   return state.items
     .map((item) => `- ${expectedTextFor(item)}`)

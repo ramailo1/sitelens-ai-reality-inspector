@@ -1,20 +1,4 @@
-/**
- * Multilingual inspection results.
- *
- * The feature under test is not "text in four languages". It is the claim that
- * ONE verified inspection is presentable in four languages without being
- * re-derived: same finding ids, same severities, same evidence, same counts,
- * same timestamps, same provenance, same models, same NVIDIA verdict - and zero
- * additional inference.
- *
- * So most of these tests assert what must NOT change. A localization layer that
- * quietly mutates a finding would be worse than no localization at all.
- *
- * One test is deliberately strict in the other direction: regenerating the
- * DERIVED prose in English must reproduce, character for character, the English
- * the pipeline itself produced. That is what proves the localized versions are
- * the same facts rendered differently, rather than a different set of sentences.
- */
+// Multilingual inspection results.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,9 +26,7 @@ import { defaultExpectedState } from '../src/expected-state.ts';
 import { demoCaptures } from '../src/captures.ts';
 import { APP_CSS, APP_JS, INDEX_HTML } from '../src/ui-assets.ts';
 
-/* ------------------------------------------------------------------ *
- * A real session, with the network replaced.
- * ------------------------------------------------------------------ */
+// A real session, with the network replaced.
 
 const VISION_BODY = {
   choices: [
@@ -130,7 +112,7 @@ function stubFetch(body: unknown) {
   };
 }
 
-/** One real inspection, plus the call log proving how many inferences ran. */
+// One real inspection, plus the call log proving how many inferences ran.
 async function runInspection() {
   const vision = stubFetch(VISION_BODY);
   const reasoning = stubFetch(REASONING_BODY);
@@ -207,9 +189,7 @@ function inputFor(view: Awaited<ReturnType<InspectionSession['run']>>): Localiza
   };
 }
 
-/* ------------------------------------------------------------------ *
- * Language selection
- * ------------------------------------------------------------------ */
+// Language selection
 
 test('exactly four inspection languages are supported', () => {
   assert.deepEqual([...INSPECTION_LANGUAGES], ['en', 'fr', 'ar', 'zh']);
@@ -273,9 +253,7 @@ test('the browser payload carries every language and its direction', () => {
 });
 
 test('no translation can break the client script it is injected into', () => {
-  // The catalog is serialized straight into a template literal. A stray backtick
-  // or ${ in any string would corrupt the served JavaScript for every user, so
-  // it is checked rather than trusted.
+  // The catalog is serialized straight into a template literal.
   for (const code of INSPECTION_LANGUAGES) {
     for (const [key, value] of Object.entries(UI_STRINGS[code])) {
       assert.doesNotMatch(value, /`/, code + '.' + key + ' must not contain a backtick');
@@ -284,9 +262,7 @@ test('no translation can break the client script it is injected into', () => {
   }
 });
 
-/* ------------------------------------------------------------------ *
- * Placeholder and case helpers
- * ------------------------------------------------------------------ */
+// Placeholder and case helpers
 
 test('placeholders fill, and a missing one stays visible rather than vanishing', () => {
   assert.equal(fill('a {x} b', { x: '1' }), 'a 1 b');
@@ -301,11 +277,9 @@ test('sentence case leaves caseless scripts alone', () => {
   assert.equal(sentenceCase('\u0639\u0645\u0648\u062f'), '\u0639\u0645\u0648\u062f');
 });
 
-/* ------------------------------------------------------------------ *
- * Canonical invariance
- * ------------------------------------------------------------------ */
+// Canonical invariance
 
-/** Catalog read by a runtime-composed key, e.g. `severity.HIGH`. */
+// Catalog read by a runtime-composed key, e.g. `severity.HIGH`.
 function labelFor(code: 'en' | 'fr' | 'ar' | 'zh', key: string): string {
   const catalog = UI_STRINGS[code] as Readonly<Record<string, string | undefined>>;
   const value = catalog[key];
@@ -313,7 +287,7 @@ function labelFor(code: 'en' | 'fr' | 'ar' | 'zh', key: string): string {
   return value;
 }
 
-/** Indexed read that asserts the element exists first. */
+// Indexed read that asserts the element exists first.
 function at<T>(list: readonly T[], index: number, label: string): T {
   const value = list[index];
   assert.ok(value !== undefined, label + ' at index ' + index + ' must exist');
@@ -392,8 +366,7 @@ test('switching language leaves every machine fact untouched', async () => {
   });
 
   const all = localizeInspectionAll(inputFor(view));
-  // Localizing is a read of the input. Running every language must leave the
-  // canonical structures exactly as they were.
+  // Localizing is a read of the input. Running every language must leave the canonical structures exactly as they were.
   const after = JSON.stringify({
     ids: view.inspectionFindings.map((f) => [f.id, f.severity, f.evidenceState, f.verificationStatus]),
     counts: view.counters,
@@ -414,13 +387,7 @@ test('localizing twice gives byte-identical output', async () => {
   assert.equal(second, first, 'the projection must be deterministic');
 });
 
-/* ------------------------------------------------------------------ *
- * Fidelity: regenerating English must reproduce the pipeline's own English.
- *
- * This is the load-bearing test. If regenerating the derived prose in English
- * produced different sentences, then the other three languages would be
- * rendering different FACTS, not the same facts in another script.
- * ------------------------------------------------------------------ */
+// Fidelity: regenerating English must reproduce the pipeline's own English.
 
 test('English regeneration reproduces the pipeline text character for character', async () => {
   const { view } = await runInspection();
@@ -466,9 +433,7 @@ test('English regeneration reproduces the canonical brief and priorities', async
   }
 });
 
-/* ------------------------------------------------------------------ *
- * Measurements and technical values
- * ------------------------------------------------------------------ */
+// Measurements and technical values
 
 test('the column count survives in every language, unaltered', async () => {
   const { view } = await runInspection();
@@ -476,8 +441,7 @@ test('the column count survives in every language, unaltered', async () => {
   const index = view.comparison.findIndex((r) => r.element === 'COLUMN');
   assert.ok(index > -1, 'the fixture must produce a COLUMN row');
 
-  // The row is an ATTENTION count discrepancy, so the numbers appear in both
-  // the expected and the observed text in all four languages.
+  // The row is an ATTENTION count discrepancy, so the numbers appear in both the expected and the observed text in all four languages.
   for (const code of INSPECTION_LANGUAGES) {
     const row = at(all[code].comparison, index, code + ' COLUMN comparison row');
     assert.match(row.observedText, new RegExp(String(at(view.comparison, index, 'row').observedCount)));
@@ -512,16 +476,12 @@ test('model ids and technical identifiers are never translated', async () => {
   localizeInspectionAll(inputFor(view));
   const after = [view.provenance.model, view.provenance.provider, view.reasoning.model];
 
-  // A model id is a machine fact. It is not projected into the localized view at
-  // all, so it cannot be translated, and the canonical one is never rewritten.
+  // A model id is a machine fact.
   assert.deepEqual(after, before);
   assert.equal(view.provenance.model, DEFAULT_NEBIUS_MODEL);
   assert.equal(view.reasoning.model, DEFAULT_REASONING_MODEL);
 
   // Where a model id DOES appear in the localized copy, it appears verbatim.
-  // The qualification panel names both models on purpose: the point of that
-  // panel is which model contributed. The requirement is that the id is
-  // identical in every language, not that it is absent.
   const all = localizeInspectionAll(inputFor(view));
   for (const code of INSPECTION_LANGUAGES) {
     const path = all[code].qualification.path;
@@ -530,8 +490,7 @@ test('model ids and technical identifiers are never translated', async () => {
       code + ' must name both models verbatim in the qualification path',
     );
   }
-  // No localized string may contain a MANGLED id: any MiniCPM or Nemotron token
-  // in the output must be the exact canonical id, character for character.
+  // No localized string may contain a MANGLED id: any MiniCPM or Nemotron token in the output must be the exact canonical.
   const localizedText = JSON.stringify(all);
   // The namespace prefix is part of the id, so it is inside the captured token.
   const tokenClass = '[A-Za-z0-9_./-]';
@@ -541,15 +500,12 @@ test('model ids and technical identifiers are never translated', async () => {
   for (const token of localizedText.match(new RegExp(tokenClass + '*Nemotron' + tokenClass + '*', 'g')) ?? []) {
     assert.equal(token, DEFAULT_REASONING_MODEL, 'mangled model id: ' + token);
   }
-  // "Nemotron" also appears as a bare product reference in the reasoning
-  // labels, which is a name and not an id.
+  // "Nemotron" also appears as a bare product reference in the reasoning labels, which is a name and not an id.
   const bareNemotron = (localizedText.match(/\bNemotron\b/g) ?? []).length;
   assert.ok(bareNemotron > 0, 'the reasoning stage is still named');
 });
 
-/* ------------------------------------------------------------------ *
- * Model-authored text is preserved and labelled, never invented
- * ------------------------------------------------------------------ */
+// Model-authored text is preserved and labelled, never invented
 
 test('AI-authored findings keep their model English and say so', async () => {
   const { view } = await runInspection();
@@ -591,8 +547,7 @@ test('comparison-derived findings ARE localized in every language', async () => 
 });
 
 test('an unlocalized model sentence is never presented as translated', async () => {
-  // Every localized finding carries a flag that says which it is. This is the
-  // guarantee that the UI cannot imply a translation it does not have.
+  // Every localized finding carries a flag that says which it is.
   const { view } = await runInspection();
   const all = localizeInspectionAll(inputFor(view));
   for (const code of INSPECTION_LANGUAGES) {
@@ -607,9 +562,7 @@ test('an unlocalized model sentence is never presented as translated', async () 
   }
 });
 
-/* ------------------------------------------------------------------ *
- * Arabic
- * ------------------------------------------------------------------ */
+// Arabic
 
 test('the Arabic projection is marked right-to-left and the others are not', async () => {
   const { view } = await runInspection();
@@ -630,8 +583,7 @@ test('Arabic labels contain Arabic script and no untranslated English chrome', a
   assert.match(at(ar.comparison, 0, 'ar comparison row').statusLabel, /[\u0600-\u06FF]/);
   assert.match(arFinding.severityLabel, /[\u0600-\u06FF]/);
   assert.match(arFinding.reason, /[\u0600-\u06FF]/);
-  // The regenerated, comparison-derived prose is Arabic in every language that
-  // is not the model's own.
+  // The regenerated, comparison-derived prose is Arabic in every language that is not the model's own.
   assert.match(arFinding.title, /[\u0600-\u06FF]/);
   assert.match(arFinding.recommendation, /[\u0600-\u06FF]/);
   assert.match(ar.brief.overallLabel, /[\u0600-\u06FF]/);
@@ -643,16 +595,12 @@ test('Arabic keeps model ids and numbers readable inside Arabic text', async () 
   const index = view.comparison.findIndex((r) => r.element === 'COLUMN');
   const observed = at(ar.comparison, index, 'ar COLUMN row').observedText;
 
-  // Digits sit inside Arabic words. They must not be separated by any mark, and
-  // must not be written in Arabic-Indic digits, because the underlying value is
-  // the Western-digit one the pipeline produced.
+  // Digits sit inside Arabic words.
   assert.match(observed, /9/);
   assert.doesNotMatch(observed, /[\u0660-\u0669]/, 'the canonical digits must not be renumbered');
 });
 
-/* ------------------------------------------------------------------ *
- * Chinese
- * ------------------------------------------------------------------ */
+// Chinese
 
 test('the Chinese projection renders CJK and carries no Latin chrome', async () => {
   const { view } = await runInspection();
@@ -672,15 +620,12 @@ test('the Chinese projection renders CJK and carries no Latin chrome', async () 
 });
 
 test('a long Chinese string is allowed to wrap rather than clip', () => {
-  // The wrapping rule is what keeps a long CJK sentence inside its panel. Assert
-  // the rule exists in the stylesheet rather than trusting a visual check alone.
+  // The wrapping rule is what keeps a long CJK sentence inside its panel.
   assert.match(APP_CSS, /\.i18n-surface\[dir="rtl"\]/);
   assert.match(APP_CSS, /overflow-wrap:\s*anywhere/);
 });
 
-/* ------------------------------------------------------------------ *
- * No reinspection
- * ------------------------------------------------------------------ */
+// No reinspection
 
 test('localizing performs no inference at all', async () => {
   const { view, visionCalls, reasonCalls } = await runInspection();
@@ -720,9 +665,7 @@ test('the session ships every language in the same payload', async () => {
   }
 });
 
-/* ------------------------------------------------------------------ *
- * The client
- * ------------------------------------------------------------------ */
+// The client
 
 interface StubNode {
   tagName: string;
@@ -786,10 +729,7 @@ function stubNode(tag: string): StubNode {
   return node;
 }
 
-/**
- * Run the REAL language code from APP_JS, with an api() that records every
- * call it is asked to make. A single call here would be a defect.
- */
+// Run the REAL language code from APP_JS, with an api() that records every call it is asked to make.
 function languageHarness(stored: string | null) {
   const nodes = new Map<string, StubNode>();
   const surfaces = [stubNode('section'), stubNode('section'), stubNode('section')];
@@ -831,15 +771,12 @@ function languageHarness(stored: string | null) {
     api: (...args: unknown[]) => { apiCalls.push(String(args[0])); return Promise.resolve({}); },
     fetch: () => { apiCalls.push('fetch'); return Promise.reject(new Error('no network in this test')); },
     setTimeout,
-    // Stands in for the real renderAll, and calls the REAL applyLanguage so the
-    // direction attributes are exercised rather than asserted about.
+    // Stands in for the real renderAll, and calls the REAL applyLanguage so the direction attributes are exercised rather.
     renderAll: () => { rendered++; },
   };
   vm.createContext(context);
 
-  // The language runtime sits in one contiguous block at the top of the client,
-  // between the `$` helper and the tab order constant. Take that block verbatim,
-  // plus the wiring function, and run the shipped text rather than a copy.
+  // The language runtime sits in one contiguous block at the top of the client, between the `$` helper and the tab order constant.
   const start = APP_JS.indexOf('const $ = (id)');
   const end = APP_JS.indexOf('const TAB_ORDER');
   const wire = APP_JS.indexOf('function wireLanguage()');
@@ -928,17 +865,12 @@ test('the localized surface carries lang and dir in the markup', () => {
   }
   assert.equal((INDEX_HTML.match(/class="bay[^"]*i18n-surface/g) ?? []).length, 3);
   assert.match(INDEX_HTML, /id="lang-select"/);
-  // The label names the select through the wrapping label's `for`, and carries
-  // the catalog key so its text follows the chosen language.
+  // The label names the select through the wrapping label's `for`, and carries the catalog key so its text follows the chosen language.
   assert.match(INDEX_HTML,
     /<label class="lang-sel" for="lang-select"[^>]*>\s*<span class="lang-k" id="lang-label"[^>]*data-i18n="lang\.label"/);
-  // The control itself stays LTR. It is in the identity strip, which is never a
-  // localized surface, and it declares so explicitly rather than relying on it.
-  // Extra attributes (tooltip) are allowed; the three invariants are for, dir
-  // and the LTR declaration.
+  // The control itself stays LTR.
   assert.match(INDEX_HTML, /<label class="lang-sel" for="lang-select"[^>]*dir="ltr"[^>]*>/);
-  // The presentation-only hint lives as a tooltip, not as visible header text,
-  // so the identity strip stays compact.
+  // The presentation-only hint lives as a tooltip, not as visible header text, so the identity strip stays compact.
   assert.match(INDEX_HTML, /<label class="lang-sel"[^>]*data-i18n-title="lang\.hint"/);
   assert.doesNotMatch(INDEX_HTML, /id="lang-note"/);
 });

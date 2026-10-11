@@ -1,17 +1,4 @@
-/**
- * The local dataset as a real, truthfully-labelled demo path.
- *
- * The central honesty claim of this feature is that a dataset photograph can
- * become a REAL input to a real inspection without ever being presented as
- * something this application captured on the operator's site. These tests
- * exercise that claim against a REAL temporary dataset folder built here, so
- * they do not depend on the untracked `sample/` directory being present.
- *
- * `LOCAL_DATASET` is a third source alongside UPLOAD and DEMO_FIXTURE. That
- * distinction is load-bearing: folding a dataset image into either existing case
- * would let a photograph from a Wikimedia archive be shown next to a synthetic
- * fixture with no indication of which is which.
- */
+// The local dataset as a real, truthfully-labelled demo path.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +16,7 @@ import { ProjectStore } from '../src/projects.ts';
 import { DemoFixtureProvider } from '../src/providers/demo-fixture.provider.ts';
 import { UnavailableReasoner } from '../src/providers/nemotron-reasoner.ts';
 
-/** A real PNG, so the dataset reader parses an actual header. */
+// A real PNG, so the dataset reader parses an actual header.
 function png(width: number, height: number): Buffer {
   const stride = width * 3;
   const raw = Buffer.alloc((stride + 1) * height);
@@ -71,7 +58,7 @@ function png(width: number, height: number): Buffer {
   ]);
 }
 
-/** A JPEG whose bytes start with an Exif orientation 6 tag. */
+// A JPEG whose bytes start with an Exif orientation 6 tag.
 function orientationSixJpeg(width: number, height: number): Buffer {
   const EXIF_ID = Buffer.from([0x45, 0x78, 0x69, 0x66, 0x00, 0x00]);
   const tiff = Buffer.alloc(8);
@@ -89,9 +76,7 @@ function orientationSixJpeg(width: number, height: number): Buffer {
   const exifSeg = Buffer.alloc(2);
   exifSeg.writeUInt16BE(payload.length + 2, 0);
 
-  // SOF0: marker (0xFF 0xC0) then length (2), precision (1), height (2),
-  // width (2), component count (1). No separate length buffer: writing one
-  // would insert two padding bytes and shift every dimension by two.
+  // SOF0: marker (0xFF 0xC0) then length (2), precision (1), height (2), width (2), component count (1).
   const sof = Buffer.alloc(11);
   sof.writeUInt16BE(11, 0);
   sof[2] = 8;
@@ -107,13 +92,7 @@ function orientationSixJpeg(width: number, height: number): Buffer {
   ]);
 }
 
-/**
- * A valid JPEG over the measured endpoint ceiling.
- *
- * Built from many COM segments because a JPEG segment length is 16-bit, so a
- * single one can only carry 65535 bytes. The file stays a structurally valid
- * JPEG: marker, length, free-form payload, repeated until the size is reached.
- */
+// A valid JPEG over the measured endpoint ceiling.
 function oversizedJpeg(targetBytes: number): Buffer {
   const base = orientationSixJpeg(200, 100);
   const sofIndex = base.indexOf(Buffer.from([0xff, 0xc0]));
@@ -135,7 +114,7 @@ function oversizedJpeg(targetBytes: number): Buffer {
   return Buffer.concat(chunks);
 }
 
-/** Build a throwaway dataset directory; returns its path and a cleanup fn. */
+// Build a throwaway dataset directory; returns its path and a cleanup fn.
 function tempDataset(files: Record<string, Buffer>): { dir: string; env: NodeJS.ProcessEnv; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'sitelens-dataset-'));
   mkdirSync(dir, { recursive: true });
@@ -228,8 +207,7 @@ test('import normalizes EXIF orientation and records the original', () => {
     assert.equal(result.entry.geometryNormalized, true);
     assert.equal(result.capture.geometryNormalized, true);
 
-    // The bytes the application holds now carry orientation 1, so the model,
-    // the browser and the overlay cannot disagree.
+    // The bytes the application holds now carry orientation 1, so the model, the browser and the overlay cannot disagree.
     assert.equal(readImageGeometry(result.capture.bytes)?.orientation, 1);
     assert.deepEqual(result.capture.dimensions, { width: 200, height: 100 });
     assert.match(result.capture.content, /EXIF orientation 6/);
@@ -290,8 +268,7 @@ test('a dataset capture is a THIRD source, never an upload or a fixture', () => 
 });
 
 test('an over-ceiling dataset image is refused with the real limit named', () => {
-  // MAX_PROVIDER_IMAGE_BYTES is measured from the live endpoint: 9.2 MB is
-  // accepted, 15.9 MB is rejected. This file is over the 10 MB ceiling.
+  // MAX_PROVIDER_IMAGE_BYTES is measured from the live endpoint: 9.2 MB is accepted, 15.9 MB is rejected.
   const fixture = tempDataset({
     '023-exterior-rebar-mat-slab-crew.jpg': oversizedJpeg(11 * 1024 * 1024),
   });

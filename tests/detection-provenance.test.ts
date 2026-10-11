@@ -1,20 +1,4 @@
-/**
- * Frame-level provenance of detected elements.
- *
- * A consolidated inspection reads several photographs and presents ONE list of
- * detections. Every entry therefore has to name the photograph that produced
- * it, because the evidence overlay positions that entry's box against a frame's
- * dimensions and shows its label beside it. An entry attributed to the wrong
- * frame is a claim the model never made: a box read from one photograph drawn on
- * another.
- *
- * The defect these guard against: the session walked the merged element list
- * with a POSITION->frame map that was filled using a per-photograph index, so
- * two photographs that each reported two elements overwrote each other's keys.
- * Everything was then attributed to the last photograph that contributed an
- * entry and the remainder fell back to the primary capture. One element per
- * photograph cannot trigger it, which is why the existing suite never saw it.
- */
+// Frame-level provenance of detected elements.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,8 +12,7 @@ function frame(id: string, label: string, marker: number): DemoCapture {
   return {
     id,
     label,
-    // One distinct byte per frame, so a stub can tell which photograph a
-    // request carried without closing over the capture it was built from.
+    // One distinct byte per frame, so a stub can tell which photograph a request carried without closing over the capture.
     bytes: Buffer.from([0x89, 0x50, 0x4e, 0x47, marker]),
     mediaType: 'image/png',
     dimensions: { width: 8, height: 8 },
@@ -49,13 +32,13 @@ interface ElementSpec {
 
 interface RunOptions {
   readonly frames: readonly DemoCapture[];
-  /** What each frame reports, keyed by the frame's marker byte. */
+  // What each frame reports, keyed by the frame's marker byte.
   readonly perFrame: Readonly<Record<number, readonly ElementSpec[]>>;
-  /** Frames the provider fails on, keyed by marker byte. */
+  // Frames the provider fails on, keyed by marker byte.
   readonly failFor?: readonly number[];
 }
 
-/** Runs one consolidated inspection and returns the view plus provider calls. */
+// Runs one consolidated inspection and returns the view plus provider calls.
 async function runInspection(options: RunOptions) {
   const calls: string[] = [];
   const failing = options.failFor ?? [];
@@ -68,9 +51,7 @@ async function runInspection(options: RunOptions) {
       const who = options.frames.find((f) => f.bytes[4] === marker)?.label ?? 'unknown';
       calls.push(who);
       if (failing.includes(marker)) {
-        // A ProviderError specifically: the session absorbs those per frame so
-        // one unreadable photograph cannot discard the others. A plain Error is
-        // rethrown and would fail the whole run.
+        // A ProviderError specifically: the session absorbs those per frame so one unreadable photograph cannot discard the others.
         throw new ProviderError('UNAVAILABLE', `provider unreachable for ${who}`);
       }
       const specs = options.perFrame[marker] ?? [];
@@ -84,8 +65,7 @@ async function runInspection(options: RunOptions) {
           present: s.present,
           count: null,
           confidence: s.confidence,
-          // The frame name is in the evidence, giving the test ground truth for
-          // what the model actually read.
+          // The frame name is in the evidence, giving the test ground truth for what the model actually read.
           evidence: `seen in ${who}`,
           boundingBox: null,
         })),
@@ -110,7 +90,7 @@ async function runInspection(options: RunOptions) {
   return { view, calls };
 }
 
-/** The frame a detection's evidence says the model read. */
+// The frame a detection's evidence says the model read.
 function frameThatProduced(evidence: string): string {
   const match = /seen in (\S+)/.exec(evidence);
   return match === null ? 'unknown' : match[1]!;
@@ -164,8 +144,7 @@ test('differing counts per frame do not confuse attribution', async () => {
 });
 
 test('conflicting presence across frames keeps each frame its own reading', async () => {
-  // Frame A says present, frame C says absent. Both readings are real and each
-  // belongs to its own frame; neither may be rewritten onto the other.
+  // Frame A says present, frame C says absent.
   const { view } = await runInspection({
     frames: [A, C],
     perFrame: {
@@ -197,8 +176,7 @@ test('a frame that fails contributes no detection and steals no attribution', as
     },
   });
 
-  // A failed frame reads nothing, so it may not appear as the source of a
-  // reading, and the surviving frames must stay correctly attributed.
+  // A failed frame reads nothing, so it may not appear as the source of a reading, and the surviving frames must stay.
   assert.equal(view.detections.length, 4);
   for (const d of view.detections) {
     assert.notEqual(d.captureLabel, 'frame-b', 'a failed frame cannot have produced a reading');
@@ -230,9 +208,7 @@ test('provenance survives a partial analysis without inventing a frame', async (
 });
 
 test('the deterministic comparison result is unchanged by provenance', async () => {
-  // Attribution must not alter what the comparison concluded. Both frames
-  // report the same element, so the reconciled verdict must be identical to the
-  // single-frame verdict for that element.
+  // Attribution must not alter what the comparison concluded.
   const multi = await runInspection({
     frames: [A, B],
     perFrame: {

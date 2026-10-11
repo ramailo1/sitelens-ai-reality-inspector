@@ -1,45 +1,6 @@
-/**
- * Multilingual presentation of an inspection result.
- *
- * THE ONE RULE IN THIS FILE: language changes PRESENTATION and nothing else.
- *
- * A canonical inspection is a set of machine facts: ids, enums, counts,
- * timestamps, bounding boxes, provenance, and the prose the vision and reasoning
- * models actually returned. Those facts are computed once, validated once,
- * persisted once, and are byte-identical whichever language is on screen. This
- * module reads a finished inspection and returns a SECOND object that describes
- * the same inspection in another language. It never mutates its input, never
- * calls a model, and never re-runs the pipeline.
- *
- * Two kinds of text exist in an inspection result, and they are handled
- * differently on purpose:
- *
- *   DERIVED      The pipeline already generates this from structured facts - the
- *                comparison rows, the reality brief, the priority basis, the
- *                labels on every enum. It is REGENERATED here from those same
- *                canonical fields in the target language. Not translated: there
- *                is no English sentence being converted, so a mistranslation
- *                cannot invent a fact that the code did not compute.
- *
- *   MODEL        Free English written by MiniCPM or Nemotron - a finding title,
- *                a rationale, an evidence description. There is no structured
- *                slot inside it to localize, and no translation model in this
- *                product. So it is PRESERVED verbatim and LABELLED as
- *                model-authored English. Inventing a translation of a safety
- *                claim is exactly the failure this product exists to avoid, so
- *                the honest answer is that the words stay and the label says so.
- *
- * Nothing here is machine-translated, and no external provider was added for
- * translation. Where a localized string is unavailable the canonical English
- * source is shown, never a guess.
- *
- * Numbers, ids, model names, element enums and timestamps are interpolated
- * verbatim into every language: a spacing of 180 mm is 180 mm in all four.
- */
+// Multilingual presentation of an inspection result.
 
-/* ------------------------------------------------------------------ *
- * Languages
- * ------------------------------------------------------------------ */
+// Languages
 
 export const INSPECTION_LANGUAGES = ['en', 'fr', 'ar', 'zh'] as const;
 export type InspectionLanguage = (typeof INSPECTION_LANGUAGES)[number];
@@ -51,18 +12,14 @@ export function isInspectionLanguage(value: unknown): value is InspectionLanguag
     && (INSPECTION_LANGUAGES as readonly string[]).includes(value);
 }
 
-/**
- * Fail closed. An unsupported or absent language resolves to English rather
- * than throwing, so a bad value can never take the inspection surface down or
- * leave it half-translated.
- */
+// Fail closed. An unsupported or absent language resolves to English rather than throwing, so a bad value can never.
 export function resolveInspectionLanguage(value: unknown): InspectionLanguage {
   return isInspectionLanguage(value) ? value : DEFAULT_INSPECTION_LANGUAGE;
 }
 
 export type TextDirection = 'ltr' | 'rtl';
 
-/** Arabic is the only right-to-left language supported. */
+// Arabic is the only right-to-left language supported.
 export const LANGUAGE_DIRECTION: Readonly<Record<InspectionLanguage, TextDirection>> = {
   en: 'ltr',
   fr: 'ltr',
@@ -70,12 +27,7 @@ export const LANGUAGE_DIRECTION: Readonly<Record<InspectionLanguage, TextDirecti
   zh: 'ltr',
 };
 
-/**
- * Endonyms, not English names and not flags.
- *
- * A flag identifies a country, not a language, and `zh` is not one flag. A judge
- * who cannot read the current language still has to find their own.
- */
+// Endonyms, not English names and not flags.
 export const LANGUAGE_LABELS: Readonly<Record<InspectionLanguage, string>> = {
   en: 'English',
   fr: 'Français',
@@ -83,7 +35,7 @@ export const LANGUAGE_LABELS: Readonly<Record<InspectionLanguage, string>> = {
   zh: '中文',
 };
 
-/** BCP 47 tags, for the `lang` attribute on the localized surface. */
+// BCP 47 tags, for the `lang` attribute on the localized surface.
 export const LANGUAGE_BCP47: Readonly<Record<InspectionLanguage, string>> = {
   en: 'en',
   fr: 'fr',
@@ -91,25 +43,16 @@ export const LANGUAGE_BCP47: Readonly<Record<InspectionLanguage, string>> = {
   zh: 'zh-CN',
 };
 
-/** Stable key used in the persisted preference. Never a display string. */
+// Stable key used in the persisted preference. Never a display string.
 export const LANGUAGE_STORAGE_KEY = 'sitelens.inspectionLanguage';
 
-/* ------------------------------------------------------------------ *
- * Catalog
- * ------------------------------------------------------------------ */
+// Catalog
 
 type Catalog = Readonly<Record<string, string>>;
 
-/**
- * English is the source of truth for the key set: the other three are typed
- * against it, so a missing key is a COMPILE ERROR rather than a blank label
- * discovered in front of a judge.
- */
+// English is the source of truth for the key set: the other three are typed against it, so a missing key is a COMPILE.
 const EN = {
-  // -- the photographs of an inspection -----------------------------------
-  // Nouns are counted in words ("3 photographs" vs "1 photograph") because a
-  // bare numeral reads as a data cell, and an operator has to be able to tell
-  // one photo from four without counting anything.
+  // -- the photographs of an inspection Nouns are counted in words ("3 photographs" vs "1 photograph") because a bare.
   'imgs.head': 'Inspection photos',
   'imgs.count': '{count} photographs',
   'imgs.countZero': 'no photo open',
@@ -135,7 +78,7 @@ const EN = {
   'imgs.basisPending': 'No inspection has been run for these photos yet.',
   'imgs.basisPartial': '{failed} photo(s) failed and contributed no evidence. This inspection rests on {analysed} photo(s).',
 
-  // -- the evidence stage, and the reviewer gate -----------------------------
+  // -- the evidence stage, and the reviewer gate
   'imgs.evidencePhotos': 'Inspection photos:',
   'imgs.evidenceBasedOn': 'one inspection, {count} photographs',
   'imgs.selectAll': 'Select all',
@@ -145,14 +88,14 @@ const EN = {
   'gate.setup': 'SET UP REVIEWER',
   'imgs.allOpen': 'Every capture in this project is already open as one inspection.',
 
-  // -- selection messages -------------------------------------------------
+  // -- selection messages
   'imgs.restored': 'Restored the last inspection of this photo. Inspect again for a fresh reading.',
   'imgs.selected': 'Photo selected. Press Inspect reality to analyse it.',
   'imgs.restoredShort': 'Photo selected; showing its last inspection.',
   'imgs.selectedShort': 'Photo selected.',
   'imgs.selectFailed': 'That photo could not be selected',
 
-  // -- the run itself -----------------------------------------------------
+  // -- the run itself
   'run.working': 'ANALYZING REALITY',
   'run.brief': 'ANALYZING REALITY — MiniCPM reads {count} photograph(s) one at a time, the comparison is computed in code, then Nemotron reasons once about the combined evidence.',
   'run.notify': 'Inspection running over {count} photograph(s): real vision inference per photo, one deterministic comparison, then one Nemotron reasoning pass.',
@@ -168,10 +111,10 @@ const EN = {
   'origin.fixture': 'DEMO FIXTURE',
   'origin.fresh': 'FRESH AI INFERENCE',
 
-  // -- evidence attribution ------------------------------------------------
+  // -- evidence attribution
   'obs.from': 'from {label}',
 
-  // -- language control ---------------------------------------------------
+  // -- language control
   'imgs.countAtCap': '{count} photographs — the maximum for one inspection',
   'meta.zone': 'ZONE',
   'meta.capture': 'CAPTURE',
@@ -210,9 +153,7 @@ const EN = {
   'tr.translatedBadge': 'Translated from English',
   'tr.fallbackNote': 'Translation unavailable — showing original',
 
-  // -- strings that live in an HTML ATTRIBUTE rather than in text. Each is
-  //    localized through the same catalog as the visible copy, so a screen
-  //    reader, an image caption and a tooltip follow the language too.
+  // -- strings that live in an HTML ATTRIBUTE rather than in text.
   'skip.capture': 'Skip to the capture stage',
   'aria.projects': 'Projects',
   'aria.workflow': 'Workflow',
@@ -228,8 +169,7 @@ const EN = {
   'foot.thesis': 'AI does not replace the inspector. It tells the inspector where to look.',
   'foot.local': 'Local inspection surface. Loopback only.',
 
-  // -- provenance rows. The VALUES are canonical and never localized; only
-  //    these labels follow the selected language.
+  // -- provenance rows. The VALUES are canonical and never localized; only these labels follow the selected language.
   'prov.provider': 'Provider',
   'prov.model': 'Model',
   'prov.inferenceExecuted': 'Inference executed',
@@ -253,7 +193,7 @@ const EN = {
   'pipe.partial': '{analysed} of {total} photograph(s) analysed, the rest failed and contributed nothing',
   'prov.rejectedHead': '{n} MODEL ENTRIES REJECTED BY VALIDATION',
 
-  // -- yes/no and generic failures -----------------------------------------
+  // -- yes/no and generic failures
   'fail.timeout': 'AI provider timed out. The model did not answer in time; no result was produced.',
   'fail.unavailable': 'Could not reach the AI provider (network or server error). No result was produced.',
   'fail.authentication': 'AI provider rejected the credential (authentication failed). Check NEBIUS_API_KEY.',
@@ -262,19 +202,19 @@ const EN = {
   'fail.malformed': 'AI provider returned a response that could not be read. No result was produced.',
   'fail.error': 'The inspection failed. No result was produced.',
 
-  // -- masthead ------------------------------------------------------------
+  // -- masthead
   'header.cached': 'CACHED AI RESULT — inference from {at}',
   'header.cachedEarlier': 'an earlier run',
   'header.liveInference': 'live inference',
 
-  // -- Inspect bay intro ---------------------------------------------------
+  // -- Inspect bay intro
   'intro.pending': 'The model has not been asked anything yet.',
   'intro.failed': 'The last inspection did not complete — see the failure note below.',
   'intro.cached': 'Showing the restored inspection of this capture. Inspect again for a fresh reading.',
   'intro.fresh': 'Fresh inference complete — findings await a named human decision.',
   'intro.idle': 'Capture a site image, then run the inspection.',
 
-  // -- evidence rail -------------------------------------------------------
+  // -- evidence rail
   'rail.pending': '{pending} awaiting review, {verified} verified',
   'rail.reality': 'REALITY',
   'rail.inspection': 'INSPECTION',
@@ -286,7 +226,7 @@ const EN = {
   'rail.awaitingReview': 'awaiting review',
   'rail.highestFinding': 'highest finding',
 
-  // -- static panel headings ----------------------------------------------
+  // -- static panel headings
   'panel.realityBrief': 'Reality brief',
   'panel.priorities': 'Inspection priorities',
   'panel.whereToLook': 'WHERE TO LOOK',
@@ -312,7 +252,7 @@ const EN = {
   'panel.stageReasoningHeading': 'Construction reasoning',
   'panel.stageReasoningNotRun': 'NOT RUN',
 
-  // -- pipeline strip ------------------------------------------------------
+  // -- pipeline strip
   'pipe.notRun': 'not run yet',
   'pipe.awaitingInspection': 'awaiting first inspection',
   'pipe.nothingVerified': 'nothing verified',
@@ -327,7 +267,7 @@ const EN = {
   'pipe.verifyPending': 'nothing verified — {n} awaiting a named human',
   'pipe.verifyCounts': '{verified} verified · {rejected} rejected',
 
-  // -- reasoning panel -----------------------------------------------------
+  // -- reasoning panel
   'reason.stageLabel': 'STAGE 2 · NEMOTRON',
   'reason.noConfidence': 'no confidence stated',
   'reason.footPrefix': 'Reasoned over {detections} detected element(s) and {rows} comparison row(s)',
@@ -336,7 +276,7 @@ const EN = {
   'reason.noneProduced': 'Construction reasoning has not been produced for this capture.',
   'reason.unavailableHead': 'CONSTRUCTION REASONING UNAVAILABLE',
 
-  // -- qualification panel -------------------------------------------------
+  // -- qualification panel
   'qual.notMet': 'NOT MET',
   'qual.noQualifying': 'no qualifying NVIDIA inference completed on this run',
   'qual.qualifyingStage': ' · qualifying stage: {stage}',
@@ -361,13 +301,13 @@ const EN = {
   'qual.pathNotMet':
     'This run contains no NVIDIA open-source inference, so it does not satisfy the NVIDIA requirement.',
 
-  // -- observations --------------------------------------------------------
+  // -- observations
   'obs.empty': 'No raw observations were returned for this capture.',
   'obs.band': '{value} · {band} band',
   'obs.fullFrame': '(full-frame — the model returned no localized region for this observation)',
   'obs.next': 'Next: {action}',
 
-  // -- capture provenance --------------------------------------------------
+  // -- capture provenance
   'capture.sourceUpload': 'UPLOAD',
   'capture.sourceDataset': 'LOCAL DATASET',
   'capture.sourceFixture': 'DEMO FIXTURE',
@@ -377,7 +317,7 @@ const EN = {
     + 'tracked by git, and it was not captured on the site of this project.',
   'capture.titleFixture': 'A synthetic scene generated in code. Not a photograph, and not evidence of accuracy.',
 
-  // -- human review confirmations -----------------------------------------
+  // -- human review confirmations
   'review.reviewerMissingFinding':
     'REVIEWER NOT CONFIGURED — Set your reviewer identity before recording a human finding decision.',
   'review.reviewerMissingObservation':
@@ -389,7 +329,7 @@ const EN = {
   'review.rejected': 'rejected',
   'review.deferred': 'deferred for review',
 
-  // -- finding card -------------------------------------------------------
+  // -- finding card
   'finding.what': 'WHAT',
   'finding.where': 'WHERE',
   'finding.why': 'WHY FLAGGED',
@@ -419,12 +359,23 @@ const EN = {
     'No usable visual evidence for this finding in this capture. It rests on the expected-state '
     + 'comparison, not on a visual reading of the image.',
 
-  // -- evidence state -----------------------------------------------------
+  // -- evidence state
   'evidenceState.LOCALIZED': 'Localized region',
   'evidenceState.FULL_FRAME': 'Full-frame evidence',
   'evidenceState.NONE': 'No visual evidence',
+  'evidenceState.help.LOCALIZED':
+    'The vision model returned a region for this finding; the rectangle on the evidence image is that region, in this capture only.',
+  'evidenceState.help.FULL_FRAME':
+    'The finding rests on a visual reading of this capture, but the model returned no region to draw. The evidence is the inspected image plus the description, not a highlighted area.',
+  'evidenceState.help.NONE':
+    'No visual reading supports this finding in this capture. It rests on the expected-state comparison alone; confirm it by a site walk, not from this image.',
+  'evidenceState.why.LOCALIZED': 'Why: model box present.',
+  'evidenceState.why.FULL_FRAME': 'Why: reported without a usable box.',
+  'evidenceState.why.NONE': 'Why: nothing reported for this element.',
+  'comparisonStatus.help.UNDETERMINED':
+    'Undetermined means the capture cannot confirm or refute this item. It is not a pass and not a failure; it stays open until a walk or another view settles it.',
 
-  // -- comparison rows ----------------------------------------------------
+  // -- comparison rows
   'comparison.empty': 'No expected state loaded, so nothing can be compared.',
   'comparison.expected': 'EXPECTED',
   'comparison.observed': 'OBSERVED',
@@ -450,7 +401,7 @@ const EN = {
   'comparison.diff.unexpected': '{element} is visible but was not expected in this zone',
   'comparison.diff.missing': '{element} expected but not detected in this capture',
 
-  // -- comparison-derived finding prose -----------------------------------
+  // -- comparison-derived finding prose
   'cf.title.undetermined': '{element} not confirmable from this capture',
   'cf.title.count': '{element} count differs from expected',
   'cf.title.unexpected': '{element} present but not expected',
@@ -478,12 +429,12 @@ const EN = {
     'Inspect the {element} location directly and record whether work is genuinely incomplete.',
   'cf.difference.undetermined': 'Expected {expected}; not determinable from this capture.',
 
-  // -- priorities ---------------------------------------------------------
+  // -- priorities
   'priority.empty': 'No open attention areas. Nothing was flagged, or every flag has already been reviewed.',
   'priority.basis.comparison': 'Expected-state comparison - {pct}% confidence',
   'priority.basis.visual': 'Visual reading - {pct}% confidence',
 
-  // -- reality brief ------------------------------------------------------
+  // -- reality brief
   'brief.noneDetected': 'No construction elements were reported in this capture.',
   'brief.countedAcross': '{total} site elements counted across {types} detected types',
   'brief.typesDetected': '{n} construction element types detected (not counted)',
@@ -501,7 +452,7 @@ const EN = {
   'overall.REVIEW_SUGGESTED': 'REVIEW SUGGESTED',
   'overall.NO_ATTENTION': 'NO ATTENTION',
 
-  // -- construction reasoning --------------------------------------------
+  // -- construction reasoning
   'reasoning.notRun':
     'Run the inspection to have Nemotron reason about what the evidence does and does not establish.',
   'reasoning.summary': 'WHAT IT MEANS',
@@ -519,19 +470,19 @@ const EN = {
     'Nothing has been invented in its place. The comparison above is computed in code and stands '
     + 'on its own.',
 
-  // -- enums --------------------------------------------------------------
+  // -- enums
   'status.UNVERIFIED': 'UNVERIFIED',
   'status.NEEDS_REVIEW': 'NEEDS REVIEW',
   'status.VERIFIED': 'VERIFIED',
   'status.REJECTED': 'REJECTED',
   'status.OVERRIDDEN': 'OVERRIDDEN',
 
-  // -- stage classification, as shown on the qualification panel ----------
+  // -- stage classification, as shown on the qualification panel
   'elig.ELIGIBLE': 'ELIGIBLE',
   'elig.NOT_ELIGIBLE': 'NOT ELIGIBLE',
   'elig.NOT_VERIFIED': 'NOT VERIFIED',
 
-  // -- model-suggested next action ----------------------------------------
+  // -- model-suggested next action
   'action.NO_ACTION': 'no action',
   'action.HUMAN_REVIEW': 'human review',
   'action.INSPECT_CLOSER': 'inspect closer',
@@ -561,7 +512,7 @@ const EN = {
   'category.SAFETY_ATTENTION': 'SAFETY ATTENTION',
   'category.UNDETERMINED': 'UNDETERMINED',
 
-  // -- element vocabulary -------------------------------------------------
+  // -- element vocabulary
   'element.COLUMN': 'column',
   'element.SLAB': 'slab',
   'element.WALL': 'wall',
@@ -587,7 +538,7 @@ const EN = {
   'elementPlural.FINISH': 'finishes',
   'elementPlural.EXCAVATION': 'excavations',
 
-  // -- verified finding ledger --------------------------------------------
+  // -- verified finding ledger
   'ledger.heading': 'Verified finding ledger',
   'ledger.subtitle': 'Actionable triage records raised when a named reviewer confirms an observation.',
   'ledger.empty':
@@ -614,7 +565,7 @@ const EN = {
   'obs.sectionHead': 'Raw visual observations',
   'obs.ledgerRaised': 'Ledger finding: {id} ({state})',
 
-  // -- persistence & reference invalidation -------------------------------
+  // -- persistence & reference invalidation
   'prov.persistence': 'Persistence',
   'prov.persistDurable': 'Confirmed written to disk',
   'prov.persistMemory': 'Process memory only (lost on restart)',
@@ -631,13 +582,13 @@ const EN = {
 type TranslationKey = keyof typeof EN;
 
 const FR: Record<TranslationKey, string> = {
-  // -- selection messages --------------------------------------------------
+  // -- selection messages
   'imgs.restored': "Restauré le dernier contrôle de cette photo. Relancez pour une lecture fraîche.",
   'imgs.selected': 'Photo sélectionnée. Appuyez sur Inspecter la réalité pour l\'analyser.',
   'imgs.restoredShort': 'Photo sélectionnée ; dernier contrôle affiché.',
   'imgs.selectedShort': 'Photo sélectionnée.',
   'imgs.selectFailed': 'La photo n\'a pas pu être sélectionnée',
-  // -- photographs, run and attribution (multi-image) ------------------------
+  // -- photographs, run and attribution (multi-image)
   'imgs.head': 'Photos de l\'inspection',
   'imgs.count': '{count} photos',
   'imgs.countZero': 'aucune photo ouverte',
@@ -663,7 +614,7 @@ const FR: Record<TranslationKey, string> = {
   'imgs.basisPending': 'Aucune inspection n\'a encore \u00e9t\u00e9 lanc\u00e9e sur ces photos.',
   'imgs.basisPartial': '{failed} photo(s) ont \u00e9chou\u00e9 et n\'ont fourni aucune preuve. Cette inspection repose sur {analysed} photo(s).',
 
-  // -- the evidence stage, and the reviewer gate -----------------------------
+  // -- the evidence stage, and the reviewer gate
   'imgs.evidencePhotos': 'Photos de l\'inspection :',
   'imgs.evidenceBasedOn': 'une seule inspection, {count} photos',
   'imgs.selectAll': 'Tout s\u00e9lectionner',
@@ -923,6 +874,17 @@ const FR: Record<TranslationKey, string> = {
   'evidenceState.LOCALIZED': 'Zone localisée',
   'evidenceState.FULL_FRAME': 'Preuve en pleine image',
   'evidenceState.NONE': 'Aucune preuve visuelle',
+  'evidenceState.help.LOCALIZED':
+    'Le modèle de vision a renvoyé une zone pour ce constat ; le rectangle sur l\u2019image est cette zone, dans cette capture uniquement.',
+  'evidenceState.help.FULL_FRAME':
+    'Le constat repose sur une lecture visuelle de cette capture, mais le modèle n\u2019a renvoyé aucune zone à dessiner. La preuve est l\u2019image inspectée plus la description, et non une zone mise en évidence.',
+  'evidenceState.help.NONE':
+    'Aucune lecture visuelle n\u2019appuie ce constat dans cette capture. Il repose uniquement sur la comparaison avec l\u2019état attendu ; confirmez-le par une visite, pas depuis cette image.',
+  'evidenceState.why.LOCALIZED': 'Pourquoi : zone renvoyée par le modèle.',
+  'evidenceState.why.FULL_FRAME': 'Pourquoi : signalé sans zone exploitable.',
+  'evidenceState.why.NONE': 'Pourquoi : rien de signalé pour cet élément.',
+  'comparisonStatus.help.UNDETERMINED':
+    'Indéterminé signifie que la capture ne peut ni confirmer ni infirmer ce point. Ce n\u2019est ni un succès ni un échec ; il reste ouvert jusqu\u2019à une visite ou une autre vue.',
 
   'comparison.empty': "Aucun état attendu chargé : rien ne peut être comparé.",
   'comparison.expected': 'ATTENDU',
@@ -1123,13 +1085,13 @@ const FR: Record<TranslationKey, string> = {
 };
 
 const AR: Record<TranslationKey, string> = {
-  // -- selection messages --------------------------------------------------
+  // -- selection messages
   'imgs.restored': 'أُعيد آخر فحص لهذه الصورة. أعد الفحص للحصول على قراءة جديدة.',
   'imgs.selected': 'تم اختيار الصورة. اضغط فحص الواقع لتحليلها.',
   'imgs.restoredShort': 'تم اختيار الصورة؛ يُعرض آخر فحص لها.',
   'imgs.selectedShort': 'تم اختيار الصورة.',
   'imgs.selectFailed': 'تعذّر اختيار الصورة',
-  // -- photographs, run and attribution (multi-image) ------------------------
+  // -- photographs, run and attribution (multi-image)
   'imgs.head': 'صور الفحص',
   'imgs.count': '{count} صورة',
   'imgs.countZero': 'لا صورة مفتوحة',
@@ -1155,7 +1117,7 @@ const AR: Record<TranslationKey, string> = {
   'imgs.basisPending': 'لم يُنفَّذ فحص لهذه الصور.',
   'imgs.basisPartial': 'فشلت {failed} صورة ولم تُقدم أي دليل. يقوم هذا الفحص على {analysed} صورة.',
 
-  // -- the evidence stage, and the reviewer gate -----------------------------
+  // -- the evidence stage, and the reviewer gate
   'imgs.evidencePhotos': 'صور الفحص:',
   'imgs.evidenceBasedOn': 'فحص واحد، {count} صورة',
   'imgs.selectAll': 'تحديد الكل',
@@ -1411,6 +1373,17 @@ const AR: Record<TranslationKey, string> = {
   'evidenceState.LOCALIZED': 'منطقة محدَّدة',
   'evidenceState.FULL_FRAME': 'دليل على الصورة كاملة',
   'evidenceState.NONE': 'لا يوجد دليل بصري',
+  'evidenceState.help.LOCALIZED':
+    'أرجع نموذج الرؤية منطقة لهذه الملاحظة؛ والمستطيل على صورة الدليل هو تلك المنطقة في هذه الصورة فقط.',
+  'evidenceState.help.FULL_FRAME':
+    'تستند الملاحظة إلى قراءة بصرية لهذه الصورة، لكن النموذج لم يُرجِع منطقة لرسمها. الدليل هو الصورة المفحوصة مع الوصف، وليس منطقة مُبرَزة.',
+  'evidenceState.help.NONE':
+    'لا توجد قراءة بصرية تدعم هذه الملاحظة في هذه الصورة. تستند إلى المقارنة مع الحالة المتوقعة وحدها؛ أكِّدها بجولة ميدانية لا من هذه الصورة.',
+  'evidenceState.why.LOCALIZED': 'السبب: النموذج أرجع مربعًا.',
+  'evidenceState.why.FULL_FRAME': 'السبب: رُصد دون مربع قابل للاستخدام.',
+  'evidenceState.why.NONE': 'السبب: لم يُرصَد شيء لهذا العنصر.',
+  'comparisonStatus.help.UNDETERMINED':
+    'غير محسوم تعني أن الصورة لا يمكنها تأكيد هذا البند ولا نفيه. ليست نجاحًا ولا فشلًا؛ وتبقى مفتوحة حتى معاينة ميدانية أو صورة أخرى.',
 
   'comparison.empty': 'لم يتم تحميل حالة متوقعة، لذا لا يمكن إجراء مقارنة.',
   'comparison.expected': 'المتوقَّع',
@@ -1605,13 +1578,13 @@ const AR: Record<TranslationKey, string> = {
 };
 
 const ZH: Record<TranslationKey, string> = {
-  // -- selection messages --------------------------------------------------
+  // -- selection messages
   'imgs.restored': '已恢复这张照片的上次检查。重新检查可获得新的判读。',
   'imgs.selected': '已选择照片。点击检查现场开始分析。',
   'imgs.restoredShort': '已选择照片；显示其上次检查。',
   'imgs.selectedShort': '已选择照片。',
   'imgs.selectFailed': '无法选择该照片',
-  // -- photographs, run and attribution (multi-image) ------------------------
+  // -- photographs, run and attribution (multi-image)
   'imgs.head': '\u68c0\u67e5\u7167\u7247',
   'imgs.count': '{count} \u5f20\u7167\u7247',
   'imgs.countZero': '\u672a\u6253\u5f00\u7167\u7247',
@@ -1637,7 +1610,7 @@ const ZH: Record<TranslationKey, string> = {
   'imgs.basisPending': '\u8fd9\u4e9b\u7167\u7247\u8fd8\u6ca1\u6709\u8fd0\u884c\u8fc7\u68c0\u67e5\u3002',
   'imgs.basisPartial': '\u6709 {failed} \u5f20\u7167\u7247\u5931\u8d25\u4e14\u672a\u63d0\u4f9b\u4efb\u4f55\u8bc1\u636e\u3002\u672c\u6b21\u68c0\u67e5\u4f9d\u636e {analysed} \u5f20\u7167\u7247\u3002',
 
-  // -- the evidence stage, and the reviewer gate -----------------------------
+  // -- the evidence stage, and the reviewer gate
   'imgs.evidencePhotos': '\u68c0\u67e5\u7167\u7247\uff1a',
   'imgs.evidenceBasedOn': '\u4e00\u6b21\u68c0\u67e5\uff0c{count} \u5f20\u7167\u7247',
   'imgs.selectAll': '\u5168\u9009',
@@ -1885,6 +1858,17 @@ const ZH: Record<TranslationKey, string> = {
   'evidenceState.LOCALIZED': '局部区域',
   'evidenceState.FULL_FRAME': '全画面证据',
   'evidenceState.NONE': '无视觉证据',
+  'evidenceState.help.LOCALIZED':
+    '视觉模型为该检查项返回了区域；证据影像上的矩形即为该区域，仅针对本次影像。',
+  'evidenceState.help.FULL_FRAME':
+    '该检查项依据对本次影像的视觉判读，但模型未返回可绘制的区域。证据是所检查的影像加文字描述，而非高亮区域。',
+  'evidenceState.help.NONE':
+    '本次影像中没有任何视觉判读支持该检查项，它仅依据与预期状态的比对；请以实地巡视为准，而非依据该影像下结论。',
+  'evidenceState.why.LOCALIZED': '原因：模型返回了区域框。',
+  'evidenceState.why.FULL_FRAME': '原因：有判读但无可用区域框。',
+  'evidenceState.why.NONE': '原因：该元素没有任何报告。',
+  'comparisonStatus.help.UNDETERMINED':
+    '“未判定”表示该影像既不能确认也不能否定此项；它既不是通过也不是失败，在实地巡视或补充影像之前保持未决。',
 
   'comparison.empty': '未加载预期状态，因此无法进行比对。',
   'comparison.expected': '预期',
@@ -2071,12 +2055,7 @@ const ZH: Record<TranslationKey, string> = {
   'ref.invalidatedLamp': '基准已更改 — 需重新检查',
 };
 
-/**
- * Every catalog, keyed by language.
- *
- * Served to the browser so the client can label enums and render chrome without
- * a second copy of the vocabulary drifting out of step with this one.
- */
+// Every catalog, keyed by language.
 export const UI_STRINGS: Readonly<Record<InspectionLanguage, Record<TranslationKey, string>>> = {
   en: EN,
   fr: FR,
@@ -2086,28 +2065,20 @@ export const UI_STRINGS: Readonly<Record<InspectionLanguage, Record<TranslationK
 
 export type { TranslationKey };
 
-/* ------------------------------------------------------------------ *
- * Translator
- * ------------------------------------------------------------------ */
+// Translator
 
 export interface Translator {
   readonly language: InspectionLanguage;
   readonly dir: TextDirection;
-  /** Look a label up. Never throws, never returns undefined. */
+  // Look a label up. Never throws, never returns undefined.
   t(key: string): string;
-  /** Element name in the current language, singular. */
+  // Element name in the current language, singular.
   element(kind: string): string;
-  /** Element name in the current language, plural/counted form. */
+  // Element name in the current language, plural/counted form.
   elementPlural(kind: string): string;
 }
 
-/**
- * Fill `{token}` placeholders.
- *
- * Deliberately not a general templating engine: a token with no supplied value
- * is left visible rather than blanked, so a missing parameter shows up on screen
- * during development instead of silently shortening a sentence.
- */
+// Fill `{token}` placeholders.
 export function fill(template: string, params: Readonly<Record<string, string | number>>): string {
   return template.replace(/\{(\w+)\}/g, (whole, token: string) => {
     const value = params[token];
@@ -2115,11 +2086,7 @@ export function fill(template: string, params: Readonly<Record<string, string | 
   });
 }
 
-/**
- * Capitalise for a sentence start, but only where the script has case.
- * Arabic and Chinese are left untouched: forcing `toUpperCase()` on them would
- * corrupt nothing but would imply a case distinction that does not exist.
- */
+// Capitalise for a sentence start, but only where the script has case.
 export function sentenceCase(value: string): string {
   return value.length === 0 ? value : value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -2144,13 +2111,11 @@ export function translatorFor(language: InspectionLanguage): Translator {
   };
 }
 
-/* ------------------------------------------------------------------ *
- * Browser payload
- * ------------------------------------------------------------------ */
+// Browser payload
 
 export interface ClientLanguageOption {
   readonly code: InspectionLanguage;
-  /** Endonym. Never an English name and never a flag. */
+  // Endonym. Never an English name and never a flag.
   readonly label: string;
   readonly dir: TextDirection;
   readonly bcp47: string;
@@ -2162,13 +2127,7 @@ export interface ClientLocalization {
   readonly defaultLanguage: InspectionLanguage;
 }
 
-/**
- * The vocabulary, serialized for the browser.
- *
- * This module stays the single source of truth: the client renders from these
- * strings rather than from a second copy that could drift. The payload is
- * static data, so shipping it costs one response and no request per switch.
- */
+// The vocabulary, serialized for the browser.
 export function clientLocalizationPayload(): ClientLocalization {
   return {
     languages: INSPECTION_LANGUAGES.map((code) => ({

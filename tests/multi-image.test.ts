@@ -1,20 +1,4 @@
-/**
- * Multi-image inspection.
- *
- * The claim under test is narrow and falsifiable:
- *
- *   If three real photographs are selected, does ONE inspection genuinely use
- *   evidence from all three?
- *
- * So most of these assert on what must NOT happen: one vision call per
- * photograph and no more, one comparison, one reasoning pass, counts never
- * summed, and canonical facts identical whatever the operator selects.
- *
- * The transport is injected throughout. That is stated plainly rather than
- * dressed up: these prove the pipeline shape and the aggregation semantics, not
- * that a live provider was reachable. The live end-to-end run is reported
- * separately in the task report.
- */
+// Multi-image inspection.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -57,13 +41,7 @@ function newStore(env: NodeJS.ProcessEnv): ProjectStore {
   });
 }
 
-/* ------------------------------------------------------------------ *
- * Real images.
- *
- * The four synthetic fixtures are genuinely different byte sequences, so
- * duplicate detection and per-image attribution are exercised against real
- * pixels rather than two copies of one buffer.
- * ------------------------------------------------------------------ */
+// Real images.
 
 const PHOTOS = demoCaptures();
 const ONE = PHOTOS[0]!;
@@ -90,14 +68,12 @@ function detectionsFor(
   };
 }
 
-/* ------------------------------------------------------------------ *
- * A session over N images, with the network replaced.
- * ------------------------------------------------------------------ */
+// A session over N images, with the network replaced.
 
-/** One provider stub per image, so a per-image response can be programmed. */
+// One provider stub per image, so a per-image response can be programmed.
 function sessionForImages(options: {
   images?: readonly { capture: typeof ONE; label: string }[];
-  /** Per-image failure, keyed by capture id. */
+  // Per-image failure, keyed by capture id.
   failFor?: Record<string, string>;
   reasonerKind?: 'real' | 'unavailable';
 }) {
@@ -110,10 +86,7 @@ function sessionForImages(options: {
   const visionCalls: string[] = [];
   const reasoningCalls: string[] = [];
 
-  // The session uses ONE provider for every photograph, which is exactly how
-  // the architecture works: one vision model, many images. So the stub must
-  // identify which photograph a request carries from the image bytes
-  // themselves, not from a closure over the capture.
+  // The session uses ONE provider for every photograph, which is exactly how the architecture works: one vision model, many images.
   const byDataUrl = new Map<string, typeof ONE>();
   for (const { capture } of images) byDataUrl.set(capture.bytes.toString('base64'), capture);
   const identify = (body: string): typeof ONE | null => {
@@ -206,9 +179,7 @@ function sessionForImages(options: {
   return { session, visionCalls, reasoningCalls, reasoningBodies, captures };
 }
 
-/* ------------------------------------------------------------------ *
- * A — single image regression
- * ------------------------------------------------------------------ */
+// A — single image regression
 
 test('A: one image still produces one valid inspection', async () => {
   const { session, visionCalls, reasoningCalls } = sessionForImages({
@@ -229,9 +200,7 @@ test('A: one image still produces one valid inspection', async () => {
   }
 });
 
-/* ------------------------------------------------------------------ *
- * B — two images
- * ------------------------------------------------------------------ */
+// B — two images
 
 test('B: two images produce ONE inspection carrying evidence from both', async () => {
   const { session, visionCalls, reasoningCalls } = sessionForImages({
@@ -249,9 +218,7 @@ test('B: two images produce ONE inspection carrying evidence from both', async (
   assert.equal(view.observations.length, 2);
 });
 
-/* ------------------------------------------------------------------ *
- * C — three images
- * ------------------------------------------------------------------ */
+// C — three images
 
 test('C: three images contribute to ONE consolidated inspection', async () => {
   const { session, visionCalls, reasoningCalls } = sessionForImages({});
@@ -269,9 +236,7 @@ test('C: three images contribute to ONE consolidated inspection', async () => {
   }
 });
 
-/* ------------------------------------------------------------------ *
- * D — provenance
- * ------------------------------------------------------------------ */
+// D — provenance
 
 test('D: every observation keeps its own photograph', async () => {
   const { session } = sessionForImages({});
@@ -312,18 +277,14 @@ test('D: a finding carries the photographs that support it', async () => {
   );
 });
 
-/* ------------------------------------------------------------------ *
- * E — combined reasoning
- * ------------------------------------------------------------------ */
+// E — combined reasoning
 
 test('E: the reasoning prompt itself attributes evidence to the right photograph', async () => {
   const { session, reasoningBodies } = sessionForImages({});
   await session.run();
   const prompt = reasoningBodies[0] ?? '';
 
-  // Not merely "the labels appear somewhere": the prompt must say it is reasoning
-  // over a SET, forbid summing, and name every photograph. Without those, Nemotron
-  // is reasoning over an anonymous blob of evidence.
+  // Not merely "the labels appear somewhere": the prompt must say it is reasoning over a SET, forbid summing, and name.
   assert.match(prompt, /covers 3 photographs/,
     'the prompt must say it is reasoning over three frames, not one');
   assert.match(prompt, /never resolved by adding the photographs up/,
@@ -371,9 +332,7 @@ test('E: a single-image run keeps its own capture label verbatim', async () => {
   assert.match(reasoningBodies[0]!, /Capture label: north elevation\n/);
 });
 
-/* ------------------------------------------------------------------ *
- * F — partial failure
- * ------------------------------------------------------------------ */
+// F — partial failure
 
 test('F: one failed image does not silently become a success', async () => {
   const { session, visionCalls } = sessionForImages({
@@ -394,9 +353,7 @@ test('F: one failed image does not silently become a success', async () => {
   assert.equal(view.observations.some((o) => o.captureId === TWO.id), false);
   assert.equal(view.images.filter((i) => i.status === 'ANALYSED').length, 2);
 
-  // The top-level result must also say so. A consumer reading only `failure`
-  // would otherwise read a 2-of-3 inspection as a clean 3-of-3 and report
-  // complete evidence from a photograph that was never read.
+  // The top-level result must also say so.
   assert.notEqual(view.failure, null,
     'a partial inspection must not report no failure at all');
   assert.equal(view.failure?.kind, 'PARTIAL_ANALYSIS');
@@ -405,8 +362,7 @@ test('F: one failed image does not silently become a success', async () => {
 });
 
 test('F: a fully successful run reports no partial-analysis failure', async () => {
-  // The counterpart to the case above. If every photograph was read, the same
-  // message must NOT appear, or a clean run would cry wolf.
+  // The counterpart to the case above.
   const { session } = sessionForImages({});
   const view = await session.run();
   assert.equal(view.outcome, 'COMPLETED');
@@ -442,9 +398,7 @@ test('F: a single failed photograph reports a partial analysis, not a clean one'
   assert.equal(view.images.filter((i) => i.status === 'ANALYSED').length, 1);
 });
 
-/* ------------------------------------------------------------------ *
- * G — all failure
- * ------------------------------------------------------------------ */
+// G — all failure
 
 test('G: when every image fails, NO inspection is produced', async () => {
   const { session } = sessionForImages({
@@ -467,9 +421,7 @@ test('G: when every image fails, NO inspection is produced', async () => {
   assert.equal(view.images.every((i) => i.status === 'FAILED'), true);
 });
 
-/* ------------------------------------------------------------------ *
- * H — empty selection
- * ------------------------------------------------------------------ */
+// H — empty selection
 
 test('H: an empty selection starts no inspection', () => {
   assert.throws(
@@ -492,9 +444,7 @@ test('H: an empty selection starts no inspection', () => {
   );
 });
 
-/* ------------------------------------------------------------------ *
- * I — duplicates
- * ------------------------------------------------------------------ */
+// I — duplicates
 
 test('I: byte-identical photographs are refused and reported, not silently dropped', () => {
   const result = partitionDuplicates([
@@ -508,8 +458,7 @@ test('I: byte-identical photographs are refused and reported, not silently dropp
 });
 
 test('I: the accepted capture keeps EVERY field, not just id and bytes', () => {
-  // This is the regression that silently blanked provenance: rebuilding a
-  // `{id, bytes}` wrapper dropped label, mediaType and projectId.
+  // This is the regression that silently blanked provenance: rebuilding a `{id, bytes}` wrapper dropped label, mediaType and projectId.
   const result = partitionDuplicates([
     { id: 'a', label: 'north elevation', mediaType: 'image/jpeg', projectId: 'p1', bytes: Buffer.from('x') },
   ]);
@@ -528,9 +477,7 @@ test('I: a genuine re-shoot of the same view is accepted', () => {
   assert.equal(result.accepted.length, 2);
 });
 
-/* ------------------------------------------------------------------ *
- * The aggregation semantics: images are NEVER summed
- * ------------------------------------------------------------------ */
+// The aggregation semantics: images are NEVER summed
 
 test('counts are not summed when photographs disagree', () => {
   const images = [
@@ -632,9 +579,7 @@ test('the disagreement sentence names the photographs, so a re-shoot is actionab
   assert.match(sentence, /img-b/);
 });
 
-/* ------------------------------------------------------------------ *
- * L — no accidental extra inference
- * ------------------------------------------------------------------ */
+// L — no accidental extra inference
 
 test('L: N images mean exactly N vision calls and exactly 1 reasoning call', async () => {
   for (const n of [1, 2, 3]) {
@@ -658,9 +603,7 @@ test('L: the same photograph twice is analysed once', async () => {
   assert.equal(visionCalls.length, 1, 'a repeated capture id must not be analysed twice');
 });
 
-/* ------------------------------------------------------------------ *
- * K — canonical invariance and NVIDIA eligibility
- * ------------------------------------------------------------------ */
+// K — canonical invariance and NVIDIA eligibility
 
 test('K: localizing or re-viewing does not change any canonical fact', async () => {
   const { session } = sessionForImages({});
@@ -698,9 +641,7 @@ test('K: NVIDIA eligibility is unchanged by how many images ran', async () => {
   }
 });
 
-/* ------------------------------------------------------------------ *
- * Merging
- * ------------------------------------------------------------------ */
+// Merging
 
 test('merging concatenates without mutating any image result', () => {
   const mk = (captureId: string, n: number): InspectionResult => ({
@@ -726,14 +667,7 @@ test('merging refuses an empty set rather than inventing one', () => {
   assert.throws(() => mergeImageResults([]), /at least one result/);
 });
 
-/* ------------------------------------------------------------------ *
- * Persistence of a consolidated inspection.
- *
- * A multi-photo inspection is WRITTEN under one group key, so it has to be READ
- * back under that same key. Getting this wrong is invisible in a single-photo
- * test - it is the defect where reopening a project shows an empty evidence
- * stage while the real findings sit on disk, so it is worth its own test.
- * ------------------------------------------------------------------ */
+// Persistence of a consolidated inspection.
 
 test('a consolidated inspection comes back after a restart, with its per-photo provenance', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sitelens-multi-'));
@@ -741,8 +675,7 @@ test('a consolidated inspection comes back after a restart, with its per-photo p
     const env = { SITELENS_DATA_DIR: dir } as NodeJS.ProcessEnv;
     const first = newStore(env);
 
-    // Real images, added as three separate uploads: the point is a group of
-  // genuine distinct photographs, not one buffer copied three times.
+    // Real images, added as three separate uploads: the point is a group of genuine distinct photographs, not one buffer.
   first.create({ name: 'Level 02 re-shoot', location: 'North core' });
   const ids = PHOTOS.slice(0, 3).map((photo, index) => first.addCapture({
     id: 'cap_restore_' + index,
@@ -759,27 +692,22 @@ test('a consolidated inspection comes back after a restart, with its per-photo p
   assert.ok(selected.ok);
   if (!selected.ok) return;
   const session = selected.value;
-  // Awaited: `run` is async, and asserting on the view before the vision calls
-  // land would read a PENDING session and pass for the wrong reason.
+  // Awaited: `run` is async, and asserting on the view before the vision calls land would read a PENDING session and pass.
   const runView = await session.run();
   assert.equal(runView.outcome, 'COMPLETED');
-  // Persisted the way the server persists it after a successful run, so the read
-  // path below is tested against the real write, not a hand-built record.
+  // Persisted the way the server persists it after a successful run, so the read path below is tested against the real.
   first.persistInspection(groupKey(first.selectedCaptures()));
   const before = session.view().observations.length;
   assert.ok(before > 0, 'the fixture run must produce evidence to restore');
 
-  // Written under the GROUP key, which is what a multi-photo run must restore
-  // under. Asserting it here is what makes the read path's key a real claim.
+  // Written under the GROUP key, which is what a multi-photo run must restore under.
   const key = groupKey(first.selectedCaptures());
   assert.match(key, /^grp_/);
   const written = new WorkspacePersistence({ env }).loadInspection(key);
   assert.ok(written !== null, 'the consolidated inspection must be on disk under the group key');
   assert.equal(written?.payloads?.length, 3, 'all three photographs must be persisted separately');
 
-  // A NEW store against the same directory, as after a restart. `restore()`
-  // must come first: seeding persists, and persisting an empty store would
-  // overwrite the state this test is about to prove.
+  // A NEW store against the same directory, as after a restart.
   const second = newStore(env);
   second.restore();
   const restored = second.selectCaptureGroup(ids);
@@ -788,16 +716,12 @@ test('a consolidated inspection comes back after a restart, with its per-photo p
   const view = restored.value.view();
 
   assert.equal(view.outcome, 'COMPLETED', 'the restored inspection must not come back empty');
-  // The origin is preserved from what actually ran. With the offline fixture that
-  // is DEMO_FIXTURE, never FRESH: a restored result must never claim to be a new
-  // model call, whatever produced the original.
+  // The origin is preserved from what actually ran.
   assert.notEqual(view.inferenceOrigin, 'FRESH',
     'a restored result must never be presented as a fresh inference');
   assert.equal(view.observations.length, before,
     'every observation must survive the restart');
-  // Every photograph contributed, and every observation still names its own
-  // source. Asserted as a set because the fixture yields three observations per
-  // photograph; what matters is that none is unattributed and none is lost.
+  // Every photograph contributed, and every observation still names its own source.
   assert.deepEqual(
     [...new Set(view.observations.map((o) => o.captureId))].sort(),
     [...ids].sort(),
@@ -813,14 +737,7 @@ test('a consolidated inspection comes back after a restart, with its per-photo p
     rmSync(dir, { recursive: true, force: true });
   }
 });
-/* ------------------------------------------------------------------ *
- * Restore refuses a photograph it does not hold.
- *
- * A stored inspection may name a capture the session no longer has, whose
- * bytes are unavailable. Restoring it anyway would attach its observations to
- * an image identity nobody can open, so it is skipped. The guard had no direct
- * test: the restart suite only ever restored captures it still held.
- * ------------------------------------------------------------------ */
+// Restore refuses a photograph it does not hold.
 
 test('a restored payload naming an absent capture is skipped, not misattributed', async () => {
   const { session, captures } = sessionForImages({ images: [{ capture: ONE, label: 'only-frame' }] });
@@ -833,8 +750,7 @@ test('a restored payload naming an absent capture is skipped, not misattributed'
     inspectedAt: '2026-01-01T00:00:00.000Z',
     latencyMs: 1,
     inferenceOrigin: 'FRESH',
-    // Empty: this record carries no human decisions, and the restore path
-    // expects the field rather than tolerating its absence.
+    // Empty: this record carries no human decisions, and the restore path expects the field rather than tolerating its absence.
     reviews: [],
     payload: {
       elements: [{ element: 'REBAR', present: true, count: null, confidence: 0.7, evidence: 'e', boundingBox: null }],
@@ -874,8 +790,7 @@ test('a restored payload naming an absent capture is skipped, not misattributed'
   assert.equal(ok, true, 'the resolvable payload must still restore');
   const view = session.view();
 
-  // The unheld capture contributes nothing: no detection, no image row, and
-  // certainly no observation labelled with an image nobody can open.
+  // The unheld capture contributes nothing: no detection, no image row, and certainly no observation labelled with an.
   assert.equal(view.detections.some((d) => d.captureId === 'cap_not_held_anywhere'), false,
     'a detection must not be attributed to a capture the session does not hold');
   assert.equal(view.detections.some((d) => d.element === 'COLUMN'), false,

@@ -1,20 +1,4 @@
-/**
- * Actionable findings.
- *
- * A finding is NOT an AI observation. The distinction is the point of the
- * product:
- *
- *   AI observation        untrusted, AI_GENERATED, never project truth
- *   human-verified finding  created only after a human VERIFIES an observation
- *
- * A finding can therefore never be produced from an unverified, rejected or
- * overridden observation, and never directly from model output. `findingFrom`
- * refuses anything that has not passed human verification.
- *
- * This is an isolated hackathon construct. Nothing here creates or syncs a
- * production SiteLens issue; `target` records that explicitly so a reviewer is
- * never misled about where the work would land.
- */
+// Actionable findings. A finding is NOT an AI observation.
 
 import { randomUUID } from 'node:crypto';
 import type {
@@ -24,41 +8,35 @@ import type {
   VerificationStatus,
 } from './types/observation.ts';
 
-/**
- * Where a finding would be raised if the isolated project were connected to a
- * real system. Always 'sitelens-isolated-hackathon' today.
- */
+// Where a finding would be raised if the isolated project were connected to a real system.
 export const FINDING_TARGET = 'sitelens-isolated-hackathon' as const;
 
-/**
- * Lifecycle of a human-verified finding. A finding starts OPEN because a human
- * confirmed it; nothing downstream can silently close it.
- */
+// Lifecycle of a human-verified finding.
 export type FindingState = 'OPEN' | 'ACKNOWLEDGED' | 'CLOSED';
 
 export interface Finding {
   readonly id: string;
-  /** The observation this finding was derived from. Always set. */
+  // The observation this finding was derived from. Always set.
   readonly sourceObservationId: string;
   readonly captureId: string;
   readonly projectId: string | null;
   readonly zoneId: string | null;
   readonly category: ObservationCategory;
-  /** Short human-facing statement of the confirmed condition. */
+  // Short human-facing statement of the confirmed condition.
   readonly summary: string;
-  /** What the model reported as evidence, retained for traceability. */
+  // What the model reported as evidence, retained for traceability.
   readonly evidenceDescription: string;
-  /** The model's advisory next step, carried forward not re-derived. */
+  // The model's advisory next step, carried forward not re-derived.
   readonly suggestedAction: SuggestedAction;
   readonly severity: AIObservation['severity'];
-  /** The human who verified the underlying observation. */
+  // The human who verified the underlying observation.
   readonly raisedBy: string;
   readonly raisedAt: string;
   readonly state: FindingState;
   readonly target: typeof FINDING_TARGET;
 }
 
-/** Reasons a finding cannot be raised from an observation. */
+// Reasons a finding cannot be raised from an observation.
 export type FindingRefusal =
   | 'ALREADY_HAD_REVIEW'
   | 'NOT_VERIFIED'
@@ -68,12 +46,7 @@ export type FindingResult =
   | { readonly ok: true; readonly finding: Finding }
   | { readonly ok: false; readonly reason: FindingRefusal; readonly message: string };
 
-/**
- * Derive a finding from an observation, but only when a human has verified it.
- *
- * The verification check is enforced here rather than at the call site so no
- * future caller can bypass it.
- */
+// Derive a finding from an observation, but only when a human has verified it.
 export function findingFrom(
   observation: AIObservation,
   options: { readonly now?: () => Date; readonly idFactory?: () => string } = {},
@@ -144,10 +117,7 @@ export function findingFrom(
   };
 }
 
-/**
- * In-memory finding ledger. Demo scope only; not a project database and not
- * connected to production SiteLens.
- */
+// In-memory finding ledger. Demo scope only; not a project database and not connected to production SiteLens.
 export class FindingLedger {
   private readonly rows = new Map<string, Finding>();
 
@@ -163,7 +133,7 @@ export class FindingLedger {
     return [...this.rows.values()];
   }
 
-  /** Advance a finding's lifecycle. The only way a finding leaves OPEN. */
+  // Advance a finding's lifecycle. The only way a finding leaves OPEN.
   public setState(id: string, state: FindingState): Finding | null {
     const existing = this.rows.get(id);
     if (!existing) return null;
@@ -172,7 +142,7 @@ export class FindingLedger {
     return updated;
   }
 
-  /** Look up an existing ledger finding raised from a specific observation. */
+  // Look up an existing ledger finding raised from a specific observation.
   public findByObservation(sourceObservationId: string): Finding | null {
     for (const row of this.rows.values()) {
       if (row.sourceObservationId === sourceObservationId) return row;
@@ -180,7 +150,7 @@ export class FindingLedger {
     return null;
   }
 
-  /** Drop any ledger finding raised from an observation that is no longer VERIFIED. */
+  // Drop any ledger finding raised from an observation that is no longer VERIFIED.
   public removeByObservation(sourceObservationId: string): void {
     for (const [id, row] of this.rows.entries()) {
       if (row.sourceObservationId === sourceObservationId) {

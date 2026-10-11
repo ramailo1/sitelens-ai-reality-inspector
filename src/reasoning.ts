@@ -1,31 +1,4 @@
-/**
- * Construction reasoning.
- *
- * This is the SECOND model in the hybrid architecture, and it does a job the
- * first one cannot:
- *
- *   MiniCPM-V-4_5   SEE       what is visibly present in the photograph
- *   Nemotron         UNDERSTAND why that matters for the work, and what it does
- *                          NOT establish
- *   SiteLens code    COMPARE   expected vs observed, in arithmetic
- *   Human            VERIFY    the only path from candidate to settled
- *
- * Nemotron receives NO image. It reasons over the structured record the vision
- * stage produced plus the deterministic comparison, which is what makes the
- * split a genuine division of labour rather than the same model asked twice.
- *
- * Two rules are enforced here in code, not just requested in the prompt:
- *
- *   1. UNCERTAINTY IS NOT OPTIONAL. `certainty` is a closed vocabulary and the
- *      whole object is rejected if it is missing or unrecognised, so a response
- *      that never states how sure it is cannot reach the product.
- *   2. A REASONING CONFIDENCE IS NOT A VERIFICATION. It is carried as
- *      `confidence` and labelled `reasoningConfidence` in the UI, and it can
- *      never move a finding out of UNVERIFIED.
- *
- * Malformed output is rejected, never repaired. A rejected response is reported
- * as an unavailable reasoning stage and the comparison still stands on its own.
- */
+// Construction reasoning.
 
 import type {
   ComparisonRow,
@@ -36,13 +9,7 @@ import type {
 import { elementLabel } from './types/inspection.ts';
 import type { AIObservation, ValidationIssue } from './types/observation.ts';
 
-/**
- * How sure the reasoning is allowed to be.
- *
- * INSUFFICIENT_EVIDENCE is the important one: it is the honest reading when the
- * photograph simply cannot settle the question, and it is the outcome the
- * product most wants a model to reach rather than talk itself out of.
- */
+// How sure the reasoning is allowed to be.
 export const REASONING_CERTAINTIES = ['SUPPORTED', 'UNCERTAIN', 'INSUFFICIENT_EVIDENCE'] as const;
 export type ReasoningCertainty = (typeof REASONING_CERTAINTIES)[number];
 
@@ -50,48 +17,37 @@ export function isReasoningCertainty(value: unknown): value is ReasoningCertaint
   return typeof value === 'string' && (REASONING_CERTAINTIES as readonly string[]).includes(value);
 }
 
-/** One validated construction-reasoning record for one inspection. */
+// One validated construction-reasoning record for one inspection.
 export interface ConstructionReasoning {
-  /** One sentence: what the evidence supports about the work. */
+  // One sentence: what the evidence supports about the work.
   readonly summary: string;
-  /** What carries the construction significance, and why it is the deciding factor. */
+  // What carries the construction significance, and why it is the deciding factor.
   readonly whatMatters: string;
-  /** The reasoning itself: how the evidence and the comparison combine. */
+  // The reasoning itself: how the evidence and the comparison combine.
   readonly rationale: string;
-  /** A practical next inspection action. Never an approval or a rejection. */
+  // A practical next inspection action. Never an approval or a rejection.
   readonly recommendation: string;
-  /** What a field user must physically check to resolve the open question. */
+  // What a field user must physically check to resolve the open question.
   readonly verification: string;
-  /**
-   * The model's own certainty, or null when it declined to give one.
-   * NOT a measurement and NOT a verification; it can never settle a finding.
-   */
+  // The model's own certainty, or null when it declined to give one.
   readonly confidence: number | null;
   readonly certainty: ReasoningCertainty;
 }
 
-/** Provenance of a reasoning result, so the stage is never anonymous. */
+// Provenance of a reasoning result, so the stage is never anonymous.
 export interface ReasoningProvenance {
   readonly model: string;
   readonly provider: string;
   readonly reasonedAt: string;
   readonly latencyMs: number;
-  /** How many comparison rows and detections the model was actually given. */
+  // How many comparison rows and detections the model was actually given.
   readonly rowsConsidered: number;
   readonly detectionsConsidered: number;
-  /**
-   * True when the reasoning text restates the vision stage rather than adding
-   * to it. Detected in code, reported honestly, never silently accepted.
-   */
+  // True when the reasoning text restates the vision stage rather than adding to it.
   readonly degenerate: boolean;
 }
 
-/**
- * Why the reasoning stage produced nothing.
- *
- * Every value is a distinct operational state. Collapsing them would let an
- * outage read as "no issues found".
- */
+// Why the reasoning stage produced nothing.
 export type ReasoningFailureKind =
   | 'NOT_CONFIGURED'
   | 'DISABLED'
@@ -118,7 +74,7 @@ export type ReasoningOutcome =
       readonly validationIssues: readonly ValidationIssue[];
     };
 
-/** Display text for an unavailable stage. Never implies the inspection failed. */
+// Display text for an unavailable stage. Never implies the inspection failed.
 export function describeReasoningFailure(kind: ReasoningFailureKind, message: string): string {
   switch (kind) {
     case 'DISABLED':
@@ -148,9 +104,7 @@ export function describeReasoningFailure(kind: ReasoningFailureKind, message: st
       return 'Nebius rate-limited the reasoning request. Wait a moment and run again. '
         + 'The visual observation and the deterministic comparison below are unaffected.';
     default:
-      // Never a bare passthrough: an operator must be told both what happened and
-      // that the stages below it are still sound, or a reasoning fault reads as
-      // an absence of problems.
+      // Never a bare passthrough: an operator must be told both what happened and that the stages below it are still sound.
       return `${message} The visual observation and the deterministic comparison below are unaffected.`;
   }
 }
@@ -185,14 +139,7 @@ export type ReasoningValidation =
   | { readonly ok: true; readonly value: ConstructionReasoning }
   | { readonly ok: false; readonly issues: readonly ValidationIssue[] };
 
-/**
- * Validate ONE untrusted reasoning payload. Fail-closed.
- *
- * `confidence` is optional and must be a finite number in [0,1] when present;
- * a missing one becomes null, which the UI renders as "not stated" rather than
- * as zero. Every other field is required: a reasoning record missing its
- * recommendation or its verification instruction is not a reasoning record.
- */
+// Validate ONE untrusted reasoning payload.
 export function validateReasoning(raw: unknown): ReasoningValidation {
   const issues: ValidationIssue[] = [];
   if (!isPlainObject(raw)) {
@@ -244,18 +191,7 @@ export function validateReasoning(raw: unknown): ReasoningValidation {
   };
 }
 
-/**
- * Does this reasoning merely restate the visual observation?
- *
- * Nemotron is required to ADD construction reasoning. A response whose rationale
- * and recommendation are both near-copies of what the vision stage already said
- * has contributed nothing, and presenting it as a second model working would be
- * exactly the decorative integration this product refuses.
- *
- * Compared case- and whitespace-insensitively over word sets, because the two
- * stages legitimately share the same nouns (a photograph of rebar says "rebar"
- * in both); what must differ is the reasoning, not the subject.
- */
+// Does this reasoning merely restate the visual observation? Nemotron is required to ADD construction reasoning.
 export function isDegenerateReasoning(
   reasoning: ConstructionReasoning,
   visualText: readonly string[],
@@ -277,46 +213,23 @@ export function isDegenerateReasoning(
   };
 
   const novel = added(reasoning.rationale) + added(reasoning.recommendation);
-  // Two sentences' worth of vocabulary the vision stage never used. Below this
-  // the reasoning is a paraphrase, not an addition.
+  // Two sentences' worth of vocabulary the vision stage never used.
   return novel < 12;
 }
 
-/**
- * A headline claim that restates a planned-state note as an observed conclusion.
- *
- * Only ever raised for the two claim-like fields (`summary`, `whatMatters`):
- * the rationale, recommendation and verification may legitimately discuss the
- * plan when directing physical checks, so they are not examined.
- */
+// A headline claim that restates a planned-state note as an observed conclusion.
 export interface ExpectedNoteEcho {
-  /** Which headline field carries the echo. */
+  // Which headline field carries the echo.
   readonly field: 'summary' | 'whatMatters';
-  /** The operator note that was restated. */
+  // The operator note that was restated.
   readonly note: string;
-  /** The element the note belongs to. */
+  // The element the note belongs to.
   readonly element: string;
-  /** The comparison status the echo contradicts. Never MATCH when raised. */
+  // The comparison status the echo contradicts. Never MATCH when raised.
   readonly status: string;
 }
 
-/**
- * Whether headline reasoning launders an expected-state note into apparent fact.
- *
- * The mechanism this exists for: the reference declares `SLAB PRESENT
- * (operator note: "substantially complete")`, the comparison row stays
- * UNDETERMINED because one photograph cannot settle it, and the model answers
- * "the slab is substantially complete" - presenting the plan as the reading.
- * Checked word-set against the note (same tokenization as the degeneracy
- * check): every significant word of the note must appear in one headline
- * field. A note contributing fewer than two significant words (a grid
- * reference such as "grid C1-C12") can never trigger, because identifiers may
- * legitimately recur; two or more shared content words in a single headline
- * sentence is a restatement, not a coincidence.
- *
- * Fail-closed input to validation, never a repair: the caller discards the
- * reasoning and the deterministic comparison stands on its own.
- */
+// Whether headline reasoning launders an expected-state note into apparent fact.
 export function echoesExpectedNote(
   reasoning: ConstructionReasoning,
   expected: ExpectedState,
@@ -350,19 +263,12 @@ export function echoesExpectedNote(
   return null;
 }
 
-/** The structured record handed to the reasoning model. */
+// The structured record handed to the reasoning model.
 export interface ReasoningContextInput {
   readonly projectName: string | null;
-  /**
-   * Names every photograph in the inspection, in order.
-   *
-   * For a single photograph this is that photograph's own label verbatim. For a
-   * group it names all of them, so the reasoning model is told up front that it
-   * is reasoning over SEVERAL frames and must not describe any one of them as
-   * "the capture".
-   */
+  // Names every photograph in the inspection, in order.
   readonly captureLabel: string;
-  /** How many photographs this inspection covers. */
+  // How many photographs this inspection covers.
   readonly imageCount: number;
   readonly expected: ExpectedState;
   readonly detections: readonly DetectedElement[];
@@ -375,19 +281,11 @@ export interface ReasoningContextInput {
   }[];
 }
 
-/** Hard cap so one verbose capture cannot blow the reasoning prompt. */
+// Hard cap so one verbose capture cannot blow the reasoning prompt.
 const MAX_ELEMENTS_IN_CONTEXT = 12;
 const MAX_OBSERVATIONS_IN_CONTEXT = 6;
 
-/**
- * Render the context as the plain, labelled text the reasoning model reads.
- *
- * Deliberately not JSON: a labelled block keeps the model's attention on the
- * ENGINEERING and away from re-parsing a nested structure, and it makes the
- * exact input auditable on screen. Every value here comes from validated
- * product data or from a deterministic comparison, so the block cannot smuggle
- * in an unverified claim.
- */
+// Render the context as the plain, labelled text the reasoning model reads.
 export function buildReasoningContext(input: ReasoningContextInput): string {
   const lines: string[] = [];
 
@@ -398,9 +296,7 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
       : `Project "${input.projectName.trim()}". This name is operator-entered and is NOT evidence of anything on site.`,
   );
   lines.push(`Capture label: ${input.captureLabel}`);
-  // Stated explicitly for a group, so the model reasons about the SET rather than
-  // about whichever frame it happens to read first. For one photograph this adds
-  // nothing and is left out.
+  // Stated explicitly for a group, so the model reasons about the SET rather than about whichever frame it happens to read first.
   if (input.imageCount > 1) {
     lines.push(
       `This inspection covers ${input.imageCount} photographs of the same subject, analysed together. `
@@ -417,11 +313,7 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
   }
   for (const item of input.expected.items) {
     const count = item.expectation === 'COUNT' ? ` = ${item.expectedCount}` : '';
-    // The note is an operator declaration of what was PLANNED, quoted as such so
-    // the model cannot mistake it for something the photograph shows. A bare
-    // parenthetical ("slab PRESENT (substantially complete)") used to read as an
-    // observed conclusion, and a model echoing it back laundered the plan into
-    // apparent fact - including for rows the comparison left UNDETERMINED.
+    // The note is an operator declaration of what was PLANNED, quoted as such so the model cannot mistake it for something.
     lines.push(`- ${elementLabel(item.element)} ${item.expectation}${count}${item.note ? ` (operator note: "${item.note}")` : ''}`);
   }
   lines.push('');
@@ -452,9 +344,7 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
     lines.push('- The vision model returned no usable observations.');
   }
   observations.forEach((observation, index) => {
-    // Which photograph produced this observation. Over a group, an unattributed
-    // observation is unattributable evidence, so the source is carried into the
-    // prompt rather than left in the session.
+    // Which photograph produced this observation.
     const from = input.imageCount > 1 ? ` (from ${observation.captureLabel})` : '';
     lines.push(
       `${index + 1}. [${observation.category}] ${observation.observation} `
@@ -468,9 +358,7 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
     lines.push('- No comparison rows: nothing was inspected, or no expected items exist.');
   }
   for (const row of input.rows) {
-    // The photographs a row rests on. A disputed count is exactly the case where
-    // the model must see that two frames disagreed, or it will narrate one of
-    // them as if it settled the question.
+    // The photographs a row rests on.
     const sources = input.imageCount > 1 && row.sourceCaptureIds.length > 1
       ? ` Across photographs: ${row.sourceCaptureIds.join(' + ')}.`
       : '';
@@ -495,7 +383,7 @@ export function buildReasoningContext(input: ReasoningContextInput): string {
   return lines.join('\n');
 }
 
-/** The visual claims the reasoning must add to, used for the degeneracy check. */
+// The visual claims the reasoning must add to, used for the degeneracy check.
 export function visualClaimText(input: ReasoningContextInput): readonly string[] {
   return [
     ...input.detections.map((d) => `${d.evidence} ${d.element}`),

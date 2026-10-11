@@ -1,18 +1,4 @@
-/**
- * Projects and the captures they own.
- *
- * The active project is real application state, not a label: every capture,
- * expected reference, inspection result and finding is reached through a project,
- * and a capture is only ever readable by the project that owns it.
- *
- * Each capture keeps its own InspectionSession, so re-selecting a capture
- * restores its observations, comparison, findings and human verifications
- * instead of silently re-running the model.
- *
- * State is in memory for the life of the process, matching the existing
- * observation store, finding ledger and result cache. This is a demonstration
- * surface, not a persistence layer.
- */
+// Projects and the captures they own.
 
 import { randomUUID } from 'node:crypto';
 import type { AIProvider } from './providers/provider.ts';
@@ -33,14 +19,7 @@ import { partitionDuplicates } from './multi-image.ts';
 export const MAX_PROJECT_NAME = 80;
 export const MAX_PROJECT_LOCATION = 120;
 
-/**
- * A deterministic key for a group of captures.
- *
- * Ordered, so the same photographs in the same order reuse one session (and so
- * one set of human reviews), while a different order is a genuinely different
- * inspection and gets its own. A single capture keys to its own id, which is what
- * keeps every pre-existing session reachable by the id the workspace file stores.
- */
+// A deterministic key for a group of captures.
 export function groupKey(captures: readonly ProjectCapture[]): string {
   const first = captures[0];
   if (captures.length <= 1) return first === undefined ? 'group_empty' : first.id;
@@ -69,50 +48,30 @@ export interface Project {
   readonly name: string;
   readonly location: string;
   readonly createdAt: string;
-  /**
-   * True for the generated project the app opens on. It is synthetic demo
-   * content, labelled so it can never be mistaken for the operator's own work.
-   */
+  // True for the generated project the app opens on.
   readonly demo: boolean;
   readonly reviewer: ReviewerIdentity | null;
 }
 
 export type ProjectSummary = Project & { readonly captureCount: number };
 
-/**
- * A capture owned by exactly one project.
- *
- * Structurally a DemoCapture so it flows through the existing inspection path
- * unchanged; `source` records where the bytes came from so the UI never implies
- * an uploaded photograph is a generated fixture, and never implies a local
- * dataset image was captured on this project's site.
- */
+// A capture owned by exactly one project.
 export interface ProjectCapture extends DemoCapture {
   readonly projectId: string;
   readonly source: 'UPLOAD' | 'DEMO_FIXTURE' | 'LOCAL_DATASET';
   readonly zoneId: string | null;
   readonly createdAt: string;
-  /**
-   * EXIF orientation recorded in the ORIGINAL file, before normalization.
-   * 1 means no rotation. Retained so a re-oriented photograph is visible on
-   * screen instead of being silently corrected.
-   */
+  // EXIF orientation recorded in the ORIGINAL file, before normalization.
   readonly exifOrientation: number;
-  /** True when the stored pixels were normalized away from the source rotation. */
+  // True when the stored pixels were normalized away from the source rotation.
   readonly geometryNormalized: boolean;
-  /** Where the bytes live on disk when persistence is attached; null otherwise. */
+  // Where the bytes live on disk when persistence is attached; null otherwise.
   readonly bytesPath: string | null;
-  /** True when bytesPath is relative to the local dataset directory. */
+  // True when bytesPath is relative to the local dataset directory.
   readonly bytesRelativeToDataset: boolean;
 }
 
-/**
- * A project's comparison reference: which preset it uses, plus any operator
- * edits applied to it.
- *
- * `edited` distinguishes a pristine preset from one an operator has changed, so
- * a comparison can always be traced back to a named, unchanging definition.
- */
+// A project's comparison reference: which preset it uses, plus any operator edits applied to it.
 export interface ProjectReference {
   readonly presetId: string;
   readonly state: ExpectedState;
@@ -140,7 +99,7 @@ function newId(prefix: string): string {
   return `${prefix}_${randomUUID().slice(0, 8)}`;
 }
 
-/** Trim and validate an operator-supplied project name. */
+// Trim and validate an operator-supplied project name.
 export function cleanProjectName(raw: unknown): ProjectResult<string> {
   if (typeof raw !== 'string') return fail('NAME_REQUIRED', 'A project name is required.');
   const name = raw.trim();
@@ -169,37 +128,28 @@ export class ProjectStore {
   private readonly captures = new Map<string, ProjectCapture>();
   private readonly sessions = new Map<string, InspectionSession>();
   private readonly references = new Map<string, ProjectReference>();
-  /** The reference catalogue. Shared by every project; never mutated per project. */
+  // The reference catalogue. Shared by every project; never mutated per project.
   public readonly presets: PresetStore;
-  /**
-   * Optional durable state. Null means in-memory, and the API then reports
-   * process memory. The two are never confused with each other.
-   */
+  // Optional durable state.
   private readonly persistence: WorkspacePersistence | null;
-  /** Captures whose persisted inspection has already been applied to a session. */
+  // Captures whose persisted inspection has already been applied to a session.
   private readonly hydrated = new Set<string>();
   private activeProjectId: string | null = null;
   private activeCaptureId: string | null = null;
-  /**
-   * The ordered photographs of the CURRENT inspection group.
-   *
-   * Length 1 in the single-image case, which is every case that predates
-   * multi-image. `activeCaptureId` remains the primary so nothing that reads it
-   * has to change.
-   */
+  // The ordered photographs of the CURRENT inspection group.
   private activeCaptureIds: string[] = [];
-  /** Byte-identical photographs refused from the last selection. */
+  // Byte-identical photographs refused from the last selection.
   private duplicateCaptureIds: string[] = [];
 
   public constructor(options: {
     readonly provider: AIProvider;
     readonly zoneId: string | null;
     readonly presets?: PresetStore;
-    /** The stage-2 reasoning model. Absent means reasoning is explicitly off. */
+    // The stage-2 reasoning model. Absent means reasoning is explicitly off.
     readonly reasoner?: Reasoner;
-    /** Presentation translator for novel model prose. Absent keeps memory-only. */
+    // Presentation translator for novel model prose. Absent keeps memory-only.
     readonly translator?: ModelTranslator | null;
-    /** Durable state. Omit for the in-memory demonstration surface. */
+    // Durable state. Omit for the in-memory demonstration surface.
     readonly persistence?: WorkspacePersistence | null;
   }) {
     this.provider = options.provider;
@@ -215,7 +165,7 @@ export class ProjectStore {
     });
   }
 
-  /** The reasoner in force, exposed so the server can report it truthfully. */
+  // The reasoner in force, exposed so the server can report it truthfully.
   public getReasoner(): Reasoner {
     return this.reasoner;
   }
@@ -224,7 +174,7 @@ export class ProjectStore {
     return this.persistence !== null;
   }
 
-  /** The storage truth for THIS instance. Never a hard-coded claim. */
+  // The storage truth for THIS instance. Never a hard-coded claim.
   public describeStorage(): { location: string; durable: boolean; detail: string } {
     if (this.persistence === null) {
       return {
@@ -242,7 +192,7 @@ export class ProjectStore {
     return this.activeProjectId === null ? null : (this.projects.get(this.activeProjectId) ?? null);
   }
 
-  /** Whether a project id is still known, regardless of which one is active. */
+  // Whether a project id is still known, regardless of which one is active.
   public has(projectId: string): boolean {
     return this.projects.has(projectId);
   }
@@ -258,7 +208,7 @@ export class ProjectStore {
     return [...this.captures.values()].filter((c) => c.projectId === projectId);
   }
 
-  /** Capture by id, but only when the active project owns it. */
+  // Capture by id, but only when the active project owns it.
   public activeCapture(id: string): ProjectResult<ProjectCapture> {
     if (this.activeProjectId === null) return fail('UNKNOWN_PROJECT', 'No project is selected.');
     const capture = this.captures.get(id);
@@ -289,11 +239,7 @@ export class ProjectStore {
     };
     this.projects.set(project.id, project);
     this.referenceFor(project.id);
-    // A new project becomes active immediately and starts genuinely empty: it
-    // inherits no captures and no reference from any other project. The
-    // multi-image group is cleared with the primary: carrying the previous
-    // project's open photographs into an empty project would fail the next
-    // inspection as NOT_OWNED while the UI claims they are open.
+    // A new project becomes active immediately and starts genuinely empty: it inherits no captures and no reference from.
     this.activeProjectId = project.id;
     this.activeCaptureId = null;
     this.activeCaptureIds = [];
@@ -347,7 +293,7 @@ export class ProjectStore {
     return { ok: true, value: updated };
   }
 
-  /** Switch the active project. Nothing from the previous project stays selected. */
+  // Switch the active project. Nothing from the previous project stays selected.
   public switchTo(projectId: string): ProjectResult<Project> {
     const project = this.projects.get(projectId);
     if (!project) return fail('UNKNOWN_PROJECT', 'That project no longer exists.');
@@ -357,19 +303,7 @@ export class ProjectStore {
     return { ok: true, value: project };
   }
 
-  /**
-   * Select the capture a project should open on.
-   *
-   * Preferring the newest INSPECTED capture is what makes returning to a project
-   * land on its last inspection rather than on a freshly uploaded photograph
-   * that has never been through the model. Selecting by recency alone put the
-   * operator back on an un-inspected capture with an empty evidence stage, and
-   * their previous findings and verifications were nowhere on screen.
-   *
-   * A project with nothing inspected yet falls back to its newest capture, and a
-   * project with no captures stays empty on purpose rather than borrowing
-   * another project's image.
-   */
+  // Select the capture a project should open on.
   private isCaptureInspected(captureId: string): boolean {
     if (this.sessions.get(captureId)?.inspected() === true) return true;
     if (this.persistence !== null && !this.hydrated.has(captureId)) {
@@ -384,13 +318,9 @@ export class ProjectStore {
     const pool = inspected.length > 0 ? inspected : captures;
     const last = pool.length > 0 ? pool[pool.length - 1] : undefined;
     this.activeCaptureId = last === undefined ? null : last.id;
-    // A default selection is always ONE photograph. Reopening a consolidated
-    // group here would silently re-group the operator's captures behind their
-    // back; an explicit selection is the only thing that forms a group.
+    // A default selection is always ONE photograph.
     this.activeCaptureIds = last === undefined ? [] : [last.id];
-    // The capture is now on screen, so its last inspection must be too. Without
-    // this, a restart left the default capture showing an empty evidence stage
-    // even though a real inspection and real verifications were on disk.
+    // The capture is now on screen, so its last inspection must be too.
     if (last !== undefined) {
       const session = this.sessionFor(last);
       this.hydrateFromPersistence(last, session);
@@ -398,14 +328,7 @@ export class ProjectStore {
     return this.activeCaptureId;
   }
 
-  /**
-   * Delete a project and everything it owns.
-   *
-   * A single pass over this project's captures drops the image bytes and the
-   * session, and therefore every observation, finding and verification that
-   * belonged to it. Other projects are untouched, and the active selection falls
-   * back to a surviving project or to the empty-project state.
-   */
+  // Delete a project and everything it owns.
   public delete(
     projectId: string,
   ): ProjectResult<{ readonly deleted: Project; readonly activeProjectId: string | null }> {
@@ -424,9 +347,7 @@ export class ProjectStore {
       this.activeProjectId = this.list()[0]?.id ?? null;
       if (this.activeProjectId !== null) this.selectDefaultCapture(this.activeProjectId);
       else {
-        // No surviving project: nothing may stay selected, including the
-        // multi-image group. A stale group id would otherwise outlive every
-        // capture it names and fail the next inspection as UNKNOWN_CAPTURE.
+        // No surviving project: nothing may stay selected, including the multi-image group.
         this.activeCaptureId = null;
         this.activeCaptureIds = [];
         this.duplicateCaptureIds = [];
@@ -436,14 +357,7 @@ export class ProjectStore {
     return { ok: true, value: { deleted: project, activeProjectId: this.activeProjectId } };
   }
 
-  /**
-   * Drop everything durable and in-memory that belongs to ONE capture.
-   *
-   * Uploaded bytes, the persisted inspection record, and any multi-image group
-   * session containing this capture all go, so deleting a capture actually
-   * deletes its image and its human verifications rather than leaving them on
-   * disk where a restart would resurrect them.
-   */
+  // Drop everything durable and in-memory that belongs to ONE capture.
   private releaseCaptureState(capture: ProjectCapture): void {
     this.hydrated.delete(capture.id);
     for (const [key, session] of this.sessions.entries()) {
@@ -456,8 +370,7 @@ export class ProjectStore {
     const store = this.persistence;
     if (store === null) return;
     store.deleteInspection(capture.id);
-    // A dataset image belongs to the dataset, not to this project, so its file
-    // is never removed: only the reference to it.
+    // A dataset image belongs to the dataset, not to this project, so its file is never removed: only the reference to it.
     if (capture.source === 'UPLOAD' && capture.bytesPath !== null) {
       store.deleteUpload(capture.bytesPath);
     }
@@ -491,8 +404,7 @@ export class ProjectStore {
       source: input.source,
       zoneId: input.zoneId ?? this.zoneId,
       createdAt: new Date().toISOString(),
-      // Default 1 = no rotation, which is the true answer for a PNG upload and
-      // for any JPEG the importer already normalized.
+      // Default 1 = no rotation, which is the true answer for a PNG upload and for any JPEG the importer already normalized.
       exifOrientation: input.exifOrientation ?? 1,
       geometryNormalized: input.geometryNormalized ?? false,
       bytesPath: input.bytesPath ?? null,
@@ -500,19 +412,11 @@ export class ProjectStore {
     };
     this.captures.set(stored.id, stored);
     this.persist();
-    // Read back rather than returning `stored`: persisting writes an upload to
-    // disk and records its path on the STORED record, so the local object is
-    // stale by one field. Handing that back would tell the caller an upload has
-    // no file behind it when it does.
+    // Read back rather than returning `stored`: persisting writes an upload to disk and records its path on the STORED.
     return this.captures.get(stored.id) ?? stored;
   }
 
-  /**
-   * Delete a capture owned by the active project.
-   *
-   * The session goes with it, so its observations, findings and verifications are
-   * gone rather than merely hidden.
-   */
+  // Delete a capture owned by the active project.
   public deleteCapture(
     captureId: string,
   ): ProjectResult<{ readonly deleted: ProjectCapture; readonly activeCaptureId: string | null }> {
@@ -523,11 +427,7 @@ export class ProjectStore {
     this.sessions.delete(captureId);
     this.releaseCaptureState(owned.value);
 
-    // Reconcile the multi-image group: it must never name a capture that no
-    // longer exists, or the next inspection fails as UNKNOWN_CAPTURE while the
-    // masthead still claims the deleted photograph is open. The surviving
-    // members stay selected in order; only when the whole group is gone does
-    // the selection fall back, preferring something already inspected.
+    // Reconcile the multi-image group: it must never name a capture that no longer exists, or the next inspection fails as.
     const alive = new Set(this.capturesOf(owned.value.projectId).map((c) => c.id));
     const survived = this.activeCaptureIds.filter((id) => alive.has(id));
     if (survived.length > 0) {
@@ -536,8 +436,7 @@ export class ProjectStore {
         this.activeCaptureId = survived[0] as string;
       }
     } else {
-      // The deleted capture's result went with it, so the fallback follows the
-      // same rule as entering a project: prefer something already inspected.
+      // The deleted capture's result went with it, so the fallback follows the same rule as entering a project: prefer.
       const remaining = this.capturesOf(owned.value.projectId);
       const inspected = remaining.filter((c) => this.isCaptureInspected(c.id));
       const pool = inspected.length > 0 ? inspected : remaining;
@@ -574,13 +473,7 @@ export class ProjectStore {
     return this.referenceFor(projectId).state;
   }
 
-  /**
-   * Point a project at a preset.
-   *
-   * Any session that already produced a comparison is marked stale, because its
-   * rows were computed against the previous reference. Silently keeping those
-   * rows on screen would attribute them to a preset that never produced them.
-   */
+  // Point a project at a preset.
   public usePreset(projectId: string, presetId: string): ProjectResult<ProjectReference> {
     const preset = this.presets.get(presetId);
     if (!preset) return fail('UNKNOWN_PRESET', 'That reference no longer exists.');
@@ -595,7 +488,7 @@ export class ProjectStore {
     return { ok: true, value: { ...reference, state: cloneExpectedState(reference.state) } };
   }
 
-  /** Record operator edits against the project's own copy of the reference. */
+  // Record operator edits against the project's own copy of the reference.
   public setReferenceState(projectId: string, state: ExpectedState): ProjectReference {
     const current = this.referenceFor(projectId);
     const reference: ProjectReference = { ...current, state, edited: true };
@@ -605,18 +498,7 @@ export class ProjectStore {
     return { ...reference, state: cloneExpectedState(state) };
   }
 
-  /**
-   * Push a project's reference into its sessions, dropping results it invalidates.
-   *
-   * The in-memory state is dropped here; the DURABLE record is deliberately
-   * left alone. A reference change invalidates how an inspection was JUDGED,
-   * not the fact that the model ran and that a named human reviewed its
-   * output. Deleting the record would destroy the only copy of a real model
-   * payload and the human verification trail built on it — an audit record
-   * `docs/ARCHITECTURE.md` promises is kept — to solve a problem that
-   * `hydrateFromPersistence` closes by refusing to restore a record stamped
-   * against a reference the project no longer uses.
-   */
+  // Push a project's reference into its sessions, dropping results it invalidates.
   private markStale(projectId: string): void {
     const reference = this.referenceFor(projectId);
     const projectCaptureIds = new Set(this.capturesOf(projectId).map((c) => c.id));
@@ -627,24 +509,12 @@ export class ProjectStore {
     }
   }
 
-  /** Session for a capture, created on first use and reused afterwards. */
+  // Session for a capture, created on first use and reused afterwards.
   public sessionFor(capture: ProjectCapture): InspectionSession {
     return this.sessionForGroup([capture]);
   }
 
-  /**
-   * The session for an ORDERED group of captures.
-   *
-   * One image is the historical case and behaves exactly as before. Several
-   * images make ONE consolidated inspection: each gets its own real vision call,
-   * the validated outputs combine, and one comparison and one reasoning pass
-   * follow.
-   *
-   * Keyed by a deterministic group id rather than by a random uuid, so reopening
-   * the same set of photographs reuses the same session — and therefore the same
-   * human reviews — instead of orphaning them. The first capture is the primary,
-   * which is what the single-image code paths read.
-   */
+  // The session for an ORDERED group of captures.
   public sessionForGroup(captures: readonly ProjectCapture[]): InspectionSession {
     const first = captures[0];
     if (first === undefined) {
@@ -663,8 +533,7 @@ export class ProjectStore {
       {
         reasoner: this.reasoner,
         translator: this.translator,
-        // The project NAME is context for the reasoning stage, and the name is
-        // operator-entered rather than observed, so the prompt says so explicitly.
+        // The project NAME is context for the reasoning stage, and the name is operator-entered rather than observed, so the.
         projectName: this.projects.get(first.projectId)?.name ?? null,
         additionalCaptures: captures.slice(1),
       },
@@ -673,14 +542,7 @@ export class ProjectStore {
     return created;
   }
 
-  /**
-   * Select one or more captures as the inspection to work on.
-   *
-   * The group is stored as ordered ids, because the operator's chosen order is
-   * the order the vision calls run in and the order provenance is reported in.
-   * Replaces any previous selection rather than accumulating: two inspections
-   * cannot be active at once, or "the current inspection" stops meaning anything.
-   */
+  // Select one or more captures as the inspection to work on.
   public selectCaptureGroup(captureIds: readonly string[]): ProjectResult<InspectionSession> {
     if (captureIds.length === 0) {
       return { ok: false, reason: 'UNKNOWN_CAPTURE', message: 'Select at least one photograph.' };
@@ -691,8 +553,7 @@ export class ProjectStore {
       if (!found.ok) return found;
       owned.push(found.value);
     }
-    // De-duplicated while preserving order, so selecting the same photograph
-    // twice cannot analyse it twice or count it as two pieces of evidence.
+    // De-duplicated while preserving order, so selecting the same photograph twice cannot analyse it twice or count it as.
     const unique: ProjectCapture[] = [];
     const seen = new Set<string>();
     for (const capture of owned) {
@@ -702,7 +563,6 @@ export class ProjectStore {
     }
 
     // A byte-identical photograph is the same evidence twice, whatever it is named.
-    // The second copy is refused here and reported, never quietly inspected.
     const deduped = partitionDuplicates(unique);
     this.duplicateCaptureIds = deduped.refused.slice();
     // The original ProjectCapture objects, so their provenance survives.
@@ -711,31 +571,24 @@ export class ProjectStore {
     this.activeCaptureId = (ordered[0] as ProjectCapture).id;
     this.activeCaptureIds = ordered.map((c) => c.id);
     const session = this.sessionForGroup(ordered);
-    // Reopen whatever this group was last inspected to, so returning to a project
-    // lands on its findings rather than on an empty evidence stage. No model is
-    // called to do this.
+    // Reopen whatever this group was last inspected to, so returning to a project lands on its findings rather than on an.
     for (const capture of ordered) this.hydrateFromPersistence(capture, session);
     this.persist();
     return { ok: true, value: session };
   }
 
-  /**
-   * Photographs dropped from the last selection as byte-identical duplicates.
-   *
-   * Reported so the UI can say "2 of 3 photographs inspected; one was a
-   * duplicate" rather than quietly analysing two and claiming three.
-   */
+  // Photographs dropped from the last selection as byte-identical duplicates.
   public refusedDuplicateIds(): readonly string[] {
     return this.duplicateCaptureIds;
   }
 
-  /** The captures of the current inspection group, in order. */
+  // The captures of the current inspection group, in order.
   public selectedCaptureIds(): readonly string[] {
     if (this.activeCaptureIds.length > 0) return this.activeCaptureIds;
     return this.activeCaptureId === null ? [] : [this.activeCaptureId];
   }
 
-  /** The captures of the current group, resolved against the active project. */
+  // The captures of the current group, resolved against the active project.
   public selectedCaptures(): ProjectCapture[] {
     const out: ProjectCapture[] = [];
     for (const id of this.selectedCaptureIds()) {
@@ -745,24 +598,12 @@ export class ProjectStore {
     return out;
   }
 
-  /**
-   * Select ONE capture as the inspection to work on.
-   *
-   * The single-image case, unchanged. Multi-image goes through
-   * `selectCaptureGroup`, which this delegates to, so both paths share one
-   * selection rule rather than two that can disagree.
-   */
+  // Select ONE capture as the inspection to work on.
   public selectCapture(captureId: string): ProjectResult<InspectionSession> {
     return this.selectCaptureGroup([captureId]);
   }
 
-  /**
-   * Restore a capture's last inspection into its session, once.
-   *
-   * Guarded by a visited set so re-selecting a capture does not repeatedly
-   * re-apply stored reviews over live ones. A live review always wins: it was
-   * recorded later and against the current process's own result.
-   */
+  // Restore a capture's last inspection into its session, once.
   private hydrateFromPersistence(
     capture: ProjectCapture,
     session: InspectionSession,
@@ -771,31 +612,16 @@ export class ProjectStore {
     if (store === null) return;
     if (session.inspected()) return;
 
-    // A consolidated inspection is WRITTEN under the group key, so it must be
-    // READ under the group key too. Keyed by a single capture id instead, every
-    // reopen of a multi-photo inspection would silently come back empty.
+    // A consolidated inspection is WRITTEN under the group key, so it must be READ under the group key too.
     const key = groupKey(this.selectedCaptures());
     if (this.hydrated.has(key)) return;
 
     const record = store.loadInspection(key);
     if (record === null) return;
 
-    // An inspection judged against a reference the project has since replaced
-    // is superseded, not deleted: the record stays on disk as the audit trail
-    // for the model call and the human decisions made against it, but it must
-    // never be presented as the current inspection.
-    //
-    // This FAILS CLOSED. A stamped record is restored only when the reference
-    // in force is KNOWN to be the one it names. A record whose stamp cannot be
-    // matched against a known current reference is refused, because an
-    // unreadable reference is not evidence of a match. The one exception is a
-    // record written before the stamp existed: it carries no claim either way,
-    // and discarding it would silently destroy history the operator still owns.
+    // An inspection judged against a reference the project has since replaced is superseded, not deleted: the record stays.
     const sessionProject = session.project;
-    // Resolved through referenceFor() rather than read from the map, so a
-    // project whose reference has never been written out still has a KNOWN
-    // current reference instead of an absent one. Resolving it is what makes
-    // the comparison below a real comparison rather than a fail-open.
+    // Resolved through referenceFor() rather than read from the map, so a project whose reference has never been written.
     const currentPresetId = sessionProject === null
       ? null
       : this.referenceFor(sessionProject).presetId;
@@ -806,14 +632,11 @@ export class ProjectStore {
       return;
     }
 
-    // Marked visited only once the record is actually adopted, so a reference
-    // change followed by a re-inspection can be re-read on the next open.
+    // Marked visited only once the record is actually adopted, so a reference change followed by a re-inspection can be.
     this.hydrated.add(key);
     if (!session.restoreInspection(record)) return;
 
-    // Reasoning is restored alongside the result so a reopened capture still
-    // shows the reasoning that produced it, attributed to the model that
-    // actually produced it.
+    // Reasoning is restored alongside the result so a reopened capture still shows the reasoning that produced it.
     const reasoning = record.reasoning;
     if (reasoning !== null) {
       if (reasoning.status === 'AVAILABLE') {
@@ -841,21 +664,13 @@ export class ProjectStore {
   public activeSession(): InspectionSession | null {
     if (this.activeCaptureId === null) return null;
     // The WHOLE group, so a consolidated inspection keeps its other photographs.
-    // Any capture outside the active project is dropped rather than inspected,
-    // which is the same ownership rule the single-image path has always applied.
     const captures = this.selectedCaptures();
     const first = captures[0];
     if (first === undefined || first.projectId !== this.activeProjectId) return null;
     return this.sessionForGroup(captures);
   }
 
-  /**
- * The project the workspace opens on, creating nothing.
- *
- * Used when `restore()` brought real projects back: the operator's own work
- * should be in front of them, not the synthetic demo shell. Falls back to the
- * demo project if a state file somehow yielded nothing usable.
- */
+  // The project the workspace opens on, creating nothing.
 public ensureSelection(): Project {
   const active = this.activeProject();
   if (active !== null) {
@@ -874,12 +689,7 @@ public ensureSelection(): Project {
   );
 }
 
-/**
-   * Seed the store with one demo project holding the generated fixtures.
-   *
-   * These are the repository's existing synthetic scenes, labelled as fixtures
-   * throughout; they are not invented data dressed up as project content.
-   */
+// Seed the store with one demo project holding the generated fixtures.
   public seedDemoProject(name: string, location: string): Project {
     const created = this.create({ name, location });
     if (!created.ok) throw new Error(`cannot seed demo project: ${created.message}`);
@@ -898,18 +708,9 @@ public ensureSelection(): Project {
     return created.value;
   }
 
-  // --- durable state --------------------------------------------------------
+  // durable state
 
-  /**
-   * Write the workspace to disk.
-   *
-   * The generated synthetic demo project is deliberately NOT persisted: it is
-   * regenerated deterministically on every start, so persisting it would only
-   * create a second copy that could drift from the code that builds it.
-   *
-   * Image bytes are never written into the JSON. A dataset capture records the
-   * path it came from; an upload records the file it was written to.
-   */
+  // Write the workspace to disk.
   public persist(): void {
     const store = this.persistence;
     if (store === null) return;
@@ -929,8 +730,7 @@ public ensureSelection(): Project {
           this.captures.set(capture.id, { ...capture, bytesPath: written });
         }
       }
-      // A dataset capture with no recorded path is referenced by its filename,
-      // which is resolved against the dataset directory on restore.
+      // A dataset capture with no recorded path is referenced by its filename, which is resolved against the dataset directory on restore.
       captures.push({
         id: capture.id,
         projectId: capture.projectId,
@@ -963,8 +763,7 @@ public ensureSelection(): Project {
       savedAt: new Date().toISOString(),
       activeProjectId: this.activeProjectId,
       activeCaptureId: this.activeCaptureId,
-      // The whole selection, so a consolidated inspection reopens intact rather
-      // than collapsing to its first photograph on restart.
+      // The whole selection, so a consolidated inspection reopens intact rather than collapsing to its first photograph on restart.
       activeCaptureIds: this.selectedCaptureIds(),
       projects: [...this.projects.values()].filter((p) => p.demo === false),
       captures,
@@ -983,14 +782,7 @@ public ensureSelection(): Project {
     });
   }
 
-  /**
-   * Persist one capture's inspection result and human decisions.
-   *
-   * Returns `true` when persistence is disabled (in-memory mode) or when the
-   * inspection record was durably written to disk. Returns `false` when
-   * persistence is enabled and the disk write failed or no persistable payload
-   * exists.
-   */
+  // Persist one capture's inspection result and human decisions.
   public persistInspection(captureId: string): boolean {
     const store = this.persistence;
     const session = this.sessions.get(captureId);
@@ -1001,10 +793,7 @@ public ensureSelection(): Project {
 
     const view = session.view();
     const reasoning = session.getReasoningOutcome();
-    // Per-image payloads for a consolidated inspection, so a restored inspection
-    // can still say WHICH photograph produced which observation. A single-image
-    // run writes the historical flat `payload` and no `payloads` field at all,
-    // which is exactly how a reader knows which shape it is holding.
+    // Per-image payloads for a consolidated inspection, so a restored inspection can still say WHICH photograph produced.
     const payloads = session.getPersistedPayloads();
     const observationIds = session.getPersistedObservationIds();
     const observationReviews = session.getObservationReviewRecords();
@@ -1024,9 +813,7 @@ public ensureSelection(): Project {
       reviews: session.getReviewRecords(),
       observationReviews,
       ledgerFindings,
-      // The reference this result was judged against. Written so a later
-      // reference change can supersede the record on READ while leaving the
-      // model payload and the human verification trail intact on disk.
+      // The reference this result was judged against.
       referencePresetId: session.project === null
         ? null
         : this.references.get(session.project)?.presetId ?? null,
@@ -1052,17 +839,7 @@ public ensureSelection(): Project {
     });
   }
 
-  /**
-   * Restore projects, captures and references from disk.
-   *
-   * Returns a short report of what was actually recovered, because "restored"
-   * and "restored everything" are different claims. A capture whose bytes can no
-   * longer be resolved is reported as skipped rather than being registered with
-   * no image behind it.
-   *
-   * The synthetic demo project is seeded FIRST and then skipped during restore,
-   * so the repository always opens on a populated surface.
-   */
+  // Restore projects, captures and references from disk.
   public restore(): {
     readonly projects: number;
     readonly captures: number;
@@ -1080,8 +857,7 @@ public ensureSelection(): Project {
         zone: preset.zone,
         items: preset.items,
       });
-      // Ids are regenerated rather than trusted, so a tampered state file cannot
-      // collide with a system preset id or redirect a project's reference.
+      // Ids are regenerated rather than trusted, so a tampered state file cannot collide with a system preset id or redirect.
       if (created.ok) void created;
     }
 
@@ -1117,10 +893,7 @@ public ensureSelection(): Project {
     for (const record of state.references) {
       if (!this.projects.has(record.projectId)) continue;
       const preset = this.presets.get(record.presetId);
-      // An EDITED reference must be restored from the record's own items. Reading
-      // it back from the preset would silently discard every operator edit and
-      // re-present the pristine system reference as if it were still in force,
-      // which is the exact provenance-laundering this product refuses.
+      // An EDITED reference must be restored from the record's own items.
       const restored: ExpectedState = record.edited
         ? { zone: record.zone, source: 'OPERATOR', items: record.items as ExpectedState['items'] }
         : preset !== null
@@ -1148,8 +921,7 @@ public ensureSelection(): Project {
         skippedCaptures += 1;
         continue;
       }
-      // Dimensions are re-read from the restored bytes rather than trusted from
-      // the file, so a truncated upload cannot reappear with a claimed size.
+      // Dimensions are re-read from the restored bytes rather than trusted from the file, so a truncated upload cannot.
       const capture: ProjectCapture = {
         id: record.id,
         label: record.label,
@@ -1171,8 +943,6 @@ public ensureSelection(): Project {
     }
 
     // Reopen the inspection the operator last had open, when it survived.
-    // The whole GROUP, so a consolidated inspection comes back with all its
-    // photographs rather than collapsing to the first one.
     const wantedGroup = (
       state.activeCaptureIds !== undefined && state.activeCaptureIds.length > 0
         ? state.activeCaptureIds

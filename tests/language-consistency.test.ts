@@ -1,27 +1,4 @@
-/**
- * Mixed-language regression guard for the rendered Inspect surface.
- *
- * The defect this exists for: selecting French or Arabic localized SOME text
- * (the finding cards, the comparison rows) while other visible text stayed
- * English (panel headings, the pipeline strip, provenance labels, empty states,
- * the NVIDIA qualification panel). Half-translated UI reads as a broken product.
- *
- * The check is a RENDERED-DOM comparison, not a source-string grep: the real
- * render functions are executed against a stub DOM for each language, and the
- * resulting visible text is compared.
- *
- * The rule applied to every leaf string:
- *
- *   - if English and French render it differently, it was localized: fine.
- *   - if they render it IDENTICALLY, it must be either a technical/canonical
- *     value (allowed to be identical) or an English phrase that should have
- *     been localized (a DEFECT).
- *
- * The second case is what this file hunts. The allowlist below is the explicit,
- * reviewed statement of which strings are legitimately identical in every
- * language: model ids, provider names, ids, timestamps, numbers, enum keywords,
- * and the canonical model-authored English prose that has no translation.
- */
+// Mixed-language regression guard for the rendered Inspect surface.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,9 +16,7 @@ import { defaultExpectedState } from '../src/expected-state.ts';
 import { demoCaptures } from '../src/captures.ts';
 import { APP_JS } from '../src/ui-assets.ts';
 
-/* ------------------------------------------------------------------ *
- * One real inspection.
- * ------------------------------------------------------------------ */
+// One real inspection.
 
 const VISION_BODY = {
   choices: [{
@@ -143,9 +118,7 @@ async function realInspection() {
   return { view, visionCalls: vision.calls, reasoningCalls: reasoning.calls };
 }
 
-/* ------------------------------------------------------------------ *
- * DOM stub
- * ------------------------------------------------------------------ */
+// DOM stub
 
 interface SNode {
   tagName: string;
@@ -153,7 +126,7 @@ interface SNode {
   textContent: string;
   value: string;
   hidden: boolean;
-  /** The client writes `fill.style.width`, so style must exist. */
+  // The client writes `fill.style.width`, so style must exist.
   style: Record<string, string>;
   dataset: Record<string, string>;
   attrs: Record<string, string>;
@@ -165,7 +138,7 @@ interface SNode {
   setAttribute(n: string, v: string): void;
   getAttribute(n: string): string | null;
   addEventListener(t: string, h: (e: unknown) => void): void;
-  /** Visible text of this node and its descendants. */
+  // Visible text of this node and its descendants.
   visible(): string[];
 }
 
@@ -206,7 +179,7 @@ function node(tag: string): SNode {
   return n;
 }
 
-/** Element ids the render functions write into, plus their initial text. */
+// Element ids the render functions write into, plus their initial text.
 function seedElements(): Map<string, SNode> {
   const ids = [
     'run-sub', 'status', 'brief', 'brief-verdict', 'priorities', 'comparison',
@@ -229,11 +202,7 @@ function seedElements(): Map<string, SNode> {
   const map = new Map<string, SNode>();
   for (const id of ids) map.set(id, node('div'));
 
-  // The reviewer strip's initial state. These three are STATIC markup that the
-  // client localizes through data-i18n, so a stub carrying the English default
-  // reproduces the pre-fix bug exactly: French output that still reads
-  // "Not configured". Seeding them proves the fix, rather than hiding the defect
-  // by leaving the elements blank.
+  // The reviewer strip's initial state.
   const seeded: Record<string, { text: string; i18n: string }> = {
     'reviewer-current-val': { text: 'Not configured', i18n: 'panel.reviewerUnset' },
     'reviewer-change-btn': { text: 'Set reviewer', i18n: 'panel.setReviewer' },
@@ -248,12 +217,7 @@ function seedElements(): Map<string, SNode> {
   return map;
 }
 
-/**
- * Run the real renderers for one language and collect every visible leaf.
- *
- * The functions are executed verbatim from the shipped APP_JS. Only the DOM and
- * a handful of globals are stubbed.
- */
+// Run the real renderers for one language and collect every visible leaf.
 function renderSurface(
   view: unknown,
   lang: 'en' | 'fr' | 'ar' | 'zh',
@@ -281,17 +245,12 @@ function renderSurface(
     querySelectorAll: (selector: string) => {
       if (selector === '.i18n-surface') return surfaces;
       if (selector === '[data-i18n]') {
-        // The real page carries these keys in its markup. Handing the same
-        // nodes back to applyLanguage() exercises the hook that fixes the
-        // static-heading defect: without it, "Not configured" and
-        // "Set reviewer" stay English in every language.
+        // The real page carries these keys in its markup.
         return [...ids.values()].filter((n) => n.attrs['data-i18n'] !== undefined);
       }
       return [];
     },
-    // Keep the client from booting. The test drives the renderers directly, and
-    // a boot() would issue its own workspace request, which is not what is
-    // under test here.
+    // Keep the client from booting.
     readyState: 'loading',
     addEventListener: () => {},
   };
@@ -327,8 +286,7 @@ function renderSurface(
     state,
     window: { localStorage: { getItem: () => null, setItem: () => {} }, console: { error: () => {} } },
     console: { error: () => {} },
-    // A render must never need the network. If one does, the call is recorded
-    // and asserted empty.
+    // A render must never need the network. If one does, the call is recorded and asserted empty.
     api: (...a: unknown[]) => { apiCalls.push('api:' + String(a[0])); return Promise.reject(new Error('no net')); },
     fetch: () => { apiCalls.push('fetch'); return Promise.reject(new Error('no net')); },
     setTimeout,
@@ -336,10 +294,7 @@ function renderSurface(
   };
   vm.createContext(context);
 
-  // The client declares its state with a top-level `const`, which in a vm is a
-  // lexical binding the host cannot reach afterwards. A tiny probe appended to
-  // the SAME script can, and it is the only way to drive the real renderers
-  // with an injected view. Nothing in APP_JS is modified.
+  // The client declares its state with a top-level `const`, which in a vm is a lexical binding the host cannot reach afterwards.
   const probe = [
     'globalThis.__probe = {',
     '  setView: (v, p) => { state.view = v; state.pipeline = p; },',
@@ -381,11 +336,9 @@ function renderSurface(
   };
 }
 
-/* ------------------------------------------------------------------ *
- * What may legitimately be identical in every language
- * ------------------------------------------------------------------ */
+// What may legitimately be identical in every language
 
-/** Canonical prose written by a model. Never translated, always labelled. */
+// Canonical prose written by a model. Never translated, always labelled.
 function isCanonicalModelProse(text: string, view: Awaited<ReturnType<typeof realInspection>>['view']): boolean {
   const canonical = [
     ...view.inspectionFindings.flatMap((f) => [f.title, f.observation, f.reason, f.evidence, f.recommendation]),
@@ -397,7 +350,7 @@ function isCanonicalModelProse(text: string, view: Awaited<ReturnType<typeof rea
   return canonical.some((c) => c.length > 12 && text.includes(c.slice(0, 40)));
 }
 
-/** A technical or canonical value that is correct in every language. */
+// A technical or canonical value that is correct in every language.
 function isTechnicalOrCanonical(text: string, view?: {
   expected?: { zone: string };
   provenance?: { captureLabel: string };
@@ -421,8 +374,7 @@ return (
     || /\d+\s*(mm|cm|m|ms|px|MB|KB|B)/i.test(text)
     // Placeholders and punctuation-only values.
     || /^[-\s·|/]*$/.test(text)
-    // The zone name, project name and capture label are operator/preset data the
-    // user typed. They are data, not product copy, so they stay as typed.
+    // The zone name, project name and capture label are operator/preset data the user typed.
     || (view !== undefined && text === view.expected?.zone)
     || (view !== undefined && text === view.provenance?.captureLabel)
     // Capture labels are descriptive names, not copy.
@@ -430,11 +382,7 @@ return (
   );
 }
 
-/**
- * English inspection phrases that must NOT survive a language switch.
- *
- * This is the defect list, kept as data so a regression names itself.
- */
+// English inspection phrases that must NOT survive a language switch.
 const ENGLISH_PHRASES = [
   'Reality brief', 'Inspection priorities', 'Provenance', 'Reality and evidence',
   'Construction reasoning', 'Findings and verification', 'Verification note',
@@ -453,9 +401,7 @@ function englishIn(text: string): string[] {
   return ENGLISH_PHRASES.filter((p) => text.includes(p));
 }
 
-/* ------------------------------------------------------------------ *
- * The tests
- * ------------------------------------------------------------------ */
+// The tests
 
 test('the French render contains no English inspection labels', async () => {
   const { view } = await realInspection();
@@ -492,9 +438,7 @@ test('English renders in English', async () => {
   const rendered = renderSurface(view, 'en');
   const joined = rendered.leaves.join(' | ');
 
-  // The English render is the baseline, so it must actually be English. These
-  // are the phrases the renderers OWN; the static headings are asserted
-  // separately against the markup, since a stub DOM starts empty.
+  // The English render is the baseline, so it must actually be English.
   for (const phrase of [
     'Expected-state comparison', 'Visual reading', 'NVIDIA MODEL',
     'NOT AN NVIDIA MODEL', 'Fresh inference complete', 'Elements detected',
@@ -533,8 +477,8 @@ test('every identical-across-languages leaf is canonical, technical or model pro
   const fr = renderSurface(view, 'fr').leaves;
 
   const unexplained = fr.filter((text) => {
-    if (!en.has(text)) return false;               // localized: fine
-    if (text.trim().length === 0) return false;    // nothing rendered
+    if (!en.has(text)) return false;
+    if (text.trim().length === 0) return false;
     if (isTechnicalOrCanonical(text, view)) return false;
     if (isCanonicalModelProse(text, view)) return false;
     return true;
@@ -552,19 +496,14 @@ test('the localized panels really did change language', async () => {
   const { view } = await realInspection();
   const fr = renderSurface(view, 'fr').leaves.join(' | ');
 
-  // One phrase per surface that used to be English-only. The apostrophes are
-// matched loosely, because the catalog uses U+2019 in some strings and the
-// ASCII form in others; both are valid French typography.
+  // One phrase per surface that used to be English-only.
   assert.match(fr, /Comparaison avec l[’']état attendu/, 'priority basis');
   assert.match(fr, /Extraction des preuves visuelles/, 'qualification stage role');
   assert.match(fr, /NON UN MODÈLE NVIDIA/, 'NVIDIA badge');
   assert.match(fr, /Inférence terminée/, 'inspect intro');
   assert.match(fr, /Éléments détectés/, 'provenance row');
   assert.match(fr, /CONSTATATION IA/, 'finding action');
-  // Model-authored prose now carries a localized presentation with a way back
-  // to the authoritative original. The test fixture sentences are all in the
-  // offline memory, so French shows the translation badge and View-original
-  // control rather than the untranslated-prose marker.
+  // Model-authored prose now carries a localized presentation with a way back to the authoritative original.
   assert.match(fr, /Traduit de l.*anglais/, 'translated-prose badge');
   assert.match(fr, /Voir l.*original/, 'view-original control');
   assert.match(fr, /Le coulage des poteaux est en cours/, 'translated observation');
@@ -591,8 +530,7 @@ test('the Arabic and Chinese renders carry their own vocabulary', async () => {
 });
 
 test('no placeholder is left unfilled in any language', async () => {
-  // A template that reaches the screen with its {token} intact is a visible
-  // defect. This is the guard for that, across every surface.
+  // A template that reaches the screen with its {token} intact is a visible defect.
   const { view } = await realInspection();
   for (const lang of INSPECTION_LANGUAGES) {
     const leaked = renderSurface(view, lang).leaves.filter((text) => /\{[a-zA-Z]+\}/.test(text));
@@ -634,10 +572,7 @@ test('canonical findings, severities and evidence are untouched by the render', 
 
 test('every static heading inside a localized bay carries an i18n key', async () => {
   const { INDEX_HTML } = await import('../src/ui-assets.ts');
-  // The markup is the second bypass class: static headings the client never
-  // re-renders, so only a data-i18n key can make them follow the language.
-  // Checked per tag, so a keyed element is recognised regardless of attribute
-  // order.
+  // The markup is the second bypass class: static headings the client never re-renders, so only a data-i18n key can make.
   const surfaces = INDEX_HTML.split('i18n-surface').slice(1);
   assert.equal(surfaces.length, 3, 'three localized bays');
 
@@ -653,8 +588,7 @@ test('every static heading inside a localized bay carries an i18n key', async ()
       if (/data-i18n=/.test(attrs)) continue;
       // Text the renderers overwrite before the user sees it needs no key.
       if (/id="(run-sub|status|reason-lede|reason-stage|stage-cap|brief-verdict|rail-overall|rail-findings-n|reviewer-current-val)"/.test(attrs)) continue;
-      // The <footer> is outside every bay: the split on 'i18n-surface' runs to
-      // the end of the document, and the footer is not a localized surface.
+      // The <footer> is outside every bay: the split on 'i18n-surface' runs to the end of the document, and the footer is not.
       if (/<footer/.test(chunk.slice(0, m.index))) break;
       unkeyed.push(text);
     }

@@ -1,14 +1,4 @@
-/**
- * Synthesis: findings, priorities, reality brief and counters.
- *
- * The invariants locked in here are the product's credibility guarantees:
- *
- *   - a MATCH never becomes a finding
- *   - a comparison finding is UNVERIFIED and labelled as arithmetic, not vision
- *   - an UNDETERMINED item is never dressed up as a confirmed problem
- *   - the brief reports only real counts, and says when nothing was found
- *   - synthetic (offline demo) runs are flagged, never presented as AI inference
- */
+// Synthesis: findings, priorities, reality brief and counters.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -113,7 +103,6 @@ test('a count shortfall becomes an evidence-backed, UNVERIFIED finding', () => {
 
 test('comparison findings state which evidence the image actually provides', () => {
   // Three rows, three evidence states, and the wording must not blur them:
-  // a localized region, a real reading with no region, and no reading at all.
   const exp = state([
     expected({ id: 'e_localized', element: 'COLUMN', expectation: 'COUNT', expectedCount: 12 }),
     expected({ id: 'e_fullframe', element: 'WALL', expectation: 'COUNT', expectedCount: 6 }),

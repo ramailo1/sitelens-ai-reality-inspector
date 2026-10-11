@@ -1,11 +1,4 @@
-/**
- * Turns raw provider output into structured observations. This is the only
- * place untrusted model output becomes product data.
- *
- * Observations always start AI_GENERATED + UNVERIFIED, invalid entries are
- * dropped rather than coerced, and a provider failure propagates as a failure so
- * an outage never yields a fabricated result.
- */
+// Turns raw provider output into structured observations.
 
 import { randomUUID } from 'node:crypto';
 import type { AIProvider, InspectRequest, ProviderFailureKind } from './providers/provider.ts';
@@ -30,69 +23,53 @@ import { toCacheableFinding, toCacheableObservation } from './inspector-payload.
 
 export type { InferenceOrigin };
 
-/** Result of one inspection run. */
+// Result of one inspection run.
 export interface InspectionResult {
   readonly captureId: string;
-  /**
-   * Every capture that contributed to a consolidated result, in order.
-   *
-   * Absent on a single-image result, where `captureId` alone is the whole
-   * truth. Present and length > 1 on a consolidated one, which is how downstream
-   * code tells "one photograph" from "three photographs merged".
-   */
+  // Every capture that contributed to a consolidated result, in order.
   readonly captureIds?: readonly string[];
   readonly provider: string;
   readonly model: string;
-  /** Only schema-valid observations. May be empty. */
+  // Only schema-valid observations. May be empty.
   readonly observations: readonly AIObservation[];
-  /** Model entries rejected by validation. Never silently discarded. */
+  // Model entries rejected by validation. Never silently discarded.
   readonly rejected: readonly { readonly issues: readonly ValidationIssue[] }[];
-  /** Display-only band per observation index, aligned to `observations`. */
+  // Display-only band per observation index, aligned to `observations`.
   readonly bands: readonly ('LOW' | 'MEDIUM' | 'HIGH')[];
   readonly inspectedAt: string;
-  /**
-   * What the model reported it can SEE, strictly validated. Kept separate from
-   * `rejected` so a bad element entry cannot change the observation counts.
-   */
+  // What the model reported it can SEE, strictly validated.
   readonly elements?: readonly DetectedElement[];
-  /** Model-proposed attention areas, strictly validated. */
+  // Model-proposed attention areas, strictly validated.
   readonly modelFindings?: readonly InspectionFinding[];
-  /** Rejected element/finding entries, reported but never silently dropped. */
+  // Rejected element/finding entries, reported but never silently dropped.
   readonly rejectedInspection?: readonly { readonly issues: readonly ValidationIssue[] }[];
-  /**
-   * Where this run's AI output came from. Always present so the UI can show
-   * FRESH AI INFERENCE, CACHED AI RESULT or DEMO FIXTURE honestly.
-   */
+  // Where this run's AI output came from.
   readonly inferenceOrigin?: InferenceOrigin;
-  /** When a CACHED result was served, when the original inference happened. */
+  // When a CACHED result was served, when the original inference happened.
   readonly originalInferenceAt?: string | null;
   readonly originalLatencyMs?: number | null;
 }
 
 export type InspectionOutcome =
   | {
-      /** Nothing has been run yet in this session. */
+      // Nothing has been run yet in this session.
       readonly status: 'PENDING';
     }
   | {
       readonly status: 'COMPLETED';
       readonly result: InspectionResult;
-      /** Present only when at least one entry was rejected by validation. */
+      // Present only when at least one entry was rejected by validation.
       readonly validationFailures: readonly { readonly issues: readonly ValidationIssue[] }[];
     }
   | {
       readonly status: 'VALIDATION_EMPTY';
-      /** Inference succeeded; the model returned no usable observations. */
+      // Inference succeeded; the model returned no usable observations.
       readonly result: InspectionResult;
       readonly validationFailures: readonly { readonly issues: readonly ValidationIssue[] }[];
     }
   | {
       readonly status: 'VALIDATION_FAILED';
-      /**
-       * Inference succeeded and the response parsed, but nothing survived
-       * validation. This is deliberately distinct from a provider failure:
-       * the model DID run and DID answer.
-       */
+      // Inference succeeded and the response parsed, but nothing survived validation.
       readonly result: InspectionResult;
       readonly validationFailures: readonly { readonly issues: readonly ValidationIssue[] }[];
     }
@@ -105,24 +82,7 @@ export type InspectionOutcome =
 
 export type InspectionStatus = 'COMPLETED' | 'VALIDATION_FAILED' | 'VALIDATION_EMPTY';
 
-/**
- * Whether a validated result counts as a completed run. Anything the model
- * said that survived validation counts: observations, elements and findings
- * alike.
- */
-/**
- * Combine per-image results into ONE consolidated result.
- *
- * Concatenation, never mutation: each image's observations, elements and
- * findings are carried through untouched, so every one keeps the capture id,
- * bounding box and confidence the model gave it. The merged result records the
- * full set of captures so downstream code can always ask which photographs
- * contributed.
- *
- * `bands` is index-aligned to `observations` by construction, so the two are
- * concatenated together. That alignment is what `view()` relies on to report a
- * confidence band per observation.
- */
+// Whether a validated result counts as a completed run.
 export function mergeImageResults(
   results: readonly InspectionResult[],
 ): InspectionResult {
@@ -141,8 +101,7 @@ export function mergeImageResults(
     modelFindings.push(...(result.modelFindings ?? []));
     rejected.push(...result.rejected);
     rejectedInspection.push(...(result.rejectedInspection ?? []));
-    // Defensive: a result whose bands are short must not shift every later
-    // observation's band, which would misreport confidences across the group.
+    // Defensive: a result whose bands are short must not shift every later observation's band, which would misreport.
     for (let i = 0; i < result.observations.length; i++) {
       bands.push(result.bands[i] ?? 'LOW');
     }
@@ -153,9 +112,7 @@ export function mergeImageResults(
     throw new Error('mergeImageResults requires at least one result');
   }
 
-  // The timestamp of the FIRST image's inspection: the run started there. Using
-  // it keeps `inspectedAt` meaning "when this inspection began", not "when the
-  // last photograph happened to finish".
+  // The timestamp of the FIRST image's inspection: the run started there.
   const inspectedAt = results
     .map((r) => Date.parse(r.inspectedAt))
     .filter((n) => !Number.isNaN(n))
@@ -173,9 +130,7 @@ export function mergeImageResults(
     elements,
     modelFindings,
     rejectedInspection,
-    // A group is only ever CACHED as a whole. Claiming per-image cache origins
-    // would require tracking them, and a mixed FRESH/CACHED group presented as
-    // one thing is exactly the ambiguity this product refuses.
+    // A group is only ever CACHED as a whole.
     inferenceOrigin: results.every((r) => r.inferenceOrigin === 'CACHED') ? 'CACHED' : 'FRESH',
     originalInferenceAt: results[0]?.originalInferenceAt ?? null,
     originalLatencyMs: null,
@@ -195,14 +150,11 @@ export interface InspectOptions {
   readonly image: InspectRequest['image'];
   readonly projectId?: string | null | undefined;
   readonly zoneId?: string | null | undefined;
-  /**
-   * The expected state rendered as short plain text. Sent to the model only as
-   * look-for context; the actual comparison happens in compare.ts, in code.
-   */
+  // The expected state rendered as short plain text.
   readonly expectedSummary?: string | null | undefined;
 }
 
-/** In-memory observation store. Demo scope only — not a product database. */
+// In-memory observation store. Demo scope only — not a product database.
 export class ObservationStore {
   private readonly rows = new Map<string, AIObservation>();
 
@@ -222,7 +174,7 @@ export class ObservationStore {
     return [...this.rows.values()];
   }
 
-  /** Apply a human decision. The ONLY way a verification status can change. */
+  // Apply a human decision. The ONLY way a verification status can change.
   public review(id: string, review: ObservationReview): AIObservation | null {
     const existing = this.rows.get(id);
     if (!existing) return null;
@@ -231,7 +183,7 @@ export class ObservationStore {
     return updated;
   }
 
-  /** Restore or roll back an observation's review state directly. */
+  // Restore or roll back an observation's review state directly.
   public setReviewState(id: string, review: ObservationReview | null): AIObservation | null {
     const existing = this.rows.get(id);
     if (!existing) return null;
@@ -250,7 +202,7 @@ export class RealityInspector {
   private readonly store: ObservationStore;
   private readonly now: () => Date;
   private readonly idFactory: () => string;
-  /** Wall time of the most recent real provider call, for the cache record. */
+  // Wall time of the most recent real provider call, for the cache record.
   private lastLatencyMs = 0;
 
   constructor(options: {
@@ -265,12 +217,7 @@ export class RealityInspector {
     this.idFactory = options.idFactory ?? (() => `obs_${randomUUID()}`);
   }
 
-  /**
-   * Inspect one capture.
-   *
-   * @throws {ProviderError} when the provider fails. The caller MUST surface
-   * this as a failure; the inspector never converts an outage into a result.
-   */
+  // Inspect one capture. @throws {ProviderError} when the provider fails.
   async inspectCapture(options: InspectOptions): Promise<InspectionResult> {
     const started = Date.now();
     const raw = await this.provider.inspect({
@@ -284,13 +231,7 @@ export class RealityInspector {
     return { ...this.buildFromPayload(raw, options), inferenceOrigin: 'FRESH' };
   }
 
-  /**
-   * Turn a provider payload into a validated result.
-   *
-   * Shared by the live path and the cache path so a cached result is validated
-   * by exactly the same rules as a fresh one. A cache entry is raw provider
-   * output, never pre-validated product data.
-   */
+  // Turn a provider payload into a validated result.
   private buildFromPayload(
     raw: RawProviderResult,
     options: InspectOptions & { readonly observationIds?: readonly string[] | undefined },
@@ -299,8 +240,7 @@ export class RealityInspector {
     const rejected: { issues: readonly ValidationIssue[] }[] = [];
     const bands: ('LOW' | 'MEDIUM' | 'HIGH')[] = [];
 
-    // The SEE layer. Kept in its own arrays so a malformed element entry can
-    // never disturb the observation bookkeeping below.
+    // The SEE layer. Kept in its own arrays so a malformed element entry can never disturb the observation bookkeeping below.
     const elements: DetectedElement[] = [];
     const modelFindings: InspectionFinding[] = [];
     const rejectedInspection: { issues: readonly ValidationIssue[] }[] = [];
@@ -339,8 +279,7 @@ export class RealityInspector {
           ? restoredId.trim()
           : this.idFactory(),
         captureId: options.image.captureId,
-        // Falls back to the id when a caller supplies no label, so an observation
-        // is never unattributable. Never invented prose: the id is a real id.
+        // Falls back to the id when a caller supplies no label, so an observation is never unattributable.
         captureLabel: options.image.captureLabel ?? options.image.captureId,
         projectId: options.projectId ?? null,
         zoneId: options.zoneId ?? null,
@@ -384,14 +323,7 @@ export class RealityInspector {
     };
   }
 
-  /**
-   * Inspect, preferring a cached successful result.
-   *
-   * On a hit the provider is NOT called. The result is rebuilt through the same
-   * validator as a fresh inference and is labelled `CACHED`, carrying the time of
-   * the original inference. Failures are never cached, so a hit always means
-   * "this exact image was successfully inspected before".
-   */
+  // Inspect, preferring a cached successful result.
   async inspectCached(
     options: InspectOptions & { readonly cache: InspectionCache; readonly useCache: boolean },
   ): Promise<InspectionResult> {
@@ -425,8 +357,7 @@ export class RealityInspector {
 
     const fresh = await this.inspectCapture(options);
     if (fresh.inferenceOrigin === 'FRESH') {
-      // Only a genuinely accepted result is storable. An empty or fully rejected
-      // response would otherwise be served back forever as a fast "success".
+      // Only a genuinely accepted result is storable.
       options.cache.store(
         key,
         {
@@ -446,16 +377,7 @@ export class RealityInspector {
     return fresh;
   }
 
-  /**
-   * Rebuild a validated result from a raw provider payload WITHOUT calling the
-   * provider.
-   *
-   * The same `buildFromPayload` path a cache hit uses, exposed for restoring a
-   * persisted inspection after a restart. Re-validating here rather than
-   * trusting the file is deliberate: a state file on disk is exactly as
-   * untrusted as a model response, and a run restored from one must be held to
-   * identical rules or a restart would quietly relax the trust boundary.
-   */
+  // Rebuild a validated result from a raw provider payload WITHOUT calling the provider.
   rebuildFromPayload(
     raw: RawProviderResult,
     options: InspectOptions & { readonly observationIds?: readonly string[] | undefined },
@@ -463,14 +385,7 @@ export class RealityInspector {
     return { ...this.buildFromPayload(raw, options), inferenceOrigin: 'CACHED' };
   }
 
-  /**
-   * Inspect one capture and classify the outcome.
-   *
-   * "the model failed", "the model answered but the answer was unusable" and
-   * "the model had nothing to report" stay distinct, so the UI can remain
-   * honest: collapsing them would let a validation failure look like a working
-   * inspection.
-   */
+  // Inspect one capture and classify the outcome.
   async inspect(options: InspectOptions): Promise<InspectionOutcome> {
     let result: InspectionResult;
     try {
@@ -492,7 +407,7 @@ export class RealityInspector {
     return { status, result, validationFailures: result.rejected } as InspectionOutcome;
   }
 
-  /** Human review: the ONLY transition out of UNVERIFIED. */
+  // Human review: the ONLY transition out of UNVERIFIED.
   reviewObservation(input: {
     observationId: string;
     decision: Exclude<VerificationStatus, 'UNVERIFIED'>;
@@ -500,8 +415,7 @@ export class RealityInspector {
     note?: string | null | undefined;
   }): AIObservation | null {
     const target = this.store.get(input.observationId);
-    // Refuse to review something that does not exist rather than silently
-    // performing a no-op that would read as a successful review.
+    // Refuse to review something that does not exist rather than silently performing a no-op that would read as a successful review.
     if (!target) return null;
     if (!input.reviewer || input.reviewer.trim().length === 0) return null;
 

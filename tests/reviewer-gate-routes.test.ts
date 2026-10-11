@@ -1,16 +1,4 @@
-/**
- * All six reviewer-gated routes, verified against a REAL running server.
- *
- * reviewer-gate.test.ts already drives the HTTP surface, but this file exists to
- * answer a narrower question with harder evidence: for each protected route,
- * with and without a reviewer, what status comes back, and did anything change
- * on the way out. It asserts on observed store state rather than on the presence
- * of a guard call, so a route that checked the gate but mutated anyway would
- * still fail here.
- *
- * Every server runs against its own temporary data directory. Nothing here
- * reads or writes the repository's data/ directory.
- */
+// All six reviewer-gated routes, verified against a REAL running server.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +14,7 @@ const PNG = Buffer.from(
   'base64',
 );
 
-/** Routes that must refuse work while the gate is closed. */
+// Routes that must refuse work while the gate is closed.
 const GATED: readonly { path: string; name: string }[] = [
   { path: '/api/upload?name=site.png&type=image/png', name: 'upload' },
   { path: '/api/run', name: 'run' },
@@ -36,7 +24,7 @@ const GATED: readonly { path: string; name: string }[] = [
   { path: '/api/review-finding', name: 'review-finding' },
 ];
 
-/** Read-only routes that must stay reachable while the gate is closed. */
+// Read-only routes that must stay reachable while the gate is closed.
 const READS: readonly string[] = [
   '/api/workspace', '/api/session', '/api/projects', '/api/captures', '/api/dataset', '/api/expected',
 ];
@@ -85,7 +73,7 @@ async function startServer(): Promise<Harness> {
   };
 }
 
-/** A payload each route will accept far enough to reach its own validation. */
+// A payload each route will accept far enough to reach its own validation.
 function payloadFor(path: string): unknown {
   if (path === '/api/run') return {};
   if (path === '/api/dataset/import') return { id: '001-some-image' };
@@ -95,11 +83,10 @@ function payloadFor(path: string): unknown {
   return undefined;
 }
 
-/** A snapshot of everything a gated mutation could plausibly have changed. */
+// A snapshot of everything a gated mutation could plausibly have changed.
 function evidenceOf(h: Harness) {
   const store = h.store();
-  // activeSession() is null when nothing is open, which is the normal case for
-  // these refusals; the view must then be read as null rather than dereferenced.
+  // activeSession() is null when nothing is open, which is the normal case for these refusals.
   const session = store.activeSession();
   return {
     captures: store.captures.size,
@@ -240,15 +227,12 @@ test('with a reviewer configured, every gated route passes the gate', async () =
     });
     assert.equal(settle.status, 200, 'review-finding passes the gate and records');
 
-    // finding-state operates on the finding LEDGER, which only holds findings
-    // raised from a human-verified OBSERVATION. Verifying one is what makes the
-    // id real; an inspection-finding id used to draw a 200 for a silent no-op.
+    // finding-state operates on the finding LEDGER, which only holds findings raised from a human-verified OBSERVATION.
     const raised = await h.call('POST', '/api/review', {
       observationId: run.body.observations[0].id, decision: 'VERIFIED',
     });
     assert.equal(raised.status, 200, 'review passes the gate and records');
-    // The ledger is read from the session the route just mutated, rather than
-    // from the review payload, so the id used below is one the ledger holds.
+    // The ledger is read from the session the route just mutated, rather than from the review payload, so the id used below.
     const ledgerFinding = (await h.call('GET', '/api/session')).body.findings[0];
     assert.ok(ledgerFinding, 'verifying an observation must raise a ledger finding');
 
@@ -276,8 +260,7 @@ test('gate passage is distinguishable from business success', async () => {
   try {
     await h.call('POST', '/api/projects', { name: 'Open' });
     await h.call('POST', '/api/reviewer', { name: 'Takou Rah' });
-    // An invalid payload must reach business validation and fail THERE, proving
-    // the 409 above really was the gate and not this route's own check.
+    // An invalid payload must reach business validation and fail THERE, proving the 409 above really was the gate and not.
     const res = await h.call('POST', '/api/review', { observationId: 'nope', decision: 'VERIFIED' });
     assert.notEqual(res.status, 409, 'the gate is open, so this cannot be a gate refusal');
     assert.equal(res.body.error !== 'REVIEWER_REQUIRED', true);

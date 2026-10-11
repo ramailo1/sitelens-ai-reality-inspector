@@ -1,10 +1,4 @@
-/**
- * Project and capture isolation over the real HTTP surface.
- *
- * The store tests prove the model; these prove the server actually enforces it,
- * because a route that forgets the ownership check would pass every unit test and
- * still hand another project's capture to the browser.
- */
+// Project and capture isolation over the real HTTP surface.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,19 +9,11 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 );
-/**
- * Open the reviewer gate for the active project.
- *
- * Uploading and running produce evidence attributed to a reviewer, so the
- * server refuses them until one is named. These tests assert project
- * isolation, not the gate, so naming one is fixture setup; the gate itself is
- * covered by reviewer-gate.test.ts.
- */
+// Open the reviewer gate for the active project.
 async function nameReviewer(call: Call): Promise<void> {
   const res = await call.json('POST', '/api/reviewer', { name: 'API Tester', role: 'QA' });
   assert.equal(res.status, 200, 'naming a reviewer must succeed');
 }
-
 
 async function withServer(fn: (call: Call) => Promise<void>): Promise<void> {
   const handle = createInspectionServer({
@@ -269,10 +255,7 @@ test('a cached result is never served to another project', async () => {
     assert.equal(run.body.provenance.projectId, a.body.project.id);
 
     await call.json('POST', '/api/projects', { name: 'Project B' });
-    // Project B gets a reviewer too. This test is about ownership, so the gate
-    // must be open on BOTH projects: otherwise the request is refused for a
-    // missing reviewer and the ownership check it was written to prove never
-    // runs. The gate's own ordering is asserted in reviewer-gate.test.ts.
+    // Project B gets a reviewer too.
     await nameReviewer(call);
     const leak = await call.json('POST', '/api/run', { captureId, cache: true });
     assert.equal(leak.status, 403, 'the cache must not bypass ownership');

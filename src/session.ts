@@ -1,15 +1,4 @@
-/**
- * Inspection session.
- *
- * Wraps the inspector, the finding ledger and the capture metadata into the
- * single record the UI and the CLI both render, so provenance is produced once
- * and cannot drift between them.
- *
- * The record always states which model ran, what image was inspected, how many
- * observations survived validation and what the trust state is - including when
- * the run produced nothing at all, so a zero-result inspection is never mistaken
- * for a run that never happened.
- */
+// Inspection session.
 
 import { RealityInspector } from './inspector.ts';
 import type { InspectionOutcome, InspectionResult, InspectionStatus } from './inspector.ts';
@@ -66,11 +55,7 @@ import type { InferenceOrigin } from './cache.ts';
 import { inspectionCache } from './cache.ts';
 import type { DemoCapture } from './captures.ts';
 
-/**
- * One element the model reported it can see, with its evidence geometry.
- * `countBasis` is always present so the UI can label a number as a visual
- * estimate or admit that none exists.
- */
+// One element the model reported it can see, with its evidence geometry.
 export interface DetectedElementView {
   readonly element: string;
   readonly present: boolean;
@@ -81,65 +66,36 @@ export interface DetectedElementView {
   readonly boundingBox: AIObservation['evidence']['boundingBox'];
   readonly pixelBox: ReturnType<typeof toPixelBox>;
   readonly localized: boolean;
-  /**
-   * Which photograph produced this reading.
-   *
-   * Present on every detection, including in a single-image inspection. A
-   * consolidated inspection is precisely the case where losing this would turn
-   * evidence from three frames into an anonymous blob.
-   */
+  // Which photograph produced this reading.
   readonly captureId: string;
   readonly captureLabel: string;
 }
 
-/**
- * What the inspected image actually contributes to one finding, stated so the
- * UI can draw exactly what exists and no more:
- *
- *   LOCALIZED   a genuine model box exists; the overlay may draw it.
- *   FULL_FRAME  the finding rests on a real visual reading of THIS image, but
- *               the model returned no usable region. The absence of a rectangle
- *               is reported, never filled with an invented one.
- *   NONE        no visual reading supports the finding; it comes from the
- *               expected-state comparison alone.
- */
+// What the inspected image actually contributes to one finding, stated so the UI can draw exactly what exists and no.
 export type EvidenceState = 'LOCALIZED' | 'FULL_FRAME' | 'NONE';
 
-/** A finding plus everything the detail view needs to draw its evidence. */
+// A finding plus everything the detail view needs to draw its evidence.
 export interface FindingView extends Omit<InspectionFinding, 'id'> {
   readonly id: string;
   readonly pixelBox: ReturnType<typeof toPixelBox>;
   readonly localized: boolean;
-  /** Which of the three evidence states this finding is in; drives the UI copy. */
+  // Which of the three evidence states this finding is in; drives the UI copy.
   readonly evidenceState: EvidenceState;
-  /** Null when the model gave no location and we refuse to invent one. */
+  // Null when the model gave no location and we refuse to invent one.
   readonly region: string | null;
-  /**
-   * Every photograph that supports this finding.
-   *
-   * One entry in a single-image inspection, several in a consolidated one. This
-   * is the answer to "which photograph supports this finding?", and it is never
-   * collapsed to a single representative image.
-   */
+  // Every photograph that supports this finding.
   readonly sourceCaptureIds: readonly string[];
-  /** Labels for `sourceCaptureIds`, same order, so the UI need not re-resolve. */
+  // Labels for `sourceCaptureIds`, same order, so the UI need not re-resolve.
   readonly sourceCaptureLabels: readonly string[];
 }
 
 export interface ComparisonView extends ComparisonRow {
   readonly pixelBox: ReturnType<typeof toPixelBox>;
-  /**
-   * Which photograph this row's box belongs to.
-   *
-   * Null when the row drew no box, or when several images contributed and no
-   * single one is authoritative — the pixel box is then the highest-confidence
-   * contributor's and this names it, so the overlay can never be read against
-   * the wrong photograph.
-   */
+  // Which photograph this row's box belongs to.
   readonly sourceCaptureId: string | null;
 }
 
-/** A recorded human decision against an inspection finding. */
+// A recorded human decision against an inspection finding.
 export interface FindingReview {
   readonly status: 'VERIFIED' | 'REJECTED' | 'NEEDS_REVIEW';
   readonly reviewer: string;
@@ -147,14 +103,7 @@ export interface FindingReview {
   readonly note: string | null;
 }
 
-/**
- * The reasoning stage as the UI sees it.
- *
- * `status` is always present. An unavailable reasoning stage is reported as
- * UNAVAILABLE with a reason, never silently omitted, because "Nemotron did not
- * contribute" and "Nemotron contributed nothing worth showing" are different
- * statements and only one of them is an error.
- */
+// The reasoning stage as the UI sees it.
 export interface ReasoningView {
   readonly status: 'AVAILABLE' | 'UNAVAILABLE';
   readonly provider: string;
@@ -167,7 +116,7 @@ export interface ReasoningView {
   readonly validationIssues: readonly ValidationIssue[];
 }
 
-/** Everything needed to render one observation with its evidence geometry. */
+// Everything needed to render one observation with its evidence geometry.
 export interface ObservationView {
   readonly id: string;
   readonly category: AIObservation['category'];
@@ -185,16 +134,10 @@ export interface ObservationView {
   readonly zoneId: string | null;
   readonly boundingBox: AIObservation['evidence']['boundingBox'];
   readonly pixelBox: ReturnType<typeof toPixelBox>;
-  /** False when the model did not localise this observation. */
+  // False when the model did not localise this observation.
   readonly localized: boolean;
   readonly findingId: string | null;
-  /**
-   * Which photograph produced this observation.
-   *
-   * Carried from the observation itself, never inferred from the group. In a
-   * consolidated inspection this is the only thing that keeps evidence from three
-   * frames from becoming an anonymous blob.
-   */
+  // Which photograph produced this observation.
   readonly captureId: string;
   readonly captureLabel: string;
 }
@@ -218,23 +161,14 @@ export interface ProvenanceRecord {
   readonly observationsRejected: number;
   readonly trustState: string;
   readonly humanReviewPerformed: boolean;
-  /** VISION-STAGE classification of the vision model alone. Never the verdict. */
+  // VISION-STAGE classification of the vision model alone. Never the verdict.
   readonly eligibility: HackathonEligibility;
-  /** Stage-scoped explanation of `eligibility`. */
+  // Stage-scoped explanation of `eligibility`.
   readonly eligibilityNote: string;
   readonly rejectionIssues: readonly ValidationIssue[];
 }
 
-/**
- * Why an inspection could not produce a complete result.
- *
- * `PARTIAL_ANALYSIS` is its own kind rather than a variant of FAILED. A run in
- * which two of three photographs were read is not a failed run and not a clean
- * one: the evidence it does hold is real, and the photograph it could not read
- * is absent. Reporting that as either "no failure" or "inspection failed" loses
- * the only fact that matters, so a consumer reading `failure` alone cannot tell
- * a complete inspection from a partial one.
- */
+// Why an inspection could not produce a complete result.
 export type InspectionFailureKind =
   | 'PARTIAL_ANALYSIS'
   | 'NOT_CONFIGURED'
@@ -252,80 +186,40 @@ export interface SessionView {
   readonly findings: readonly Finding[];
   readonly failure: { readonly kind: InspectionFailureKind | string; readonly message: string; readonly detail: string | null } | null;
 
-  /** WHAT EXISTS ON SITE, as reported by the model. */
+  // WHAT EXISTS ON SITE, as reported by the model.
   readonly detections: readonly DetectedElementView[];
-  /** The comparison reference in force for this run. */
+  // The comparison reference in force for this run.
   readonly expected: ExpectedState;
-  /** REALITY vs EXPECTED, one row per expected item. */
+  // REALITY vs EXPECTED, one row per expected item.
   readonly comparison: readonly ComparisonView[];
-  /** Candidate attention areas, all UNVERIFIED until a human acts. */
+  // Candidate attention areas, all UNVERIFIED until a human acts.
   readonly inspectionFindings: readonly FindingView[];
-  /** Where an inspector should look first. */
+  // Where an inspector should look first.
   readonly priorities: readonly InspectionPriority[];
-  /** The short factual summary. */
+  // The short factual summary.
   readonly brief: RealityBrief;
-  /** Headline counters for the inspection panel. */
+  // Headline counters for the inspection panel.
   readonly counters: RealityCounters;
-  /**
-   * FRESH AI INFERENCE | CACHED AI RESULT | DEMO FIXTURE.
-   *
-   * Always reported so the UI can never imply a live model call when the
-   * result came from the cache or from the offline fixture.
-   */
+  // FRESH AI INFERENCE | CACHED AI RESULT | DEMO FIXTURE.
   readonly inferenceOrigin: InferenceOrigin;
-  /** Set when CACHED: when the real inference behind this result happened. */
+  // Set when CACHED: when the real inference behind this result happened.
   readonly originalInferenceAt: string | null;
   readonly originalLatencyMs: number | null;
-  /** True when the result came from the deterministic offline fixture. */
+  // True when the result came from the deterministic offline fixture.
   readonly isDemoFixture: boolean;
-  /**
-   * EVERY photograph this inspection covers, INCLUDING the ones that failed.
-   *
-   * This is what makes a consolidated inspection legible: the result states how
-   * many photographs were offered, how many were read, and which frame each piece
-   * of evidence came from. A run that reported only its successes would let a
-   * partial inspection read as a complete one.
-   */
+  // EVERY photograph this inspection covers, INCLUDING the ones that failed.
   readonly images: readonly ImageProvenance[];
-  /**
-   * STAGE 2: Nemotron construction reasoning.
-   *
-   * Always present. `status: 'UNAVAILABLE'` with a reason is the honest report
-   * when the stage could not run; the comparison above it is unaffected either
-   * way, which is the point of keeping them separate.
-   */
+  // STAGE 2: Nemotron construction reasoning.
   readonly reasoning: ReasoningView;
-  /**
-   * The two model stages plus the submission-level NVIDIA verdict.
-   *
-   * Three distinct statements live here and are kept apart: whether each model
-   * is an NVIDIA model, whether each stage met the requirement, and whether the
-   * run as a whole did.
-   */
+  // The two model stages plus the submission-level NVIDIA verdict.
   readonly pipelineEligibility: PipelineEligibility;
-  /**
-   * The same inspection, presented in every supported language.
-   *
-   * A pure projection of the fields above, computed once and shipped in the
-   * same payload, so the browser can switch language without a request and
-   * without touching the canonical facts. Selecting a language here is a
-   * presentation choice and can never alter what the inspection found, when it
-   * ran, which models ran it, or whether it qualifies.
-   */
+  // The same inspection, presented in every supported language.
   readonly localized: Readonly<Record<InspectionLanguage, LocalizedInspection>>;
-  /**
-   * Presentation-layer translations of model-authored English prose.
-   *
-   * Keyed by the EXACT English source string. Each entry carries fr/ar/zh
-   * display texts plus per-language `translated` flags. Computed from
-   * canonical facts, shipped in the same payload so the language switch stays
-   * a local read, and never written back into the canonical fields. A changed
-   * source misses the map and falls back to the original.
-   */
+  // Presentation-layer translations of model-authored English prose.
   readonly modelTranslations: Readonly<
     Record<string, Readonly<Record<InspectionLanguage, ModelTranslationResult>>>
   >;
-  /** Geometry facts about the capture, including any EXIF normalization. */
+  // Geometry facts about the capture, including any EXIF normalization.
   readonly geometry: {
     readonly storedWidth: number | null;
     readonly storedHeight: number | null;
@@ -336,17 +230,11 @@ export interface SessionView {
   };
 }
 
-/**
- * One photograph's part in a consolidated inspection.
- *
- * Always present for every offered photograph, INCLUDING the ones that failed.
- * A run that reports only its successes would let a partial inspection read as a
- * complete one, which is the specific failure this product exists to prevent.
- */
+// One photograph's part in a consolidated inspection.
 export interface ImageOutcome {
   readonly captureId: string;
   readonly captureLabel: string;
-  /** FAILED means this photograph contributed nothing. */
+  // FAILED means this photograph contributed nothing.
   readonly status: 'ANALYSED' | 'FAILED';
   readonly failure: string | null;
   readonly elements: readonly DetectedElement[];
@@ -354,23 +242,18 @@ export interface ImageOutcome {
   readonly modelFindings: readonly InspectionFinding[];
 }
 
-/**
- * Dimensions of one capture's stored bytes.
- *
- * Re-reads the header rather than trusting a value from the workspace file: a
- * truncated upload must not reappear with a claimed size.
- */
+// Dimensions of one capture's stored bytes.
 function dimensionsByCaptureOf(target: DemoCapture): ReturnType<typeof readImageDimensions> {
   return readImageDimensions(target.bytes);
 }
 
-/** The capture's provenance label, as a technical enum the UI can localize. */
+// The capture's provenance label, as a technical enum the UI can localize.
 function sourceLabelFor(capture: DemoCapture): string {
   const source = (capture as { source?: unknown }).source;
   return typeof source === 'string' ? source : 'UPLOAD';
 }
 
-/** Geometry facts the UI shows so a rotated source file is visible, not hidden. */
+// Geometry facts the UI shows so a rotated source file is visible, not hidden.
 export interface SessionGeometryView {
   readonly storedWidth: number | null;
   readonly storedHeight: number | null;
@@ -380,7 +263,7 @@ export interface SessionGeometryView {
   readonly geometryNormalized: boolean;
 }
 
-/** One persisted inspection, as read back from disk. */
+// One persisted inspection, as read back from disk.
 export interface RestoredInspection {
   readonly savedAt: string;
   readonly inspectedAt: string;
@@ -392,14 +275,7 @@ export interface RestoredInspection {
     readonly elements: readonly unknown[];
     readonly findings: readonly unknown[];
   };
-  /**
-   * Per-image payloads for a consolidated inspection.
-   *
-   * Absent on every inspection written before multi-image existed; the reader
-   * then falls back to the single merged `payload` above. Present entries are
-   * re-validated individually, so a multi-image inspection restores through the
-   * same validators a fresh one does.
-   */
+  // Per-image payloads for a consolidated inspection.
   readonly payloads?: readonly {
     readonly captureId: string;
     readonly captureLabel: string;
@@ -443,14 +319,7 @@ export interface RestoredInspection {
   }[] | undefined;
 }
 
-/**
- * Shape the stage-2 outcome for display.
- *
- * Never returns null. The three cases are genuinely different statements —
- * "has not run yet", "ran and produced reasoning", "ran and produced nothing
- * usable" — and collapsing any pair of them would let a reasoning outage read as
- * agreement.
- */
+// Shape the stage-2 outcome for display.
 export function buildReasoningView(
   outcome: ReasoningOutcome | null,
   reasoner: Reasoner,
@@ -496,71 +365,34 @@ export function buildReasoningView(
   };
 }
 
-/**
- * A single inspection session over one capture.
- *
- * The run order is the product thesis, executed:
- *
- *   1. MiniCPM-V      SEE          validated elements + observations
- *   2. compare.ts     COMPARE      MATCH / ATTENTION / UNDETERMINED, in arithmetic
- *   3. Nemotron       UNDERSTAND   construction reasoning over (1) and (2)
- *   4. synthesis.ts   INSPECT      candidate findings, all UNVERIFIED
- *   5. a named human  VERIFY       the only path from candidate to settled
- *
- * Step 2 runs BEFORE step 3 on purpose. Nemotron is told what the deterministic
- * comparison concluded, and its output can never change that conclusion: a
- * reasoning model arguing for MATCH does not get to become MATCH. The comparison
- * is arithmetic, and prose is not arithmetic.
- *
- * State lives in memory for the life of the process, and additionally in
- * `data/` when a persistence layer is attached. Neither is a database.
- */
+// A single inspection session over one capture.
 export class InspectionSession {
   private readonly inspector: RealityInspector;
   private readonly ledger: FindingLedger;
-  // Explicit fields rather than constructor parameter properties: Node's
-  // type-stripping loader does not support parameter properties.
+  // Explicit fields rather than constructor parameter properties: Node's type-stripping loader does not support parameter properties.
   private readonly provider: AIProvider;
   private readonly reasoner: Reasoner;
-  /** Presentation translator for novel model prose. Null keeps memory-only. */
+  // Presentation translator for novel model prose. Null keeps memory-only.
   private readonly translator: ModelTranslator | null;
-  /**
-   * Every photograph in this inspection.
-   *
-   * Length 1 is the historical case and behaves identically. Length >1 is a
-   * consolidated inspection: each image gets its own real vision call, the
-   * validated outputs are combined, and one comparison and one reasoning pass
-   * follow. `capture` below is always the FIRST image, so every existing
-   * single-image reader of this class is unchanged.
-   */
+  // Every photograph in this inspection.
   private readonly captures: readonly DemoCapture[];
-  /** The first photograph. The single-image identity of this session. */
+  // The first photograph. The single-image identity of this session.
   private readonly capture: DemoCapture;
   private readonly projectId: string | null;
   private readonly projectName: string | null;
   private readonly zoneId: string | null;
-  /**
-   * Per-image outcome of the most recent run.
-   *
-   * A FAILED entry is retained rather than dropped: the consolidated result must
-   * be able to say that three photographs were offered and two were read, so a
-   * partial run can never be presented as a complete one.
-   */
+  // Per-image outcome of the most recent run.
   private imageOutcomes: readonly ImageOutcome[] = [];
-  /** The comparison reference. Editable, and always reported back to the UI. */
+  // The comparison reference. Editable, and always reported back to the UI.
   private expected: ExpectedState;
   private outcome: InspectionOutcome | null = null;
   private startedAt = 0;
   private latencyMs = 0;
-  /** Human review of an inspection finding, keyed by stable content key. */
+  // Human review of an inspection finding, keyed by stable content key.
   private readonly reviewsByKey = new Map<string, FindingReview>();
-  /** Findings from the most recent view(), so a review can resolve its id. */
+  // Findings from the most recent view(), so a review can resolve its id.
   private currentFindings: readonly FindingView[] = [];
-  /**
-   * Stage 2 outcome. Cleared whenever the reference changes, because reasoning
-   * written against a reference that no longer applies is exactly the stale
-   * prose this product refuses to keep on screen.
-   */
+  // Stage 2 outcome. Cleared whenever the reference changes, because reasoning written against a reference that no longer.
   private reasoning: ReasoningOutcome | null = null;
 
   public constructor(
@@ -572,19 +404,9 @@ export class InspectionSession {
     options?: {
       readonly reasoner?: Reasoner;
       readonly projectName?: string | null;
-      /**
-       * Presentation-layer translator for novel model prose. Null means the
-       * offline memory serves alone with honest fallback. Never a vision or
-       * reasoning re-inference: it translates finished strings once per run.
-       */
+      // Presentation-layer translator for novel model prose.
       readonly translator?: ModelTranslator | null;
-      /**
-       * The remaining photographs of a consolidated inspection.
-       *
-       * Accepted as an array rather than a second positional parameter so every
-       * existing construction site keeps compiling unchanged. The first entry of
-       * `captures` stays the session's primary image.
-       */
+      // The remaining photographs of a consolidated inspection.
       readonly additionalCaptures?: readonly DemoCapture[];
     },
   ) {
@@ -612,44 +434,31 @@ export class InspectionSession {
     this.ledger = new FindingLedger();
   }
 
-  /** The photographs this inspection covers, in the order they were supplied. */
+  // The photographs this inspection covers, in the order they were supplied.
   public get imageIds(): readonly string[] {
     return this.captures.map((c) => c.id);
   }
 
-  /**
-   * The project this inspection belongs to, or null when none was named.
-   *
-   * Exposed so the store can stamp the reference an inspection was judged
-   * against without reaching into private state.
-   */
+  // The project this inspection belongs to, or null when none was named.
   public get project(): string | null {
     return this.projectId;
   }
 
-  /** How many real vision calls this inspection makes. */
+  // How many real vision calls this inspection makes.
   public get imageCount(): number {
     return this.captures.length;
   }
 
-  /** The label of a capture this inspection holds, or its id if unknown. */
+  // The label of a capture this inspection holds, or its id if unknown.
   private labelFor(captureId: string): string {
     return this.captures.find((c) => c.id === captureId)?.label ?? captureId;
   }
 
-  /**
-   * The headline failure of this run, partial analysis included.
-   *
-   * All-or-nothing stays FAILED. A run that read SOME photographs is COMPLETED
-   * with a PARTIAL_ANALYSIS failure rather than a clean COMPLETED: the result is
-   * usable and the omission is real, and both facts have to reach the same
-   * reader.
-   */
+  // The headline failure of this run, partial analysis included.
   private topLevelFailure(
     outcome: InspectionOutcome | null,
   ): { readonly kind: InspectionFailureKind | string; readonly message: string; readonly detail: string | null } | null {
-    // PENDING carries no result and therefore no failure. It is a member of the
-    // union rather than assumed away.
+    // PENDING carries no result and therefore no failure. It is a member of the union rather than assumed away.
     if (outcome === null || outcome.status === 'PENDING') return null;
     if (outcome.status === 'FAILED') {
       return { kind: outcome.kind, message: outcome.message, detail: outcome.detail };
@@ -667,12 +476,7 @@ export class InspectionSession {
     };
   }
 
-  /**
-   * Per-image provenance for the view.
-   *
-   * Includes the images that FAILED, because a consolidated inspection that
-   * reported only its successes would let a partial run read as complete.
-   */
+  // Per-image provenance for the view.
   private imageProvenance(): ImageProvenance[] {
     return this.captures.map((capture) => {
       const outcome = this.imageOutcomes.find((o) => o.captureId === capture.id);
@@ -692,20 +496,13 @@ export class InspectionSession {
     });
   }
 
-  /**
-   * The label the reasoning stage is told it is reasoning over.
-   *
-   * One image keeps its own label verbatim, so the existing single-image prompt
-   * is byte-identical. Several images name all of them, because a prompt that
-   * said "this capture" while handing over three photographs would misreport
-   * what the model was shown.
-   */
+  // The label the reasoning stage is told it is reasoning over.
   private captureGroupLabel(): string {
     if (this.captures.length <= 1) return this.capture.label;
     return this.captures.map((c) => c.label).join(' + ');
   }
 
-  /** Per-image readings, in run order, for the reconciling comparison. */
+  // Per-image readings, in run order, for the reconciling comparison.
   private imageDetections(): ImageDetections[] {
     return this.imageOutcomes.map((outcome) => ({
       captureId: outcome.captureId,
@@ -714,13 +511,7 @@ export class InspectionSession {
     }));
   }
 
-  /**
-   * The comparison rows for this run.
-   *
-   * A single image takes the untouched single-image path. Several images go
-   * through the reconciling comparison, so counts are never summed and every
-   * row records which photographs contributed to it.
-   */
+  // The comparison rows for this run.
   private comparisonRows(detections: readonly DetectedElement[]): ComparisonRow[] {
     if (this.captures.length <= 1 || this.imageOutcomes.length <= 1) {
       return compareExpectedState(this.expected, detections);
@@ -728,14 +519,7 @@ export class InspectionSession {
     return compareAcrossImages(this.expected, this.imageDetections());
   }
 
-  /**
-   * Adopt a new comparison reference, discarding the result it invalidates.
-   *
-   * The comparison rows belong to the previous reference, so they are dropped
-   * rather than re-presented under a preset that never produced them. Clearing
-   * the outcome also removes the findings those rows produced, and the reasoning
-   * that was written about them.
-   */
+  // Adopt a new comparison reference, discarding the result it invalidates.
   adoptReference(expected: ExpectedState): void {
     this.expected = expected;
     this.outcome = null;
@@ -746,18 +530,15 @@ export class InspectionSession {
     this.ledger.clear();
   }
 
-  /** Run the model. Safe to call repeatedly; the last run is what is rendered. */
+  // Run the model. Safe to call repeatedly; the last run is what is rendered.
   async run(options: { readonly useCache?: boolean } = {}): Promise<SessionView> {
     this.startedAt = Date.now();
     this.ledger.clear();
-    // The deterministic fixture is never served from cache: it costs nothing,
-    // and a "cached" label on synthetic data would be actively misleading.
+    // The deterministic fixture is never served from cache: it costs nothing, and a "cached" label on synthetic data would.
     const useCache = options.useCache === true && this.provider.name !== 'demo-fixture';
     const expectedSummary = expectedSummaryFor(this.expected);
 
-    // ONE real vision call per photograph, in order. Sequential on purpose: the
-    // progress the operator sees is then literally true, and a rate-limited
-    // provider is not hit with N concurrent requests.
+    // ONE real vision call per photograph, in order.
     const results: InspectionResult[] = [];
     const outcomes: ImageOutcome[] = [];
     let firstProviderError: ProviderError | null = null;
@@ -769,8 +550,7 @@ export class InspectionSession {
             bytes: capture.bytes,
             mediaType: capture.mediaType,
             captureId: capture.id,
-            // Provenance only, never sent to the model. It is what lets every
-            // observation name the photograph it came from.
+            // Provenance only, never sent to the model. It is what lets every observation name the photograph it came from.
             captureLabel: capture.label,
           },
           projectId: this.projectId,
@@ -791,9 +571,7 @@ export class InspectionSession {
         });
       } catch (error: unknown) {
         if (error instanceof ProviderError) {
-          // Recorded, not fatal. One unreadable photograph must not discard the
-          // evidence the others produced, but it must also never be counted as
-          // a success.
+          // Recorded, not fatal. One unreadable photograph must not discard the evidence the others produced, but it must also.
           if (firstProviderError === null) firstProviderError = error;
           outcomes.push({
             captureId: capture.id,
@@ -812,13 +590,9 @@ export class InspectionSession {
 
     this.imageOutcomes = outcomes;
 
-    // "Completed" means the validators accepted something. A response carrying
-    // only valid elements or only valid findings is real usable output, so
-    // keying this on observations.length alone reported a successful
-    // inspection as VALIDATION_EMPTY.
+    // "Completed" means the validators accepted something.
     if (results.length === 0) {
-      // Every photograph failed. Fail closed: no inspection is invented from
-      // images that were never read.
+      // Every photograph failed. Fail closed: no inspection is invented from images that were never read.
       const error = firstProviderError;
       this.outcome = error === null
         ? { status: 'FAILED', kind: 'ERROR', message: 'No image in this inspection could be read.', detail: null }
@@ -834,30 +608,18 @@ export class InspectionSession {
     }
     this.latencyMs = Date.now() - this.startedAt;
 
-    // Stage 2 runs only on a run that produced usable perception. Reasoning
-    // about a failed or empty inspection would be inventing a reading of a
-    // photograph nothing has read.
+    // Stage 2 runs only on a run that produced usable perception.
     if (this.outcome !== null && this.outcome.status !== 'FAILED') {
       this.reasoning = await this.runReasoning();
     } else {
       this.reasoning = null;
     }
     // Presentation translations for whatever novel prose this run produced.
-    // Runs before the view is built so the payload ships them; never fails or
-    // slows the inspection itself beyond the bounded translation calls.
     await this.translateModelProse();
     return this.view();
   }
 
-  /**
-   * Translate novel model-authored prose for display, once per run.
-   *
-   * Skipped for the synthetic fixture (which must never spend budget or gain
-   * live text that implies real inference) and whenever no translator is
-   * configured. Failures resolve to honest fallback inside the helper; a throw
-   * here would be a presentation fault taking down an inspection, so the call
-   * is additionally guarded and can never reject the run.
-   */
+  // Translate novel model-authored prose for display, once per run.
   private async translateModelProse(): Promise<void> {
     const translator = this.translator;
     if (translator === null || this.provider.name === 'demo-fixture') return;
@@ -866,18 +628,11 @@ export class InspectionSession {
     try {
       await translateModelTextsLive(sources, translator);
     } catch {
-      // Honest fallback is already the per-entry outcome; there is nothing to
-      // report that would not itself be invented presentation state.
+      // Honest fallback is already the per-entry outcome.
     }
   }
 
-  /**
-   * The canonical prose of the just-finished run, as exact source strings.
-   *
-   * Read from the outcome result and reasoning outcome - the same validated
-   * strings the view later renders - so translation keys can never drift from
-   * what is on screen. Translated text is never written back here.
-   */
+  // The canonical prose of the just-finished run, as exact source strings.
   private collectRunModelProse(): readonly string[] {
     const outcome = this.outcome;
     const result = outcome !== null && 'result' in outcome ? outcome.result : null;
@@ -909,18 +664,10 @@ export class InspectionSession {
     });
   }
 
-  /**
-   * STAGE 2: Nemotron construction reasoning over the validated result.
-   *
-   * Receives the expected state, the validated detections, the validated
-   * observations and the deterministic comparison rows. Never receives the raw
-   * image and never writes back into the comparison.
-   */
+  // STAGE 2: Nemotron construction reasoning over the validated result.
   private async runReasoning(): Promise<ReasoningOutcome> {
     const outcome = this.outcome;
-    // PENDING is unreachable in practice (run() only ever assigns a real
-    // outcome), but it is a member of the union and carries no result, so it is
-    // excluded rather than assumed away.
+    // PENDING is unreachable in practice (run() only ever assigns a real outcome), but it is a member of the union and.
     if (outcome === null || outcome.status === 'FAILED' || outcome.status === 'PENDING') {
       return {
         status: 'UNAVAILABLE',
@@ -933,23 +680,15 @@ export class InspectionSession {
     const result = outcome.result;
     const context: ReasoningContextInput = {
       projectName: this.projectName,
-      // The whole set, because the reasoning stage must be told what it is
-      // reasoning over. A single image still produces the singular label.
+      // The whole set, because the reasoning stage must be told what it is reasoning over.
       captureLabel: this.captureGroupLabel(),
-      // How many frames this pass is reasoning over, so the prompt can say so
-      // and attribute each observation to one of them.
+      // How many frames this pass is reasoning over, so the prompt can say so and attribute each observation to one of them.
       imageCount: this.captures.length,
       expected: this.expected,
       detections: result.elements ?? [],
-      // The COMBINED validated observations, not one image's. Every observation
-      // keeps its own captureId, so the prompt attributes each to its
-      // photograph and Nemotron can say which frame supports a claim.
+      // The COMBINED validated observations, not one image's.
       observations: result.observations,
-      // The SAME rows the comparison panel renders. Reasoning is downstream of
-      // arithmetic, never a substitute for it.
-      // The SAME rows the comparison panel renders, and for a multi-image
-      // inspection the reconciling rows, so Nemotron reasons over exactly the
-      // comparison a judge can read.
+      // The SAME rows the comparison panel renders.
       rows: this.comparisonRows(result.elements ?? []),
       findings: (result.modelFindings ?? []).map((f) => ({
         title: f.title,
@@ -973,14 +712,7 @@ export class InspectionSession {
     }
   }
 
-  /**
-   * Reattach a reasoning outcome restored from disk.
-   *
-   * Used on startup so a restored inspection still carries the reasoning that
-   * produced it, rather than showing a bare comparison as if reasoning had never
-   * been part of the pipeline. The stored provenance is honoured verbatim, so a
-   * restored result is never re-attributed to a model that did not run.
-   */
+  // Reattach a reasoning outcome restored from disk.
   restoreReasoning(
     reasoning: ConstructionReasoning,
     provenance: ReasoningProvenance,
@@ -998,21 +730,12 @@ export class InspectionSession {
     };
   }
 
-  /** The reasoning outcome, for persistence. Null before anything has run. */
+  // The reasoning outcome, for persistence. Null before anything has run.
   getReasoningOutcome(): ReasoningOutcome | null {
     return this.reasoning;
   }
 
-  /**
-   * Raw validated provider payload, for persistence.
-   *
-   * Keyed PER IMAGE, not merged. A stored inspection must be able to say which
-   * photograph produced which observation; merging them at write time would
-   * destroy exactly the provenance this feature exists to preserve.
-   *
-   * Null before anything has run. A single image still yields one entry, so the
-   * stored shape is uniform and an old single-payload file can be read back.
-   */
+  // Raw validated provider payload, for persistence.
   getPersistedPayloads(): readonly {
     readonly captureId: string;
     readonly captureLabel: string;
@@ -1037,13 +760,7 @@ export class InspectionSession {
     }));
   }
 
-  /**
-   * The FIRST image's payload, for callers that only ever persisted one image.
-   *
-   * Kept so the single-image path is untouched. A multi-image inspection is
-   * persisted through `getPersistedPayloads()` instead, and never through this,
-   * because dropping the other images here would silently lose their evidence.
-   */
+  // The FIRST image's payload, for callers that only ever persisted one image.
   getPersistedPayload(): {
     observations: readonly unknown[];
     elements: readonly unknown[];
@@ -1053,13 +770,13 @@ export class InspectionSession {
     return first === undefined ? null : first.payload;
   }
 
-  /** Observation IDs for the first image's payload, for single-image persistence. */
+  // Observation IDs for the first image's payload, for single-image persistence.
   getPersistedObservationIds(): readonly string[] {
     const first = this.getPersistedPayloads()[0];
     return first === undefined ? [] : first.observationIds;
   }
 
-  /** Review records, for persistence. */
+  // Review records, for persistence.
   getReviewRecords(): readonly {
     key: string; status: string; reviewer: string; reviewedAt: string; note: string | null;
   }[] {
@@ -1072,7 +789,7 @@ export class InspectionSession {
     }));
   }
 
-  /** Observation review records, for persistence. */
+  // Observation review records, for persistence.
   getObservationReviewRecords(): readonly {
     observationId: string;
     key: string;
@@ -1107,15 +824,12 @@ export class InspectionSession {
     return records;
   }
 
-  /** Ledger findings raised from verified observations, for persistence. */
+  // Ledger findings raised from verified observations, for persistence.
   getLedgerFindings(): readonly Finding[] {
     return this.ledger.all();
   }
 
-  /**
-   * Snapshot all mutable review and ledger state before a review operation so
-   * the session can roll back cleanly if durable persistence fails.
-   */
+  // Snapshot all mutable review and ledger state before a review operation so the session can roll back cleanly if.
   public snapshotReviewState(): {
     readonly reviewsByKey: ReadonlyMap<string, FindingReview>;
     readonly ledgerFindings: readonly Finding[];
@@ -1164,7 +878,7 @@ export class InspectionSession {
     };
   }
 
-  /** Restore review and ledger state captured by `snapshotReviewState()`. */
+  // Restore review and ledger state captured by `snapshotReviewState()`.
   public rollbackReviewState(snapshot: ReturnType<InspectionSession['snapshotReviewState']>): void {
     this.reviewsByKey.clear();
     for (const [key, value] of snapshot.reviewsByKey.entries()) {
@@ -1177,7 +891,7 @@ export class InspectionSession {
     this.view();
   }
 
-  /** Reapply persisted human decisions by their stable content key. */
+  // Reapply persisted human decisions by their stable content key.
   restoreReviews(
     records: readonly {
       key: string; status: string; reviewer: string; reviewedAt: string; note: string | null;
@@ -1197,7 +911,7 @@ export class InspectionSession {
     }
   }
 
-  /** Reapply persisted human decisions on observations belonging to this session. */
+  // Reapply persisted human decisions on observations belonging to this session.
   restoreObservationReviews(
     records: readonly {
       readonly observationId: string;
@@ -1234,7 +948,7 @@ export class InspectionSession {
     }
   }
 
-  /** Reapply persisted ledger findings raised from verified observations in this session. */
+  // Reapply persisted ledger findings raised from verified observations in this session.
   restoreLedgerFindings(
     records: readonly {
       readonly id: string;
@@ -1287,13 +1001,7 @@ export class InspectionSession {
     }
   }
 
-  /**
-   * Record a human decision.
-   *
-   * Only a VERIFY decision can raise a finding; rejection and deferral leave the
-   * observation out of the finding ledger, which is what stops unverified output
-   * from becoming an actionable item.
-   */
+  // Record a human decision.
   review(input: {
     readonly observationId: string;
     readonly decision: 'VERIFIED' | 'REJECTED' | 'NEEDS_REVIEW';
@@ -1334,36 +1042,18 @@ export class InspectionSession {
     return this.view();
   }
 
-  /**
-   * Resolve the inspection finding a caller means by this id.
-   *
-   * Recomputed from the live view so a stale `currentFindings` cache from a
-   * superseded run or cleared reference can never satisfy a lookup.
-   */
+  // Resolve the inspection finding a caller means by this id.
   private resolveInspectionFinding(findingId: string): FindingView | null {
     const rendered = this.view().inspectionFindings.find((f) => f.id === findingId);
     return rendered === undefined ? null : rendered;
   }
 
-  /**
-   * Whether this inspection currently holds a finding with this id.
-   *
-   * Exists so a route can REFUSE a decision against an id that is not here,
-   * rather than answering 200 for a no-op. A silent no-op is indistinguishable
-   * from a saved review to the client, which is exactly the false confirmation
-   * this product refuses to produce.
-   */
+  // Whether this inspection currently holds a finding with this id.
   public hasInspectionFinding(findingId: string): boolean {
     return this.resolveInspectionFinding(findingId) !== null;
   }
 
-  /**
-   * Whether this inspection currently holds an observation with this id.
-   *
-   * Same contract as hasInspectionFinding: the caller learns that the id is not
-   * reviewable here instead of being told the review succeeded. Checks only the
-   * active inspection outcome, never superseded runs left in the inspector store.
-   */
+  // Whether this inspection currently holds an observation with this id.
   public hasObservation(observationId: string): boolean {
     const outcome = this.outcome;
     if (outcome === null || outcome.status === 'FAILED' || outcome.status === 'PENDING') {
@@ -1372,13 +1062,7 @@ export class InspectionSession {
     return outcome.result.observations.some((o) => o.id === observationId);
   }
 
-  /**
-   * Record a human decision against an inspection finding.
-   *
-   * This is the ONLY way a finding leaves UNVERIFIED, and the only path from
-   * "AI suspected" to "human verified". An anonymous review is refused: an
-   * unattributed verification would make the whole trust chain meaningless.
-   */
+  // Record a human decision against an inspection finding.
   reviewFinding(input: {
     readonly findingId: string;
     readonly decision: 'VERIFIED' | 'REJECTED' | 'NEEDS_REVIEW';
@@ -1388,8 +1072,7 @@ export class InspectionSession {
     if (typeof input.reviewer !== 'string' || input.reviewer.trim().length === 0) {
       return this.view();
     }
-    // Find the finding by the id the UI currently holds, then remember the
-    // decision under its stable key so it survives the next re-render.
+    // Find the finding by the id the UI currently holds, then remember the decision under its stable key so it survives the.
     const current = this.resolveInspectionFinding(input.findingId);
     if (current === null) return this.view();
 
@@ -1403,34 +1086,12 @@ export class InspectionSession {
       },
     );
 
-    // A VERIFIED inspection finding is recorded in the session's own audit
-    // trail above. The legacy observation ledger is a SEPARATE product: it
-    // records findings raised from a verified OBSERVATION, and is deliberately
-    // untouched by the inspection-finding loop.
+    // A VERIFIED inspection finding is recorded in the session's own audit trail above.
     return this.view();
   }
-  /**
-   * Reopen a previously persisted inspection, WITHOUT calling any model.
-   *
-   * This is what makes a verified finding survive a restart. Three properties
-   * make it safe to serve:
-   *
-   *   1. The stored payload goes back through the SAME validators as a fresh
-   *      response, so a tampered state file cannot inject an element or finding
-   *      that validation would have rejected.
-   *   2. The result is labelled CACHED and carries the ORIGINAL inference time,
-   *      so a restored result is never presented as a fresh model call.
-   *   3. Human decisions are reapplied by their stable content key, so the
-   *      VERIFIED / REJECTED state the operator set is the state that returns.
-   *
-   * Returns false when the payload yields nothing usable, so the caller can
-   * leave the capture honestly un-inspected instead of showing an empty shell.
-   */
+  // Reopen a previously persisted inspection, WITHOUT calling any model.
   restoreInspection(record: RestoredInspection): boolean {
-    // A stored inspection may hold ONE payload (every inspection written before
-    // multi-image) or SEVERAL, one per photograph. Both are read; the per-image
-    // payloads are rebuilt separately so each observation keeps the capture it
-    // came from, then merged into one consolidated result.
+    // A stored inspection may hold ONE payload (every inspection written before multi-image) or SEVERAL, one per photograph.
     const sources: readonly {
       readonly captureId: string;
       readonly captureLabel: string;
@@ -1453,9 +1114,7 @@ export class InspectionSession {
     const outcomes: ImageOutcome[] = [];
 
     for (const source of sources) {
-      // A payload naming a capture this session does not hold is refused rather
-      // than misattributed: its bytes are unavailable, so its observations would
-      // carry an image identity nobody can inspect.
+      // A payload naming a capture this session does not hold is refused rather than misattributed: its bytes are.
       const capture = this.captures.find((c) => c.id === source.captureId);
       if (capture === undefined) continue;
 
@@ -1519,10 +1178,7 @@ export class InspectionSession {
 
   view(): SessionView {
     const outcome = this.outcome;
-    // Pixel boxes are only meaningful against the image they came from. With one
-    // image this is the historical behaviour; with several, each image's own
-    // dimensions are used, so a box drawn over photo 3 is never scaled by photo
-    // 1's width.
+    // Pixel boxes are only meaningful against the image they came from.
     const dimensionsByCapture = new Map<string, ReturnType<typeof readImageDimensions>>();
     for (const capture of this.captures) {
       dimensionsByCapture.set(capture.id, readImageDimensions(capture.bytes));
@@ -1536,9 +1192,7 @@ export class InspectionSession {
 
     const findings = this.ledger.all();
 
-    // Live observations from EVERY image in this inspection, so a recorded human
-    // review on photo 2's finding is not resurrected as UNVERIFIED because only
-    // photo 1's store slice was consulted.
+    // Live observations from EVERY image in this inspection, so a recorded human review on photo 2's finding is not.
     const liveById = new Map<string, AIObservation>();
     for (const capture of this.captures) {
       for (const observation of this.inspector.listObservations(capture.id)) {
@@ -1551,8 +1205,7 @@ export class InspectionSession {
       (snapshot, index) => {
         const observation = liveById.get(snapshot.id) ?? snapshot;
         const box = observation.evidence.boundingBox;
-        // Scaled by the dimensions of the photograph THIS observation came from,
-        // so a box from photo 3 is never drawn against photo 1's width.
+        // Scaled by the dimensions of the photograph THIS observation came from, so a box from photo 3 is never drawn against.
         const pixelBox = toPixelBox(box, dimensionsFor(observation.captureId));
         return {
           id: observation.id,
@@ -1580,29 +1233,14 @@ export class InspectionSession {
       },
     );
 
-    // Every rejection from BOTH validators. Reporting only observation rejections
-    // hid the ones that actually matter here: an element or finding rejected as a
-    // template placeholder is exactly the operator needs to see, because it is
-    // the difference between "the model saw nothing" and "the model answered
-    // with placeholders we discarded".
+    // Every rejection from BOTH validators.
     const rejectionIssues: ValidationIssue[] = [
       ...(result?.rejected ?? []).flatMap((entry) => entry.issues),
       ...(result?.rejectedInspection ?? []).flatMap((entry) => entry.issues),
     ];
 
     const rawDetections: readonly DetectedElement[] = result?.elements ?? [];
-    // Which photograph produced each reading, indexed by its position in the
-    // MERGED element list. Recorded here rather than on DetectedElement because
-    // that type is validated model output and must stay exactly what the model
-    // returned.
-    //
-    // The offset RUNS ACROSS photographs. It used to restart at zero inside each
-    // one, so a map keyed by that position had two frames that each reported two
-    // elements overwrite each other's keys: every detection was then attributed
-    // to the last frame that contributed an entry, and the rest silently fell
-    // back to the primary capture. A detection read in one photograph was drawn
-    // on another, and its evidence box was positioned against the wrong frame's
-    // dimensions.
+    // Which photograph produced each reading, indexed by its position in the MERGED element list.
     const detectionCaptureByIndex: string[] = [];
     for (const image of this.imageOutcomes) {
       for (const _ of image.elements) detectionCaptureByIndex.push(image.captureId);
@@ -1628,21 +1266,13 @@ export class InspectionSession {
       };
     });
 
-    // Rows exist only alongside a real inspection. With no result there is nothing
-    // observed, so producing rows would render every expectation as UNDETERMINED
-    // and read like a finding rather than an un-inspected capture.
-    //
-    // With several photographs this is the RECONCILING comparison, which records
-    // which images contributed to each row and refuses to sum counts.
+    // Rows exist only alongside a real inspection.
     const rows = result === null ? [] : this.comparisonRows(rawDetections);
 
-    // Whether the model reported anything at all for each row's element. This is
-    // what separates a finding the inspected image supports (full-frame evidence)
-    // from one that rests on the expected state alone (no visual evidence).
+    // Whether the model reported anything at all for each row's element.
     const detectionReportedByRow = new Map(rows.map((r) => [r.id, r.detectionReported] as const));
 
-    // `synthetic` is true whenever the deterministic offline provider ran, so
-    // a fixture result can never be presented as model inference.
+    // `synthetic` is true whenever the deterministic offline provider ran, so a fixture result can never be presented as model inference.
     const synthetic = this.provider.name === 'demo-fixture';
     const synthesized = synthesizeFindings({
       captureId: this.capture.id,
@@ -1653,26 +1283,17 @@ export class InspectionSession {
       synthetic,
     });
 
-    // Human decisions are the authority, so a re-render must not resurrect a
-    // reviewed finding as UNVERIFIED. Findings are re-synthesised on every
-    // render but keep a content-derived id, so reviews are keyed by that same
-    // stable content key.
+    // Human decisions are the authority, so a re-render must not resurrect a reviewed finding as UNVERIFIED.
     const stableKey = (f: InspectionFinding): string =>
       `${f.origin}|${f.comparisonId ?? ''}|${f.title.trim().toLowerCase()}`;
 
     const inspectionFindings: FindingView[] = synthesized.map((f) => {
       const review = this.reviewsByKey.get(stableKey(f)) ?? null;
-      // Evidence state, from strongest to weakest. AI findings are validated
-      // observations of THIS image, so unlocalised ones are full-frame by
-      // construction; comparison findings follow what their row's model
-      // actually reported.
+      // Evidence state, from strongest to weakest.
       const detectionReported =
         f.origin === 'AI' || (f.comparisonId !== null && detectionReportedByRow.get(f.comparisonId) === true);
 
-      // Source attribution. A COMPARISON finding rests on its row, so it inherits
-      // the row's sources. An AI finding came from one image, so it inherits the
-      // observation it was derived from — never the group, which would claim
-      // photographs did not see it.
+      // Source attribution. A COMPARISON finding rests on its row, so it inherits the row's sources.
       const rowSources = f.comparisonId !== null
         ? (rows.find((r) => r.id === f.comparisonId)?.sourceCaptureIds ?? [])
         : [];
@@ -1697,8 +1318,7 @@ export class InspectionSession {
     });
 
     const priorities = buildPriorities(inspectionFindings);
-    // Remembered so reviewFinding() can resolve the id the browser is holding
-    // without re-entering the synthesis path.
+    // Remembered so reviewFinding() can resolve the id the browser is holding without re-entering the synthesis path.
     this.currentFindings = inspectionFindings;
     const brief = buildRealityBrief({
       detections: rawDetections,
@@ -1715,7 +1335,6 @@ export class InspectionSession {
 
     const comparison: ComparisonView[] = rows.map((row) => {
       // The row's box came from whichever image contributed the winning reading.
-      // Named explicitly, so a highlight is never drawn against the wrong frame.
       const sourceCaptureId = row.sourceCaptureIds.length > 0
         ? (row.sourceCaptureIds[0] as string)
         : this.capture.id;
@@ -1726,14 +1345,10 @@ export class InspectionSession {
       };
     });
 
-    // Stage 2, shaped for display. Always an object: an unavailable reasoning
-    // stage is reported as such rather than omitted, so the UI can say whether
-    // Nemotron contributed or why it did not.
+    // Stage 2, shaped for display.
     const reasoningView: ReasoningView = buildReasoningView(this.reasoning, this.reasoner);
 
-    // Two separate claims, deliberately not collapsed. `provenance.eligibility`
-    // is the MODEL/STAGE-level fact about the vision model alone; the pipeline
-    // view adds the reasoning stage and states the submission-level result.
+    // Two separate claims, deliberately not collapsed.
     const eligibility = classifyEligibility({
       provider: this.provider.name,
       model: this.provider.model,
@@ -1760,8 +1375,7 @@ export class InspectionSession {
       imageHeight: dimensions?.height ?? null,
       inspectedAt: new Date(this.startedAt === 0 ? Date.now() : this.startedAt).toISOString(),
       latencyMs: this.latencyMs,
-      // True whenever the model was actually invoked, which is the case for every
-      // outcome except a transport or configuration failure.
+      // True whenever the model was actually invoked, which is the case for every outcome except a transport or configuration failure.
       inferenceExecuted: outcome !== null && outcome.status !== 'FAILED',
       observationsReturned: result?.observations.length ?? 0,
       observationsAccepted: result?.observations.length ?? 0,
@@ -1774,10 +1388,7 @@ export class InspectionSession {
       rejectionIssues,
     };
 
-    // Presentation-layer translations of model-authored English. Collected
-    // from canonical facts, resolved through the offline memory, and shipped
-    // alongside the view so the language switch stays a local read. Never
-    // written back into the canonical fields.
+    // Presentation-layer translations of model-authored English.
     const modelTranslations = buildModelTranslationMap(
       collectModelProse({
         detections: detections.map((d) => ({ evidence: d.evidence })),
@@ -1811,10 +1422,7 @@ export class InspectionSession {
       provenance,
       observations,
       findings,
-      // A partial analysis is stated HERE, at the top level, and not only in
-      // `images`. Every per-image status is already reported, but a consumer
-      // that reads the headline would otherwise read a 2-of-3 inspection as a
-      // clean one and quote complete evidence from a photograph nothing read.
+      // A partial analysis is stated HERE, at the top level, and not only in `images`.
       failure: this.topLevelFailure(outcome),
       detections,
       expected: this.expected,
@@ -1831,9 +1439,7 @@ export class InspectionSession {
       images: this.imageProvenance(),
       reasoning: reasoningView,
       pipelineEligibility,
-      // Built LAST, from the canonical structures above, and never fed back into
-      // them. Presentation only: four languages of the same inspection, shipped
-      // together so the browser never has to ask for a second one.
+      // Built LAST, from the canonical structures above, and never fed back into them.
       localized: localizeInspectionAll({
         detections: detections.map((d) => ({
           element: d.element,
@@ -1847,8 +1453,7 @@ export class InspectionSession {
         priorities,
         counters,
         isDemoFixture: synthetic,
-        // Classification facts only, never the English sentences: the projection
-        // re-renders the panel in each language from these.
+        // Classification facts only, never the English sentences: the projection re-renders the panel in each language from these.
         qualification: {
           visionModel: this.provider.model,
           reasoningModel: this.reasoner.model,
@@ -1867,8 +1472,7 @@ export class InspectionSession {
         storedHeight: geometry?.stored.height ?? null,
         displayedWidth: geometry?.displayed.width ?? null,
         displayedHeight: geometry?.displayed.height ?? null,
-        // 1 means "no rotation". Reported so a rotated source file is visible
-        // rather than quietly corrected.
+        // 1 means "no rotation". Reported so a rotated source file is visible rather than quietly corrected.
         exifOrientation: geometry?.orientation ?? 1,
         geometryNormalized: geometry !== null && !geometry.normalized,
       },
@@ -1880,25 +1484,12 @@ export class InspectionSession {
     return this.view();
   }
 
-  /**
-   * Whether this session's finding ledger holds a finding with this id.
-   *
-   * The ledger is a SEPARATE product from the inspection findings above: it
-   * holds findings raised from a human-verified OBSERVATION. Checking it here is
-   * what lets a route tell the caller that the id it named is not a real finding
-   * instead of reporting a state change that never happened.
-   */
+  // Whether this session's finding ledger holds a finding with this id.
   public hasLedgerFinding(findingId: string): boolean {
     return this.ledger.get(findingId) !== null;
   }
 
-  /**
-   * Whether this capture has actually been inspected.
-   *
-   * Distinct from "a session exists": selecting a capture creates its session but
-   * runs no model, so an un-inspected capture must not be reported as inspected.
-   * Used to decide where returning to a project should land.
-   */
+  // Whether this capture has actually been inspected.
   inspected(): boolean {
     return this.outcome !== null && this.outcome.status !== 'PENDING';
   }

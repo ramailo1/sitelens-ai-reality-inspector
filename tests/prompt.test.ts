@@ -1,15 +1,4 @@
-/**
- * Prompt-contract regression tests.
- *
- * These lock in a defect found during a LIVE Nebius run: the inspection prompt
- * presented enum choices as a pipe-separated list inside the JSON template
- * (e.g. "category": "OBSERVED_ELEMENT | PROGRESS_OBSERVATION"). Models copy
- * such placeholders verbatim, so every observation came back with a combined
- * category and strict validation correctly rejected all of them.
- *
- * The fix is in the PROMPT (a single legal value per field, with the legal set
- * stated in prose). Validation is deliberately unchanged and still strict.
- */
+// Prompt-contract regression tests.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -72,8 +61,7 @@ test('prompt requires exactly one category and forbids combined values', () => {
 });
 
 test('the live defect shape is still rejected by strict validation', () => {
-  // Guards the boundary this fix relies on: a verbatim echo of the OLD
-  // prompt must STILL be rejected. The prompt was fixed, not the validator.
+  // Guards the boundary this fix relies on: a verbatim echo of the OLD prompt must STILL be rejected.
   const echoed = validateModelObservation({
     category: 'OBSERVED_ELEMENT | PROGRESS_OBSERVATION',
     observation: 'A yellow machine is visible in the foreground.',

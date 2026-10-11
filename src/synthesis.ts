@@ -1,10 +1,4 @@
-/**
- * Inspection synthesis: findings, priorities and the reality brief.
- *
- * Derived in code from validated inputs. The model supplies evidence and
- * candidates; this module supplies the ordering, the counts and the verdict.
- * Nothing is asserted here that a deterministic rule could have produced.
- */
+// Inspection synthesis: findings, priorities and the reality brief.
 
 import type { ComparisonSummary } from './compare.ts';
 import { NOT_DETERMINABLE_TEXT, summarizeComparison } from './compare.ts';
@@ -29,13 +23,7 @@ const SEVERITY_RANK: Readonly<Record<ObservationSeverity, number>> = {
   INFO: 0,
 };
 
-/**
- * An UNDETERMINED item is not an inspection priority.
- *
- * It is open work, but not a place to look for a defect, so listing it beside a
- * confirmed count shortfall would imply we know something we do not. Undetermined
- * items are reported separately in the brief and kept out of the ranked list.
- */
+// An UNDETERMINED item is not an inspection priority.
 function isPriority(finding: InspectionFinding): boolean {
   return (
     (finding.verificationStatus === 'UNVERIFIED' ||
@@ -49,22 +37,16 @@ export interface SynthesizeOptions {
   readonly captureId: string;
   readonly expected: ExpectedState;
   readonly detections: readonly DetectedElement[];
-  /** Findings the model proposed, already validated. */
+  // Findings the model proposed, already validated.
   readonly modelFindings: readonly InspectionFinding[];
   readonly rows: readonly ComparisonRow[];
-  /** True when this came from the deterministic offline provider. */
+  // True when this came from the deterministic offline provider.
   readonly synthetic: boolean;
-  /** Overridable for tests; derives a stable id from the finding's content. */
+  // Overridable for tests; derives a stable id from the finding's content.
   readonly idFactory?: (key: string) => string;
 }
 
-/**
- * Turn one ATTENTION/UNDETERMINED comparison row into a finding.
- *
- * This is where "expected 12, observed 4" becomes a card a human can act on,
- * with the expected value, the observed value and the difference all carried
- * through explicitly rather than left for the reader to infer.
- */
+// Turn one ATTENTION/UNDETERMINED comparison row into a finding.
 function findingFromRow(
   row: ComparisonRow,
   captureId: string,
@@ -93,9 +75,7 @@ function findingFromRow(
         ? 'DEVIATION'
         : 'MISSING_ELEMENT';
 
-  // An UNDETERMINED row must NOT carry an attention severity. We do not know
-  // that anything is wrong, and dressing an unknown up as a MEDIUM deviation is
-  // precisely the false certainty this product refuses to offer.
+  // An UNDETERMINED row must NOT carry an attention severity.
   const severity: ObservationSeverity = undetermined ? 'INFO' : 'MEDIUM';
 
   const observation = row.observedText;
@@ -104,16 +84,7 @@ function findingFromRow(
       'A single photograph cannot settle this; it stays open pending a walk or a second view.'
     : `Expected ${row.expectedText}. Observed ${row.observedText}.`;
 
-  // EVIDENCE states exactly what the image supports, and no more. Three cases,
-  // because collapsing them manufactures certainty the pipeline does not have:
-  //
-  //   LOCALIZED   the model returned a usable region; the overlay may draw it.
-  //   FULL_FRAME  the model made a real visual reading of THIS image but did
-  //               not localise it. The image supports the finding; no rectangle
-  //               does. Never upgraded to a box, never downgraded to no evidence.
-  //   NONE        the model reported nothing for this element, so the finding
-  //               rests on the expected-state comparison alone. Saying the image
-  //               supports it would be exactly the invention this product refuses.
+  // EVIDENCE states exactly what the image supports, and no more.
   const evidence: string = row.boundingBox !== null
     ? 'The model localised this element in the capture; see the highlighted region.'
     : row.detectionReported
@@ -148,9 +119,7 @@ function findingFromRow(
       : row.difference,
     reason,
     evidence,
-    // A comparison finding carries NO model confidence of its own: it is
-    // arithmetic. Borrowing an element confidence here would dress a
-    // deterministic result up as a measurement.
+    // A comparison finding carries NO model confidence of its own: it is arithmetic.
     confidence: row.confidence ?? 0.5,
     recommendation,
     boundingBox: row.boundingBox,
@@ -162,18 +131,13 @@ function findingFromRow(
   };
 }
 
-/**
- * Build the full finding set: model-proposed candidates plus comparison-derived
- * ones, deduplicated by title so a single issue is not shown twice.
- */
+// Build the full finding set: model-proposed candidates plus comparison-derived ones, deduplicated by title so a single.
 export function synthesizeFindings(
   options: SynthesizeOptions,
 ): InspectionFinding[] {
   const idFactory =
     options.idFactory ??
-    // Deterministic by default: ids are derived from the finding's content, so
-    // the same inspection always produces the same ids. That is what lets a
-    // human review survive a re-render instead of being orphaned by a new uuid.
+    // Deterministic by default: ids are derived from the finding's content, so the same inspection always produces the same ids.
     ((key: string): string => `fnd_${shortHash(key)}`);
   const keyFor = (f: {
     origin: FindingOrigin;
@@ -206,12 +170,7 @@ export function synthesizeFindings(
   return merged;
 }
 
-/**
- * A short, stable, non-cryptographic hash.
- *
- * Used only to make finding ids readable and stable. It is NOT a security
- * boundary and must never be used for identity or tamper detection.
- */
+// A short, stable, non-cryptographic hash.
 function shortHash(input: string): string {
   let h1 = 0x811c9dc5;
   let h2 = 0x01000193;
@@ -223,13 +182,7 @@ function shortHash(input: string): string {
   return (h1.toString(36) + h2.toString(36)).slice(0, 10);
 }
 
-/**
- * Rank where an inspector should look first.
- *
- * Ordering is severity, then confidence, then a nudge for comparison findings
- * (which rest on arithmetic rather than a visual opinion). The output is a work
- * list, never a list of things declared wrong.
- */
+// Rank where an inspector should look first.
 export function buildPriorities(
   findings: readonly InspectionFinding[],
 ): InspectionPriority[] {
@@ -238,10 +191,7 @@ export function buildPriorities(
   const ranked = [...open].sort((a, b) => {
     const bySeverity = SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity];
     if (bySeverity !== 0) return bySeverity;
-    // A comparison finding outranks an equally severe AI opinion, because its
-    // basis is a deterministic comparison rather than a visual reading. This
-    // is checked BEFORE confidence: arithmetic should not be out-voted by a
-    // model's self-reported certainty.
+    // A comparison finding outranks an equally severe AI opinion, because its basis is a deterministic comparison rather.
     if (a.origin !== b.origin) return a.origin === 'COMPARISON' ? -1 : 1;
     return b.confidence - a.confidence;
   });
@@ -257,12 +207,7 @@ export function buildPriorities(
   }));
 }
 
-/**
- * The reality brief: a short, factual summary a site professional can act on.
- *
- * Every line is a count of something that actually happened in this run. The
- * verdict is derived from those counts, never chosen by the model.
- */
+// The reality brief: a short, factual summary a site professional can act on.
 export function buildRealityBrief(input: {
   readonly detections: readonly DetectedElement[];
   readonly rows: readonly ComparisonRow[];
@@ -328,10 +273,7 @@ export function buildRealityBrief(input: {
   };
 }
 
-/**
- * The verdict. Any MEDIUM/HIGH candidate, or any ATTENTION comparison row,
- * means a human should look. Otherwise there is nothing pressing to report.
- */
+// The verdict. Any MEDIUM/HIGH candidate, or any ATTENTION comparison row, means a human should look.
 function deriveOverall(
   attentionFindings: readonly InspectionFinding[],
   comparison: ComparisonSummary,
@@ -345,7 +287,7 @@ function deriveOverall(
   return 'NO_ATTENTION';
 }
 
-/** Counters for the right-hand INSPECTION panel. */
+// Counters for the right-hand INSPECTION panel.
 export interface RealityCounters {
   readonly elementsDetected: number;
   readonly elementsCounted: number;

@@ -1,11 +1,4 @@
-/**
- * The full inspection session: SEE -> COMPARE -> SYNTHESISE -> VERIFY.
- *
- * These are the integration-level guarantees the UI depends on. The most
- * important one is that a human review SURVIVES a re-render: findings are
- * re-synthesised on every view, so if review state were keyed by a generated id
- * the review would silently vanish the moment anything re-rendered.
- */
+// The full inspection session: SEE -> COMPARE -> SYNTHESISE -> VERIFY.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -140,8 +133,7 @@ test('a different expected state produces a different comparison', async () => {
 
 test('the capture count drives the reality headline honestly', async () => {
   const view = await session().run();
-  // The fixture counts 4 columns; the brief must report that real number and
-  // not invent a total from elements it never counted.
+  // The fixture counts 4 columns.
   assert.equal(view.counters.totalCounted, 4);
   assert.match(view.brief.lines.join('\n'), /4 site elements counted/);
 });

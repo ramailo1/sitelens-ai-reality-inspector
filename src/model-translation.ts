@@ -1,80 +1,33 @@
-/**
- * Presentation-layer translation memory for model-authored English prose.
- *
- * THE ONE RULE IN THIS FILE: translation changes PRESENTATION and nothing else.
- *
- * The canonical inspection (ids, enums, counts, boxes, provenance, reviews and
- * the original English strings the models actually returned) is computed once,
- * validated once, persisted once and never rewritten here. This module reads a
- * finished English string and returns a second string that says the same thing
- * in another supported language. It never mutates its input, never calls a
- * model, never performs network I/O and never re-runs the pipeline.
- *
- * Two tiers, one contract. The MEMORY below is the offline tier: human-reviewed,
- * full-sentence translations of KNOWN fixture sentences, deterministic and
- * testable without paid calls. The LIVE tier (further down in this file) handles
- * NOVEL model prose through the already-configured Nebius Token Factory chat
- * endpoint with the already-configured credential - no new service, host,
- * credential or configuration variable. Both tiers resolve through the same
- * lookup, carry the same freshness key (exact source text), and fall back to
- * the original English with an honest label when unavailable. The language
- * switch itself stays a local read in both tiers: live translations are
- * computed once per inspection run and shipped in the same payload, never on
- * switch, and never as a vision or reasoning re-inference.
- *
- * Inventing a translation of a safety claim is exactly the failure this
- * product exists to avoid. The memory never invents; the live tier returns
- * only validated model output and falls back per entry rather than guessing.
- *
- * Freshness: lookup is by EXACT source text (trimmed). When the source text
- * changes, the key changes, the old translation no longer matches and the UI
- * falls back to the original. An outdated translation can never appear current.
- *
- * What is covered: free English written by MiniCPM or Nemotron that the UI
- * actually shows - detection evidence, observation text, evidence descriptions,
- * AI finding title / observation / reason / evidence / recommendation /
- * location, and reasoning summary / whatMatters / rationale / recommendation /
- * verification. Stable identifiers, enums, model names, hashes, counts, boxes,
- * provenance and reviewer words are never translated here.
- */
+// Presentation-layer translation memory for model-authored English prose.
 
 import type { InspectionLanguage } from './localization.ts';
 import { resolveReasoningConfig } from './config.ts';
 import { safeResolveReasoningCredentials } from './providers/nemotron-reasoner.ts';
 
-/** Target languages that need a translation. English needs none. */
+// Target languages that need a translation. English needs none.
 export type ModelTranslationTarget = 'fr' | 'ar' | 'zh';
 
-/** Version of this memory. Bumped when entries change, so caches invalidate. */
+// Version of this memory. Bumped when entries change, so caches invalidate.
 export const MODEL_TRANSLATION_VERSION = 'model-memory-v1' as const;
 
 export interface ModelTranslationResult {
   readonly source: string;
-  /** Text to display. The original when no translation exists. */
+  // Text to display. The original when no translation exists.
   readonly text: string;
-  /** True only when `text` is a genuine translation of `source`. */
+  // True only when `text` is a genuine translation of `source`.
   readonly translated: boolean;
-  /** Which tier produced the text: the offline memory, the live Nebius chat
-   *  translation, or 'none' when falling back to the original. */
+  // Which tier produced the text: the offline memory, the live Nebius chat translation, or 'none' when falling back to the original.
   readonly provider: 'model-memory-v1' | 'live-neb-translate-v1' | 'none';
 }
 
-/** Version of the live translation contract. Bumped when the prompt or the
- *  accepted response shape changes, so an old cached entry is never served
- *  against a newer contract. Part of every live cache key. */
+// Version of the live translation contract.
 export const LIVE_TRANSLATION_VERSION = 'live-neb-translate-v1' as const;
 
 type Triple = { readonly fr: string; readonly ar: string; readonly zh: string };
 
-/**
- * Human-reviewed, full-sentence translations of KNOWN model sentences.
- *
- * Keys are the EXACT English source strings (trimmed). Values are the same
- * fact in three languages. Numbers, enum keywords (e.g. ATTENTION) and model
- * names are preserved verbatim inside the translations.
- */
+// Human-reviewed, full-sentence translations of KNOWN model sentences.
 const MEMORY: Readonly<Record<string, Triple>> = {
-  // -- demo fixture: detection evidence ------------------------------------
+  // -- demo fixture: detection evidence
   'Four vertical structural members are distinguishable across the frame.': {
     fr: 'Quatre éléments verticaux de structure sont distinguables dans le cadre.',
     ar: 'يمكن تمييز أربعة عناصر إنشائية رأسية عبر الإطار.',
@@ -95,7 +48,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
     ar: 'تظهر التمديدات جزئيًا خلف الإطار؛ ومداها غير واضح.',
     zh: '管线在画面后方部分可见，范围尚不明确。',
   },
-  // -- demo fixture: findings -------------------------------------------------
+  // -- demo fixture: findings
   'Column spacing looks irregular': {
     fr: 'Espacement des poteaux irrégulier',
     ar: 'تباعد الأعمدة يبدو غير منتظم',
@@ -156,7 +109,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
     ar: 'أعلى يسار السقف',
     zh: '楼板左上方',
   },
-  // -- demo fixture: observations ---------------------------------------------
+  // -- demo fixture: observations
   'A steel frame structure with vertical columns is visible across the site.': {
     fr: 'Une ossature métallique avec des poteaux verticaux est visible sur le chantier.',
     ar: 'يظهر هيكل فولاذي بأعمدة رأسية عبر الموقع.',
@@ -187,7 +140,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
     ar: 'لا تظهر حافة الأرضية أعلى اليسار أي حاجز متواصل في الصورة.',
     zh: '图像左上方楼板边缘未见连续围挡。',
   },
-  // -- test fixtures: detection evidence --------------------------------------
+  // -- test fixtures: detection evidence
   'nine cast columns are visible across the frame': {
     fr: 'neuf poteaux coulés sont visibles dans le cadre',
     ar: 'تظهر تسعة أعمدة مصبوبة عبر الإطار',
@@ -208,7 +161,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
     ar: 'لا تظهر أي برج سقالات في الإطار',
     zh: '画面中未见任何脚手架塔',
   },
-  // -- test fixtures: observations --------------------------------------------
+  // -- test fixtures: observations
   'Column casting is part way across the bay.': {
     fr: 'Le coulage des poteaux est en cours dans la travée.',
     ar: 'صب الأعمدة جارٍ جزئيًا عبر الباكية.',
@@ -219,7 +172,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
     ar: 'قوالب وبدايات أعمدة في وسط الإطار',
     zh: '画面中部为模板与柱预留插筋',
   },
-  // -- test fixtures: AI finding ----------------------------------------------
+  // -- test fixtures: AI finding
   'Open excavation at the frame edge': {
     fr: 'Fouille ouverte au bord du cadre',
     ar: 'حفرة مفتوحة عند حافة الإطار',
@@ -250,7 +203,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
     ar: 'الحافة اليمنى من الإطار',
     zh: '画面右边缘',
   },
-  // -- test fixtures: reasoning -----------------------------------------------
+  // -- test fixtures: reasoning
   'Column casting is part way across the bay and cannot be settled from one frame.': {
     fr: 'Le coulage des poteaux est en cours dans la travée et ne peut être tranché sur une seule image.',
     ar: 'صب الأعمدة جارٍ جزئيًا عبر الباكية ولا يمكن حسمه من صورة واحدة.',
@@ -276,7 +229,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
     ar: 'تأكد ميدانيًا من عدد الأعمدة ومواقع البدايات في الموقع.',
     zh: '到现场实地确认柱数量与插筋位置。',
   },
-  // -- conduit example (task illustration) ------------------------------------
+  // -- conduit example (task illustration)
   'Embedded electrical conduit is visible along the wall.': {
     fr: 'Un conduit électrique encastré est visible le long du mur.',
     ar: 'يظهر مسار كهربائي مدفون على طول الجدار.',
@@ -317,7 +270,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
     ar: 'مسار المواسير ظاهر لكن لا يمكن حسم اكتماله من صورة واحدة.',
     zh: '导管走线可见，但单张影像无法判定其完整性。',
   },
-  // -- construction domain: crane oversail, penetrations, cover & rebar -------
+  // -- construction domain: crane oversail, penetrations, cover & rebar
   'Crane jib oversail beyond the site boundary': {
     fr: 'Survol de flèche de grue au-delà de la limite de chantier',
     ar: 'تجاوز ذراع الرافعة خارج حدود الموقع',
@@ -335,13 +288,7 @@ const MEMORY: Readonly<Record<string, Triple>> = {
   },
 };
 
-/* ------------------------------------------------------------------ *
- * In-memory reuse cache
- *
- * Bounded, deterministic and process-local. A translation is keyed by the
- * EXACT source text plus the target language plus this memory version, so a
- * changed source or a changed memory can never serve a stale translation.
- * ------------------------------------------------------------------ */
+// In-memory reuse cache Bounded, deterministic and process-local.
 
 const TRANSLATION_CACHE_LIMIT = 500;
 const translationCache = new Map<string, ModelTranslationResult>();
@@ -365,29 +312,20 @@ function cacheSet(key: string, value: ModelTranslationResult): void {
   translationCacheOrder.push(key);
 }
 
-/** Number of cached translations. Exposed for tests, never for the UI. */
+// Number of cached translations. Exposed for tests, never for the UI.
 export function modelTranslationCacheSize(): number {
   return translationCache.size;
 }
 
-/** Empty the reuse cache. Tests only; production never clears. */
+// Empty the reuse cache. Tests only; production never clears.
 export function clearModelTranslationCache(): void {
   translationCache.clear();
   translationCacheOrder.length = 0;
 }
 
-/* ------------------------------------------------------------------ *
- * Lookup
- * ------------------------------------------------------------------ */
+// Lookup
 
-/**
- * Translate ONE model-authored English string for display.
- *
- * Pure and total: unknown text, empty text and English itself all resolve to
- * the original with `translated: false`, never an invented or empty string.
- * A translation is claimed only on an exact memory hit for a non-English
- * target.
- */
+// Translate ONE model-authored English string for display.
 export function translateModelText(
   source: unknown,
   target: InspectionLanguage,
@@ -426,13 +364,7 @@ export function translateModelText(
   return result;
 }
 
-/**
- * Translate many strings at once, reusing valid cached entries.
- *
- * Order-preserving and duplicate-safe: the same source translated twice costs
- * one lookup. Never throws; every entry resolves to either a genuine
- * translation or the original with `translated: false`.
- */
+// Translate many strings at once, reusing valid cached entries.
 export function translateModelTexts(
   sources: readonly string[],
   target: InspectionLanguage,
@@ -440,25 +372,13 @@ export function translateModelTexts(
   return sources.map((source) => translateModelText(source, target));
 }
 
-/**
- * Whether a translation exists for this exact source and target.
- *
- * The UI uses this to decide between a "translated" badge and an honest
- * fallback note, without ever implying a translation it does not have.
- */
+// Whether a translation exists for this exact source and target.
 export function hasModelTranslation(source: string, target: InspectionLanguage): boolean {
   if (target === 'en') return false;
   return translateModelText(source, target).translated;
 }
 
-/**
- * Build the per-inspection translation map shipped inside SessionView.
- *
- * Keys are the EXACT English source strings. Values carry fr/ar/zh display
- * texts plus per-language `translated` flags. The map is a presentation
- * projection: it is computed from canonical facts, never written back into
- * them, and a changed source simply misses the map and falls back.
- */
+// Build the per-inspection translation map shipped inside SessionView.
 export function buildModelTranslationMap(
   sources: readonly string[],
 ): Readonly<Record<string, Readonly<Record<InspectionLanguage, ModelTranslationResult>>>> {
@@ -467,10 +387,7 @@ export function buildModelTranslationMap(
   );
   const out: Record<string, Record<InspectionLanguage, ModelTranslationResult>> = {};
   for (const source of unique) {
-    // Memory first, live cache second: fresh runs merge what the run filled,
-    // restored inspections reuse whatever is still valid, and anything else
-    // falls back honestly. Still a pure read - the async fill happens once per
-    // run, never here and never on language switch.
+    // Memory first, live cache second: fresh runs merge what the run filled, restored inspections reuse whatever is still.
     out[source] = {
       en: resolveDisplayTranslation(source, 'en'),
       fr: resolveDisplayTranslation(source, 'fr'),
@@ -481,14 +398,7 @@ export function buildModelTranslationMap(
   return out;
 }
 
-/**
- * Collect every user-facing MODEL prose string in a canonical inspection.
- *
- * Detection evidence, observation text, evidence descriptions, AI finding
- * fields and reasoning fields. Comparison-derived prose is NOT collected: it
- * is already regenerated per language from structured facts and needs no
- * translation memory.
- */
+// Collect every user-facing MODEL prose string in a canonical inspection.
 export function collectModelProse(input: {
   readonly detections: readonly { readonly evidence: string }[];
   readonly observations: readonly {
@@ -521,8 +431,7 @@ export function collectModelProse(input: {
     if (observation.evidenceDescription.trim().length > 0) out.push(observation.evidenceDescription);
   }
   for (const finding of input.findings) {
-    // Only MODEL-authored (AI-origin) prose needs the memory. Comparison
-    // findings are regenerated per language elsewhere.
+    // Only MODEL-authored (AI-origin) prose needs the memory. Comparison findings are regenerated per language elsewhere.
     if (finding.origin !== 'AI') continue;
     if (finding.title.trim().length > 0) out.push(finding.title);
     if (finding.observation.trim().length > 0) out.push(finding.observation);
@@ -542,36 +451,9 @@ export function collectModelProse(input: {
   return out;
 }
 
-/* ------------------------------------------------------------------ *
- * LIVE tier: novel prose through the already-configured Nebius chat path.
- *
- * The memory above cannot translate what it has never seen, and live
- * Nemotron reasoning is novel on every run. The application already owns an
- * authorized text-generation capability for exactly this shape of work: the
- * OpenAI-compatible chat endpoint on Nebius Token Factory, reached with the
- * same base URL, model, timeout and credential already configured for
- * construction reasoning. Translation reuses all four, so there is no new
- * service, no new host, no new credential and no new configuration variable.
- *
- * Authorization boundary, stated plainly: live translation runs if and only
- * if construction reasoning itself is configured (credential present,
- * reasoning enabled). Otherwise - offline, demo fixture, missing key - only
- * the memory serves, and everything else falls back honestly. When this file
- * says "live translation is unavailable", that boundary is what it means.
- *
- * Cost and timing, also plainly: at most one chat call per target language
- * per inspection run, only for sources the memory and the cache both miss,
- * computed once when the run finishes - never on language switch, never as a
- * vision or reasoning re-inference, never twice for the same source. A failed
- * call translates nothing and fails nothing else: the inspection stands as
- * run, with the original English shown and labelled.
- * ------------------------------------------------------------------ */
+// LIVE tier: novel prose through the already-configured Nebius chat path.
 
-/** A translation call. Returns only validated translations, keyed by source.
- *  Sources with no usable translation are simply absent: the caller falls
- *  back to the original for those, never an invention. Implementations must
- *  never throw for transport or validation failures - an empty map is the
- *  fail-closed answer. */
+// A translation call. Returns only validated translations, keyed by source.
 export interface ModelTranslator {
   readonly name: string;
   translate(
@@ -607,17 +489,7 @@ const CONSTRUCTION_DOMAIN_GUIDANCE: Readonly<Record<ModelTranslationTarget, stri
     + '"MEP rough-in" / "conduit" / "embedded services" as "机电预留预埋" / "预埋导管", and "setting-out" as "放线".',
 };
 
-/**
- * Post-normalize leaked English construction jargon (specifically "oversail" /
- * "oversailing") when a live LLM translation leaves the English term embedded
- * in an otherwise localized sentence.
- *
- * Narrow by construction: whole-word match on the single known term, applied
- * only when the sentence already carries the target script (Arabic, Chinese)
- * or is French output. A leading capital is preserved so sentence-initial
- * position keeps its casing; Arabic and Chinese have no case. Anything else
- * passes through untouched - this repairs one term, never rephrases prose.
- */
+// Post-normalize leaked English construction jargon (specifically "oversail" / "oversailing") when a live LLM.
 export function normalizeTranslatedConstructionTerms(
   text: string,
   target: ModelTranslationTarget,
@@ -639,15 +511,10 @@ export function normalizeTranslatedConstructionTerms(
   return text;
 }
 
-/** Largest batch per call, so one verbose inspection cannot blow the budget. */
+// Largest batch per call, so one verbose inspection cannot blow the budget.
 export const MAX_TRANSLATION_BATCH = 24;
 
-/**
- * The translation instruction. Preservation is the load-bearing sentence:
- * identifiers, grid references, counts, measurements and the deterministic
- * vocabulary must arrive byte-identical, because a "translation" that
- * renumbers the evidence is a fabrication.
- */
+// The translation instruction.
 export function buildTranslationPrompt(
   target: ModelTranslationTarget,
   count: number,
@@ -666,15 +533,7 @@ export function buildTranslationPrompt(
   ].join('\n');
 }
 
-/**
- * Validate ONE untrusted translation response. Fail-closed per entry: only a
- * non-empty string at its own index is accepted; anything else leaves that
- * source honestly untranslated rather than repaired or shifted.
- *
- * Accepts the inner object directly (what the translator hands over after
- * unwrapping the chat envelope) as well as a still-enveloped payload, so a
- * gateway shape cannot silently void every entry.
- */
+// Validate ONE untrusted translation response.
 export function parseTranslationResponse(
   rawText: string,
   count: number,
@@ -708,7 +567,7 @@ export function parseTranslationResponse(
   return aligned(inner) ?? allNull();
 }
 
-/** Tolerate the OpenAI-compatible envelope and a bare content string. */
+// Tolerate the OpenAI-compatible envelope and a bare content string.
 function extractTranslationContent(parsed: unknown): string | null {
   if (typeof parsed === 'string') return parsed;
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
@@ -731,7 +590,7 @@ export interface NebiusChatTranslatorOptions {
   readonly fetchImpl?: ModelFetchLike;
 }
 
-/** Injectable fetch, so tests never perform real network I/O. */
+// Injectable fetch, so tests never perform real network I/O.
 export type ModelFetchLike = (
   input: string,
   init: {
@@ -746,15 +605,7 @@ export type ModelFetchLike = (
   text(): Promise<string>;
 }>;
 
-/**
- * Novel prose translated through the configured Nebius chat endpoint.
- *
- * Same resolved base URL (already host-allowlisted), bearer handling and
- * deadline enforcement as the vision and reasoning stages. Nothing is logged,
- * so there is nothing that could leak the credential. Throws nothing: every
- * failure mode - transport, status, shape - resolves to an empty map, which
- * is the honest "unavailable" the caller renders as the labelled original.
- */
+// Novel prose translated through the configured Nebius chat endpoint.
 export class NebiusChatTranslator implements ModelTranslator {
   public readonly name = 'live-neb-translate-v1' as const;
 
@@ -850,17 +701,7 @@ export class NebiusChatTranslator implements ModelTranslator {
   }
 }
 
-/**
- * Build the live translator from the process environment, or null.
- *
- * THE DOCUMENTED BOUNDARY: live translation runs if and only if construction
- * reasoning itself is configured - the same Nebius Token Factory credential
- * (NEBIUS_API_KEY) and the same reasoning model selection
- * (NEBIUS_REASONING_MODEL and friends), enabled. No new variable, no new
- * credential, no new service. Null means memory plus honest fallback: offline,
- * demo fixture, switched-off reasoning, or missing key. Callers must treat
- * null as "live translation is unavailable", never as an error.
- */
+// Build the live translator from the process environment, or null.
 export function createTranslatorFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   fetchImpl?: ModelFetchLike,
@@ -881,35 +722,20 @@ export function createTranslatorFromEnv(
   );
 }
 
-/* ------------------------------------------------------------------ *
- * Live cache: exact source, target language, contract version.
- *
- * Process-local and synchronous, so the sync view builder and restored
- * inspections reuse valid entries with no network. A changed source or a
- * bumped version misses and falls back; an outdated translation can never
- * appear current.
- * ------------------------------------------------------------------ */
+// Live cache: exact source, target language, contract version.
 
 const liveTranslationCache = new Map<string, string>();
 const liveTranslationOrder: string[] = [];
 const LIVE_CACHE_LIMIT = 500;
 
-/**
- * Sources a translator positively answered WITHOUT a translation.
- *
- * A failed call records nothing - a transient outage must be retried on the
- * next run. But when a call succeeds and still carries no translation for a
- * source, re-requesting it on every later run would burn budget forever for
- * an answer that is already known. Settled misses are keyed exactly like
- * hits, so they invalidate identically when the source or version changes.
- */
+// Sources a translator positively answered WITHOUT a translation.
 const liveTranslationMiss = new Set<string>();
 
 function liveCacheKey(source: string, target: string): string {
   return `${LIVE_TRANSLATION_VERSION}\n${target}\n${source}`;
 }
 
-/** Synchronous read of a cached live translation, or null. */
+// Synchronous read of a cached live translation, or null.
 export function lookupLiveTranslation(source: string, target: InspectionLanguage): string | null {
   if (target === 'en') return null;
   return liveTranslationCache.get(liveCacheKey(source.trim(), target)) ?? null;
@@ -926,23 +752,19 @@ function storeLiveTranslation(source: string, target: ModelTranslationTarget, te
   liveTranslationOrder.push(key);
 }
 
-/** Number of cached live translations. Exposed for tests, never for the UI. */
+// Number of cached live translations. Exposed for tests, never for the UI.
 export function liveTranslationCacheSize(): number {
   return liveTranslationCache.size;
 }
 
-/** Empty the live cache. Tests only; production never clears. */
+// Empty the live cache. Tests only; production never clears.
 export function clearLiveTranslationCache(): void {
   liveTranslationCache.clear();
   liveTranslationOrder.length = 0;
   liveTranslationMiss.clear();
 }
 
-/**
- * Whether a source is settled for a target: memory hit, live hit, or a
- * positively answered miss. Settled sources are never re-requested; only
- * unsettled ones may cost a call. English is settled by definition.
- */
+// Whether a source is settled for a target: memory hit, live hit, or a positively answered miss.
 export function isTranslationSettled(source: string, target: InspectionLanguage): boolean {
   if (target === 'en' || typeof source !== 'string' || source.trim().length === 0) return true;
   if (translateModelText(source, target).translated) return true;
@@ -950,11 +772,7 @@ export function isTranslationSettled(source: string, target: InspectionLanguage)
   return liveTranslationCache.has(key) || liveTranslationMiss.has(key);
 }
 
-/**
- * Resolve ONE source for display: memory first, live cache second, honest
- * fallback otherwise. Pure read, never network. The async live fill happens
- * once per run (see translateModelTextsLive), never on language switch.
- */
+// Resolve ONE source for display: memory first, live cache second, honest fallback otherwise.
 export function resolveDisplayTranslation(
   source: string,
   target: InspectionLanguage,
@@ -971,14 +789,7 @@ export function resolveDisplayTranslation(
   return remembered;
 }
 
-/**
- * Fill live translations for sources the memory and cache both miss.
- *
- * At most one translator call per target language, de-duplicated sources,
- * memory hits never re-requested. Never throws: a failing translator or
- * language simply keeps its honest fallback. Not a vision or reasoning
- * inference: it translates finished prose and feeds nothing back upstream.
- */
+// Fill live translations for sources the memory and cache both miss.
 export async function translateModelTextsLive(
   sources: readonly string[],
   translator: ModelTranslator | null,

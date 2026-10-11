@@ -1,11 +1,4 @@
-/**
- * The result cache.
- *
- * The cache exists so UI and comparison work is not blocked behind model
- * latency. The risk it creates is dishonesty: a cached answer presented as a
- * fresh one, or a failure stored and later served as a fast success. These
- * tests lock both hazards shut.
- */
+// The result cache. The cache exists so UI and comparison work is not blocked behind model latency.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -66,8 +59,7 @@ test('a successful result is stored and served as CACHED', () => {
 });
 
 test('a result with nothing accepted is NOT cached', () => {
-  // This is the rule that stops a failure being served back forever as a fast
-  // success. An empty or wholly-rejected answer has acceptedEntries === 0.
+  // This is the rule that stops a failure being served back forever as a fast success.
   const cache = new InspectionCache();
   const stored = cache.store('k', { observations: [], elements: [], findings: [] },
     { model: 'm', latencyMs: 5, acceptedEntries: 0 });
@@ -125,16 +117,14 @@ test('a failed inspection is not cached', async () => {
 });
 
 test('a cached observation is re-validated, not trusted blindly', async () => {
-  // A cache entry holds raw provider output. It must go through the validator
-  // on the way back out, exactly like a fresh answer.
+  // A cache entry holds raw provider output.
   const cache = new InspectionCache();
   const provider = providerReturning([VALID]);
   const inspector = new RealityInspector({ provider });
   const opts = { image: IMAGE, expectedSummary: 'x', cache, useCache: true };
   await inspector.inspectCached(opts);
 
-  // Poison the entry with an invalid observation. The cache is cleared first
-  // because store() is first-write-wins for an existing key.
+  // Poison the entry with an invalid observation.
   const key = computeCacheKey({
     imageBytes: IMAGE.bytes, model: provider.model, expectedSummary: 'x',
   });

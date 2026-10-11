@@ -1,21 +1,9 @@
-/**
- * Re-serialising validated product data back to the raw provider shape.
- *
- * The cache and the persistence layer both store what the PROVIDER returned, not
- * the product's view of it. That is what makes re-validating on read meaningful:
- * a stored entry is untrusted input, exactly like a fresh model response, and a
- * cache hit or a restored inspection passes back through the same validators
- * rather than being trusted.
- *
- * Kept in its own module because both the inspector's cache path and the session's
- * persistence path need the identical mapping; two copies would eventually
- * disagree about what a stored entry means.
- */
+// Re-serialising validated product data back to the raw provider shape.
 
 import type { AIObservation } from './types/observation.ts';
 import type { InspectionFinding } from './types/inspection.ts';
 
-/** A validated observation, flattened back to the raw provider field names. */
+// A validated observation, flattened back to the raw provider field names.
 export function toCacheableObservation(o: AIObservation): Record<string, unknown> {
   return {
     category: o.category,
@@ -28,7 +16,7 @@ export function toCacheableObservation(o: AIObservation): Record<string, unknown
   };
 }
 
-/** A validated finding, flattened back to the raw provider field names. */
+// A validated finding, flattened back to the raw provider field names.
 export function toCacheableFinding(f: InspectionFinding): Record<string, unknown> {
   return {
     title: f.title,

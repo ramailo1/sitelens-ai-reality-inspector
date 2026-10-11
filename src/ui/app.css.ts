@@ -1,15 +1,6 @@
-/**
- * The inspector stylesheet.
- *
- * Survey paper, concrete, graphite and a single instrument red reserved for
- * attention. No gradients, no glass, no AI ornament: every rule on screen is
- * there to separate a measurement from a claim.
- */
+// Inspector stylesheet: design tokens, layout bays, RTL logical rules, and responsive breakpoints.
 
-export const APP_CSS = `/* ==========================================================================
-   AI REALITY INSPECTOR
-   Concrete before gradients. Geometry before decoration.
-   ========================================================================== */
+export const APP_CSS = `
 :root {
   --paper:        #EFEBE3;
   --paper-2:      #E7E2D7;
@@ -40,9 +31,6 @@ export const APP_CSS = `/* =====================================================
   --neutral:      #6E6960;
   --neutral-wash: rgba(110, 105, 96, .09);
 
-  /* Stage roles on the qualification card. A qualifying inference, a stage that
-     ran on a model the hackathon does not require, and the platform the call
-     went through are three different claims and are never given one colour. */
   --info:         #2C6E9B;
   --info-wash:    rgba(44, 110, 155, .11);
   --stage:        #5B4A9E;
@@ -59,10 +47,7 @@ export const APP_CSS = `/* =====================================================
 }
 
 * { box-sizing: border-box; }
-/* One rule, once. Elements toggled with the hidden attribute are laid out by
-   their own class rules (flex, grid), which would otherwise beat the attribute
-   and leave "hidden" bands on screen. Specificity cannot fix this reliably, so
-   the attribute wins outright. */
+
 [hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; }
 
@@ -76,13 +61,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Prose blocks and titles break lines gracefully instead of leaving orphans. */
 .bay-sub, .panel-sub, .reason-lede, .modal-body, .dataset-note,
 .fc-title, .prio-t, .cmp-pair dd, .obs-text {
   text-wrap: pretty;
 }
 
-/* Paper tooth: fixed, so it reads as the sheet rather than as content. */
 body::before {
   content: "";
   position: fixed;
@@ -119,13 +102,7 @@ body::before {
 
 .rig {
   position: relative;
-  /* Above every band below it. The project menu (.proj-menu) is absolutely
-     positioned INSIDE this element, so it can never paint above a sibling that
-     shares or beats this element's own stacking level: .rig is a stacking
-     context because it is positioned with a z-index, and the menu's own z-index
-     is confined inside it. .pipe used to be z-index 2 as well and comes later in
-     the document, so it painted over the open menu however high the menu's
-     z-index was. Raising the header fixes the cause rather than fighting it. */
+
   z-index: 5;
   display: flex;
   align-items: center;
@@ -138,7 +115,9 @@ body::before {
   flex-wrap: wrap;
 }
 
-.rig-id { display: flex; align-items: baseline; gap: 9px; }
+.rig-id { display: flex; align-items: baseline; gap: 9px; min-width: 0; flex: none; }
+.rig-name { flex: none; white-space: nowrap; }
+.rig-org { flex: none; white-space: nowrap; }
 
 .rig-mark {
   width: 10px; height: 10px;
@@ -167,12 +146,6 @@ body::before {
 .rig-meta-i b { color: var(--ink-4); letter-spacing: .1em; font-weight: 500; }
 .rig-meta-i span { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
 
-/* The open-photograph count and the names behind it.
-   The summary is the whole closed state, so it must not widen with the list:
-   a masthead that grows with the selection pushes the reviewer and the project
-   selector off the strip. The list is absolutely positioned for the same
-   reason, and the header sits above the bands below it so it can paint over
-   them instead of being clipped by them. */
 .rig-disclose { position: relative; }
 .rig-summary {
   list-style: none;
@@ -212,8 +185,6 @@ body::before {
 
 .rig-nav { margin-inline-start: auto; display: flex; }
 
-/* Workflow steps are tabs: exactly one is selected and exactly one panel shows.
-   The selected state is carried by a colour AND a rule, never colour alone. */
 .step {
   display: flex;
   align-items: baseline;
@@ -241,13 +212,17 @@ body::before {
 .step[aria-selected="true"] .step-n { color: var(--red); }
 .step-t { font-size: 12.5px; font-weight: 500; }
 
-.rig-state { display: flex; align-items: center; gap: 8px; }
+.rig-state { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
 .rig-state-t {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--ink-2);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .lamp {
@@ -275,8 +250,8 @@ body::before {
   font-size: 10.5px;
   flex-wrap: wrap;
 }
-.ident-k { color: var(--ink-3); letter-spacing: .1em; text-transform: uppercase; }
-.ident-v { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ident-k { color: var(--ink-3); letter-spacing: .1em; text-transform: uppercase; flex: none; }
+.ident-v { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 
 .ident-synth {
   margin-inline-start: auto;
@@ -289,8 +264,6 @@ body::before {
 }
 .ident-synth[hidden] { display: none; }
 
-/* A cached AI answer is real but not fresh, so it is badged separately from a
-   live call. Never shown alongside the synthetic-fixture badge. */
 .ident-cache {
   margin-inline-start: auto;
   padding: 3px 9px;
@@ -368,19 +341,6 @@ body::before {
   .rig-meta { display: none; }
 }
 
-/* Narrow viewports: the header is a wrapping flex row, so its LAST line can
-   still be wider than the screen. The workflow nav holds four tabs at a fixed
-   intrinsic width (382px) and, with margin-inline-start:auto pushing it to the
-   inline end, it lands on its own row and overflows a 390px viewport by 12px.
-   Allowing it to take the full row and letting the tabs share the space keeps
-   every step reachable instead of pushing the strip off-screen. */
-@media (max-width: 820px) {
-  .rig { gap: 12px; padding: 0 12px; }
-  .rig-nav { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; }
-  .step { padding-inline: 0 10px; margin-inline-end: 10px; }
-  .rig-state { flex: 1 1 100%; }
-}
-
 .drop {
   border: 1px dashed var(--rule-2);
   background: var(--paper-2);
@@ -402,19 +362,14 @@ body::before {
 }
 .drop-title { margin: 0; font-family: var(--mono); font-size: 12px; font-weight: 600; }
 .drop-alt { margin: 6px 0; color: var(--ink-4); font-size: 11px; }
-/* --ink-3, not --ink-4: this hint states the real accepted formats and size
-   limit, so it is information rather than decoration and has to clear AA. */
+
 .drop-hint { margin: 10px 0 0; color: var(--ink-3); font-family: var(--mono); font-size: 10.5px; }
 
-/* Native dropdown chrome draws its own box and arrow, which fights the crafted
-   surface. The arrow is drawn here instead so the control keeps its affordance. */
 .field select, .exp-row select, .preset-item select {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='6'%3E%3Cpath d='M1 1l3.5 3.5L8 1' fill='none' stroke='%2345423D' stroke-width='1.4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  /* The chevron is genuinely directional affordance: it sits at the inline
-     end of the control in both directions. background-position has no logical
-     form, so the RTL mirror is stated explicitly below with the other mirrors. */
+
   background-position: right 9px center;
   padding-inline-end: 26px;
 }
@@ -455,7 +410,7 @@ html[dir="rtl"] .preset-item select { background-position: left 9px center; }
 }
 .panel-head .tag { margin-inline-start: auto; }
 .panel-sub { margin: 0 0 12px; color: var(--ink-3); font-size: 12px; max-width: 70ch; }
-.panel-acts { margin-top: 12px; display: flex; gap: 8px; }
+.panel-acts { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
 
 .tag {
   display: inline-block;
@@ -522,9 +477,9 @@ html[dir="rtl"] .cmp, .i18n-surface[dir="rtl"] .cmp { box-shadow: inset -3px 0 0
 html[dir="rtl"] .cmp[data-status="MATCH"], .i18n-surface[dir="rtl"] .cmp[data-status="MATCH"] { box-shadow: inset -3px 0 0 var(--verify); }
 html[dir="rtl"] .cmp[data-status="ATTENTION"], .i18n-surface[dir="rtl"] .cmp[data-status="ATTENTION"] { box-shadow: inset -3px 0 0 var(--red); }
 html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[data-status="UNDETERMINED"] { box-shadow: inset -3px 0 0 var(--review); }
-.cmp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.cmp-el { font-family: var(--mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
-.cmp-tag { margin-inline-start: auto; }
+.cmp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; min-width: 0; }
+.cmp-el { font-family: var(--mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; min-width: 0; overflow-wrap: anywhere; }
+.cmp-tag { margin-inline-start: auto; flex: none; }
 .cmp[data-status="MATCH"] .cmp-tag { border-color: var(--verify); color: var(--verify); }
 .cmp[data-status="ATTENTION"] .cmp-tag { border-color: var(--red); color: var(--red); background: var(--red-wash); }
 .cmp[data-status="UNDETERMINED"] .cmp-tag { border-color: var(--review); color: var(--review); background: var(--review-wash); }
@@ -555,9 +510,7 @@ html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn-ghost { background: transparent; }
-/* The one PRIMARY action of a context. Solid ink, no outline: red is reserved
-   for attention and destruction, so the main action can no longer be mistaken
-   for a warning alongside the buttons that delete things. */
+
 .btn-primary { background: var(--ink); border-color: var(--ink); color: var(--paper); font-weight: 600; }
 .btn-primary:hover:not(:disabled) { background: var(--ink-2); border-color: var(--ink-2); color: var(--paper); }
 .btn-red { border-color: var(--red); color: var(--red); background: var(--red-wash); font-weight: 600; }
@@ -576,29 +529,22 @@ html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[
 }
 .sheet img { width: 100%; height: auto; display: block; }
 .sheet-sm img { max-height: 360px; object-fit: contain; }
-/* A minimum height keeps the stage readable if an image ever fails to load,
-   instead of collapsing the whole inspection surface into a one-line strip. */
+
 .sheet-lg img { max-height: 620px; min-height: 300px; object-fit: contain; }
 
-/* Display-only 180-degree correction for captures whose source EXIF tag was
-   accurate (orientation 3/4): the stored pixels are upside down, the bytes stay
-   untouched, and renderOverlay flips evidence boxes to match. */
 .img-flip180 { transform: rotate(180deg); }
 
 .sheet-overlay { position: absolute; inset: 0; pointer-events: none; }
 .sheet-overlay:empty { display: none; }
 
-/* Corner registration marks: the frame reads as a measured image. */
 .sheet-cal { position: absolute; inset: 0; pointer-events: none; }
 .sheet-cal i { position: absolute; width: 14px; height: 14px; border: 1px solid rgba(255,255,255,.5); }
-/* Viewfinder corners: drawn on all four sides, so mirroring would paint the
-   identical picture. Physical coordinates stay. */
+
 .sheet-cal i:nth-child(1) { top: 8px; left: 8px; border-right: 0; border-bottom: 0; }
 .sheet-cal i:nth-child(2) { top: 8px; right: 8px; border-left: 0; border-bottom: 0; }
 .sheet-cal i:nth-child(3) { bottom: 8px; left: 8px; border-right: 0; border-top: 0; }
 .sheet-cal i:nth-child(4) { bottom: 8px; right: 8px; border-left: 0; border-top: 0; }
 
-/* Evidence boxes are drawn ONLY from real model geometry. */
 .ev {
   position: absolute;
   border: 1.5px solid var(--red);
@@ -614,9 +560,7 @@ html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[
 .ev:hover, .ev[data-active="true"] { background: rgba(200,16,46,.22); border-color: var(--red); }
 .ev-n {
   position: absolute;
-  /* Deliberately physical: this badge hangs off evidence-box geometry, which
-     is computed in pixels and is never mirrored. Mirroring it would detach the
-     number from the region it labels. */
+
   top: -9px; left: -9px;
   min-width: 18px; height: 18px;
   display: grid; place-items: center;
@@ -629,16 +573,12 @@ html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[
 }
 .ev[data-active="true"] .ev-n { background: var(--red); }
 
-.stage-cap { margin: 8px 0 0; font-family: var(--mono); font-size: 10.5px; color: var(--ink-4); }
+.stage-cap { margin: 8px 0 0; font-family: var(--mono); font-size: 10.5px; color: var(--ink-4); overflow-wrap: anywhere; }
 
 .stage-grid { display: grid; grid-template-columns: minmax(0, 1fr) 206px; gap: 18px; align-items: start; }
 .stage-l { min-width: 0; }
 .stage-r { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
 
-/* The photographs of one inspection. An inspection can rest on several
-   photographs, and the evidence stage has to be able to show each one with its
-   own boxes: without this the operator can only ever see one frame of a group
-   and the rest of the evidence is unreachable. */
 .photo-switcher {
   display: flex;
   align-items: center;
@@ -666,11 +606,8 @@ html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[
 }
 .photo-tab:hover { background: var(--concrete); color: var(--ink); }
 .photo-tab.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-/* The sheet holds image coordinate space, not text: it must never mirror with
-   the paragraph, whatever direction the surrounding surface reads in. */
-.sheet { direction: ltr; }
 
-@media (max-width: 820px) { .stage-grid { grid-template-columns: minmax(0, 1fr); } }
+.sheet { direction: ltr; }
 
 .rail { background: var(--paper-2); padding: 11px 13px; }
 .rail-h {
@@ -737,8 +674,10 @@ html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[
   padding: 6px 10px;
   border: 1px solid var(--rule);
   background: var(--paper-2);
+  min-width: 0;
+  flex-wrap: wrap;
 }
-.reviewer-status-info { display: flex; flex-direction: column; gap: 2px; }
+.reviewer-status-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .reviewer-lbl { font-family: var(--mono); font-size: 9px; letter-spacing: .08em; color: var(--ink-4); }
 .reviewer-val { font-size: 12px; font-weight: 600; color: var(--ink-2); }
 .reviewer-status-box[data-configured="false"] .reviewer-val { color: var(--red); font-style: italic; font-weight: 500; }
@@ -759,10 +698,11 @@ html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[
   border-bottom: 1px solid var(--rule);
   cursor: pointer;
   background: var(--paper);
+  min-width: 0;
 }
-.fc-id { font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
-.fc-title { font-size: 13px; font-weight: 600; }
-.fc-tail { margin-inline-start: auto; display: flex; align-items: center; gap: 8px; }
+.fc-id { font-family: var(--mono); font-size: 10px; color: var(--ink-4); flex: none; }
+.fc-title { font-size: 13px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.fc-tail { margin-inline-start: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 
 .fc-body { display: none; }
 .finding-card[data-open="true"] .fc-body { display: block; }
@@ -808,9 +748,27 @@ html[dir="rtl"] .cmp[data-status="UNDETERMINED"], .i18n-surface[dir="rtl"] .cmp[
   color: var(--ink-4);
 }
 .fc-noev b { letter-spacing: .08em; color: var(--ink-3); }
-/* Full-frame evidence still IS evidence, so it reads one shade stronger than
-   the no-evidence state, which must read as an admitted gap, not a warning. */
+
 .fc-noev[data-state="FULL_FRAME"] { color: var(--ink-3); }
+
+.fc-evhelp {
+  margin: 0;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--rule-hair);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.fc-evhelp b { letter-spacing: .06em; color: var(--ink-4); font-weight: 600; }
+
+.cmp-help {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
 
 .fc-acts {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -932,8 +890,6 @@ html[dir="rtl"] .prio[data-attention="MEDIUM"], .i18n-surface[dir="rtl"] .prio[d
   max-width: 62ch;
 }
 
-/* An empty message inside a hairline list must not inherit the list's rule
-   background, or the message renders as a heavy gray slab. */
 .prio-list:has(> .empty),
 .cmp-list:has(> .empty) { background: none; border: 0; }
 .prio-list:has(> .empty) .empty,
@@ -967,21 +923,24 @@ html[dir="rtl"] .prio[data-attention="MEDIUM"], .i18n-surface[dir="rtl"] .prio[d
 .finding-meta { margin: 6px 0 0; font-family: var(--mono); font-size: 10px; color: var(--ink-4); }
 .finding-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
 
-.proj { position: relative; display: flex; align-items: center; gap: 6px; }
+.proj { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .proj-btn {
   display: flex; align-items: baseline; gap: 7px;
   padding: 5px 10px; background: var(--paper);
   border: 1px solid var(--rule-2); border-radius: 2px;
   font-family: var(--mono); font-size: 11px; cursor: pointer;
   max-width: 260px;
+  min-width: 0; flex: 0 1 auto;
 }
 .proj-btn:hover { background: var(--concrete); }
 .proj-k { color: var(--ink-4); letter-spacing: .1em; text-transform: uppercase; font-size: 10px; }
 .proj-name {
   color: var(--ink); font-weight: 600; font-size: 11.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; flex: 1 1 auto;
 }
-.proj-caret { color: var(--ink-3); border-inline-start: 1px solid var(--rule); padding-inline-start: 6px; }
+.proj-caret { color: var(--ink-3); border-inline-start: 1px solid var(--rule); padding-inline-start: 6px; flex: none; }
+.proj-k { flex: none; }
 .proj-menu {
   position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 40;
   min-width: 260px; max-width: 320px; padding: 10px;
@@ -999,8 +958,7 @@ html[dir="rtl"] .prio[data-attention="MEDIUM"], .i18n-surface[dir="rtl"] .prio[d
   border: 0; text-align: start; cursor: pointer;
 }
 .proj-item:hover { background: var(--concrete); }
-/* The current-project rule is genuinely directional: it must sit at the
-   reading-start edge in both directions, so the RTL mirror is explicit. */
+
 .proj-item[aria-current="true"] { background: var(--paper); box-shadow: inset 3px 0 0 var(--red); }
 html[dir="rtl"] .proj-item[aria-current="true"] { box-shadow: inset -3px 0 0 var(--red); }
 .proj-item-n { font-family: var(--mono); font-size: 11.5px; color: var(--ink); font-weight: 600; }
@@ -1017,7 +975,7 @@ html[dir="rtl"] .proj-item[aria-current="true"] { box-shadow: inset -3px 0 0 var
   box-shadow: 0 18px 48px rgba(28, 27, 25, .28);
 }
 .modal-h { margin: 0 0 14px; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
-/* The modal's explanatory line, styled here instead of inline in the markup. */
+
 .modal-sub { margin: 0 0 12px; color: var(--ink-3); font-size: 11.5px; }
 .modal-body { margin: 0 0 16px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
 .modal-note { margin: 0 0 12px; font-family: var(--mono); font-size: 11px; color: var(--red); }
@@ -1052,11 +1010,6 @@ html[dir="rtl"] .capture-row[aria-current="true"] .capture-main { box-shadow: in
 @media (max-width: 900px) {
   .proj-btn { max-width: 180px; }
 }
-@media (max-width: 820px) {
-  .proj { flex: 1 1 100%; }
-  .proj-btn { flex: 1; max-width: none; }
-  .proj-menu { min-width: 0; width: 100%; }
-}
 
 .proj-badge {
   margin-inline-start: 6px; padding: 1px 5px;
@@ -1074,8 +1027,7 @@ html[dir="rtl"] .capture-row[aria-current="true"] .capture-main { box-shadow: in
   border: 1px dashed var(--rule-2); background: var(--paper);
   font-family: var(--mono); font-size: 10px; color: var(--ink-3); line-height: 1.6;
 }
-/* Persistence provenance is true and occasionally needed, but it is not part
-   of the capture workflow — so it waits behind a disclosure. */
+
 .storage { margin: 10px 0 0; }
 .storage summary {
   display: inline-block;
@@ -1101,12 +1053,6 @@ html[dir="rtl"] .capture-row[aria-current="true"] .capture-main { box-shadow: in
 }
 .preset-item .btn { padding: 3px 8px; }
 
-/* ==========================================================================
-   THE NVIDIA QUALIFICATION CARD
-   The verdict is the headline because it answers the question a judge actually
-   asks. The rows underneath are the evidence for it: each names the model that
-   really ran and says whether that row is the qualifying inference.
-   ========================================================================== */
 .qual {
   margin-top: 12px;
   border: 1px solid var(--rule-2);
@@ -1221,14 +1167,6 @@ html[dir="rtl"] .capture-row[aria-current="true"] .capture-main { box-shadow: in
 .foot-thesis { color: var(--ink-2); font-weight: 600; letter-spacing: .02em; }
 .foot-r { margin-inline-start: auto; }
 
-/* ==========================================================================
-   THE REVIEWER GATE
-   Sits above the pipeline on purpose, so it is the first thing read when the
-   workflow is unavailable rather than a message that only appears once
-   something is clicked. It states the real reason and it is the route to the
-   action that resolves it. The amber of setup, never the red of a failure: a
-   missing reviewer is an incomplete setup step, not a defect in the inspection.
-   ========================================================================== */
 .gate {
   position: relative;
   display: flex;
@@ -1251,13 +1189,6 @@ html[dir="rtl"] .capture-row[aria-current="true"] .capture-main { box-shadow: in
 }
 .gate-b { flex: 1 1 240px; font-size: 11.5px; line-height: 1.5; color: var(--ink-2); }
 
-/* ==========================================================================
-   THE PIPELINE STRIP
-   Four verbs, four steps, each reporting its OWN state. This is the thesis made
-   permanent on screen: SEE by a model, COMPARE by our code, UNDERSTAND by a
-   second model, VERIFY by a person. A step that did not run says so, so a
-   silent stage can never be read as agreement.
-   ========================================================================== */
 .pipe {
   position: relative;
   z-index: 2;
@@ -1279,9 +1210,7 @@ html[dir="rtl"] .capture-row[aria-current="true"] .capture-main { box-shadow: in
   column-gap: 10px;
   padding-block: 9px;
   padding-inline: 14px;
-  /* Step dividers connect the strip in both directions: the divider always
-     sits at the inline end, so the strip reads as one instrument in LTR and
-     in RTL without a separate override. */
+
   border-inline-end: 1px solid var(--rule-hair);
   border-inline-start: 1px solid transparent;
   margin-inline-start: -14px;
@@ -1321,10 +1250,7 @@ html[dir="rtl"] .capture-row[aria-current="true"] .capture-main { box-shadow: in
   line-height: 1.4;
   margin-top: 1px;
 }
-/* A partial analysis is its own third state: not the green of a completed run
-   and not a failed one. The failure state uses the same amber wash, so partial
-   is separated from it by an inset left rule instead of by colour alone -- the
-   two can then be told apart at a glance and in high-contrast mode. */
+
 .pipe-step[data-state="partial"] {
   background: var(--review-wash);
   box-shadow: inset 3px 0 0 var(--review);
@@ -1343,8 +1269,7 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
 .pipe-step[data-state="fail"] .pipe-n { color: var(--review); }
 .pipe-step[data-state="wait"] { background: rgba(28, 27, 25, .04); }
 .pipe-step[data-state="wait"] .pipe-n { color: var(--ink-2); }
-/* A step that has not run is dimmed, but never to the point of illegibility:
-   "not run yet" is information, not decoration. */
+
 .pipe-step[data-state="idle"] { opacity: .8; }
 .pipe-step[data-state="idle"] .pipe-note { color: var(--ink-3); }
 
@@ -1352,12 +1277,6 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
   .pipe-steps { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* ==========================================================================
-   LOCAL DATASET BROWSER
-   The demo path onto REAL construction imagery. The labelling carries the
-   weight: every tile says LOCAL DATASET's truth, so a genuine archive
-   photograph can never be mistaken for a project capture or a synthetic scene.
-   ========================================================================== */
 .dataset {
   margin-top: 14px;
   border: 1px solid var(--rule-2);
@@ -1412,8 +1331,6 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
 }
 .dataset .note-bad { margin: 0; }
 
-/* A tile is an instrument label, not a thumbnail: no image is decoded, so the
-   browser is not asked to hold 38 large files in memory to draw a grid. */
 .tile {
   display: grid;
   gap: 3px;
@@ -1459,11 +1376,6 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
 }
 .tile-rot { color: var(--review); }
 
-/* ==========================================================================
-   CONSTRUCTION REASONING  (stage 2)
-   The panel that makes the second model visible. Amber when it could not run,
-   so a missing stage is impossible to mistake for a clean bill of health.
-   ========================================================================== */
 .reason {
   margin-top: 16px;
   border: 1px solid var(--rule-2);
@@ -1527,8 +1439,6 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
 }
 .reason-grid .fc-row dd { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
 
-/* Certainty is a qualitative reading of evidence, so it is a chip, not a bar.
-   A bar would invite reading it as a measurement. */
 .reason-certainty {
   display: flex;
   align-items: center;
@@ -1593,7 +1503,6 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
   color: var(--ink-4);
 }
 
-/* Geometry disclosure: a re-oriented photograph is stated, never silently fixed. */
 .geom {
   margin: 8px 0 0;
   padding: 7px 9px;
@@ -1605,20 +1514,6 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
   color: var(--ink-2);
 }
 
-/* ==========================================================================
-   LANGUAGE AND THE PHOTOGRAPHS OF ONE INSPECTION
-
-   Two concerns share this block because both are about not misleading a
-   reader. The language rules keep Latin runs (model ids, counts, timestamps)
-   readable inside Arabic text instead of letting the bidi algorithm reorder
-   them. The photo rules make the count of photographs legible without counting
-   thumbnails, and keep a FAILED photograph visible as failed: hiding it would
-   let a partial inspection read as a complete one.
-   ========================================================================== */
-
-/* The language control sits in the identity strip and stays LTR in every
-   language: a selector listing en / fr / ar / zh is read in code order, not in
-   prose order, and it is never inside a localized surface to begin with. */
 .lang-sel {
   display: inline-flex;
   align-items: center;
@@ -1632,8 +1527,7 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
   font-size: 9.5px;
   letter-spacing: .1em;
   text-transform: uppercase;
-  /* --ink-3, not --ink-4: the label names a control the operator has to find,
-     so it is information rather than decoration and has to clear AA. */
+
   color: var(--ink-3);
 }
 .lang-sel select {
@@ -1646,9 +1540,7 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
   padding: 3px 6px;
 }
 .lang-sel select:focus-visible { outline: 2px solid var(--red); outline-offset: 1px; }
-/* The presentation-only hint is a title tooltip on the control, not visible
-   header text, so the identity strip stays compact at desktop and narrow
-   widths. No .lang-note element remains in the markup. */
+
 .tr-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
 .tr-badge { letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule-2); padding: 2px 7px; background: var(--paper-2); }
 .tr-fallback { color: var(--ink-3); }
@@ -1659,12 +1551,6 @@ html[dir="rtl"] .pipe-step[data-state="partial"] { box-shadow: inset -3px 0 0 va
 .i18n-surface[lang="zh-CN"] .bay-h,
 .i18n-surface[lang="zh-CN"] .panel-h { letter-spacing: .04em; }
 
-/* Numbers, ids and model names are Latin-runs inside Arabic text. Isolating each
-   one keeps "openbmb/MiniCPM-V-4_5" and a count from being reordered by the
-   bidirectional algorithm, which is what makes mixed content unreadable.
-   Technical values outside the result bays (pipeline strip, identity strip,
-   reasoning header) are marked data-latin in the markup and isolated against
-   the DOCUMENT direction, because those chrome regions follow html[dir]. */
 html[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; }
 .i18n-surface[dir="rtl"] { text-align: right; }
 .i18n-surface[dir="rtl"] .mono,
@@ -1675,12 +1561,11 @@ html[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; }
 .i18n-surface[dir="rtl"] .conf,
 .i18n-surface[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; text-align: left; }
 .i18n-surface[dir="rtl"] .fc-title { unicode-bidi: plaintext; }
-/* Long unbroken strings must wrap rather than push a card off the page. */
+
 .i18n-surface[dir="rtl"] .obs-text,
 .i18n-surface[dir="rtl"] .fc-title,
 .i18n-surface[dir="rtl"] .reason-lede { overflow-wrap: anywhere; }
 
-/* ---- the photographs of one inspection --------------------------------- */
 .imgs { border: 1px solid var(--rule); background: var(--paper-2); padding: 12px; margin-top: var(--gap); }
 .imgs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .imgs-h { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
@@ -1699,7 +1584,6 @@ html[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; }
 .imgs-note { margin: 9px 0 0; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
 .btn-xs { padding: 5px 10px; font-size: 11px; }
 
-/* ---- how many photographs this inspection actually rests on ------------- */
 .basis { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 3px; }
 .basis-item { display: grid; grid-template-columns: 66px minmax(0, 1fr) auto; align-items: baseline; gap: 8px; font-size: 11px; }
 .basis-dot { font-family: var(--mono); font-size: 9px; letter-spacing: .06em; color: var(--verify); }
@@ -1710,17 +1594,10 @@ html[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; }
 .basis-warn { margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--red); }
 .basis-empty { font-size: 11px; color: var(--ink-4); }
 
-/* Which photograph an observation came from. Evidence without its source
-   photograph is not auditable once more than one image is in play. */
 .obs-photo { font-family: var(--mono); font-size: 10px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
 
-/* The ledger finding an observation raised. It names a full record id, and
-   .tag is white-space:nowrap, so at phone widths the id pushed the strip off
-   the screen and produced a horizontal scrollbar. Allowing the break keeps the
-   id intact and auditable instead of trimming it. */
 .obs-raised { white-space: normal; overflow-wrap: anywhere; }
 
-/* ---- verified finding ledger & persistence truth ----------------------- */
 .ledger-section { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--rule-2); }
 .ledger-bar { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .ledger-title, .obs-section-title {
@@ -1814,9 +1691,32 @@ html[dir="rtl"] [data-latin] { unicode-bidi: isolate; direction: ltr; }
   line-height: 1.55;
   color: var(--ink-2);
 }
+@media (max-width: 820px) {
+  .rig { gap: 12px; padding: 0 12px; }
+  .rig-nav { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; }
+  .step { padding-inline: 0 10px; margin-inline-end: 10px; }
+  .rig-state { flex: 1 1 100%; }
+  .proj { flex: 1 1 100%; min-width: 0; }
+  .proj-btn { flex: 1 1 auto; max-width: none; min-width: 0; }
+  #proj-new { flex: none; }
+  .proj-menu { min-width: 0; width: 100%; max-width: 100%; }
+  .ident { padding: 7px 12px; }
+  .review-bar { grid-template-columns: minmax(0, 1fr); }
+  .reason-grid .fc-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .fc-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .cmp-pair { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .exp-row { grid-template-columns: minmax(0, 1fr); }
+  .stage-grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 640px) {
   .finding-head, .obs-acts, .finding-acts { gap: 5px; }
   .finding-acts .btn, .obs-acts .btn { flex: 1 1 auto; text-align: center; }
   .obs-photo { max-width: 100%; }
+}
+@media (max-width: 400px) {
+  .rig { padding: 0 10px; gap: 10px; }
+  .proj { flex-wrap: wrap; }
+  .proj-btn { flex: 1 1 100%; }
+  #proj-new { flex: 1 1 auto; text-align: center; }
 }
 `;

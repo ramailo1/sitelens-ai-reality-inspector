@@ -1,67 +1,35 @@
-/**
- * Environment configuration, read from process.env only. Secrets are never
- * written to disk or logged.
- *
- * Missing credentials fail closed: the provider reports NOT_CONFIGURED rather
- * than falling back to an anonymous or demo mode.
- */
+// Environment configuration, read from process.env only.
 
 import { ProviderError } from './providers/provider.ts';
 
-/** Public configuration. Contains no secrets by construction. */
+// Public configuration. Contains no secrets by construction.
 export interface ProviderConfig {
   readonly baseUrl: string;
   readonly model: string;
   readonly timeoutMs: number;
   readonly maxObservations: number;
-  /**
-   * Upper bound on the completion length. Essential rather than cosmetic: some
-   * catalogue models are reasoning models that will otherwise consume the entire
-   * request deadline emitting tokens and never return the JSON object.
-   */
+  // Upper bound on the completion length.
   readonly maxTokens: number;
 }
 
-/** Secret material, kept separate so it is never logged or serialised. */
+// Secret material, kept separate so it is never logged or serialised.
 export interface ResolvedCredentials {
   readonly apiKey: string;
 }
 
-/** The documented default endpoint (OpenAI-compatible Token Factory). */
+// The documented default endpoint (OpenAI-compatible Token Factory).
 export const DEFAULT_NEBIUS_BASE_URL = 'https://api.tokenfactory.nebius.com/v1/';
 
-/**
- * Default vision model.
- *
- * Chosen by measurement, not preference: a bake-off of the three
- * vision-capable models in the catalogue over five real construction
- * photographs, at NEBIUS_MAX_TOKENS=3000, judged by this repository's own
- * validators. MiniCPM returned usable output on 4/5 images against 2/5 for
- * gemma-3-27b-it and 1/5 for Qwen3.8-27B, and produced the elements and findings
- * the rest of the pipeline reasons about. See README for the full table.
- *
- * Not an NVIDIA model. Every nvidia/* id in the catalogue was probed with real
- * image input and all returned `HTTP 400 This model does not support image
- * input`, so the VISION stage is reported as NOT_ELIGIBLE rather than claimed.
- * The NVIDIA requirement is met, when it is met, by the reasoning stage below.
- */
+// Default vision model.
 export const DEFAULT_NEBIUS_MODEL = 'openbmb/MiniCPM-V-4_5';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_OBSERVATIONS = 6;
 
-/**
- * Completion budget.
- *
- * 1400 was the old default and it truncated MiniCPM mid-JSON on real site
- * photographs. A sweep across the test images showed 3000 removes the
- * truncation while staying tight enough that the model does not pad its answer.
- * Reasoning models such as Qwen3.8-27B need >=6000; they spend thousands of
- * tokens reasoning before they answer, which is why they are not the default.
- */
+// Completion budget. 1400 was the old default and it truncated MiniCPM mid-JSON on real site photographs.
 const DEFAULT_MAX_TOKENS = 3000;
 
-/** Config used when a provider is explicitly selected but unset. */
+// Config used when a provider is explicitly selected but unset.
 export function defaultProviderConfig(): ProviderConfig {
   return {
     baseUrl: DEFAULT_NEBIUS_BASE_URL,
@@ -72,47 +40,26 @@ export function defaultProviderConfig(): ProviderConfig {
   };
 }
 
-/**
- * Reasoning-stage configuration: the SECOND model in the hybrid architecture.
- *
- * Separate from the vision configuration because the two models have genuinely
- * different jobs and different budgets. The vision model must return compact
- * structured perception from an image; the reasoning model must be given room
- * to think, because its value IS the reasoning rather than the recall.
- */
+// Reasoning-stage configuration: the SECOND model in the hybrid architecture.
 export interface ReasoningConfig {
   readonly baseUrl: string;
   readonly model: string;
   readonly timeoutMs: number;
   readonly maxTokens: number;
-  /** False when reasoning is switched off entirely for this run. */
+  // False when reasoning is switched off entirely for this run.
   readonly enabled: boolean;
 }
 
-/**
- * Default reasoning model.
- *
- * Chosen by measurement over the four `nvidia/Nemotron-*` ids in the Token
- * Factory catalogue, all of which answer a structured reasoning prompt on this
- * project's real inspection context. See the measured table in README.md for
- * the comparison. Nemotron is an NVIDIA open-source model, which is what the
- * hackathon requires; the vision model is not, and the README says so.
- */
+// Default reasoning model.
 export const DEFAULT_REASONING_MODEL = 'nvidia/Nemotron-3-Ultra-550b-a55b';
 
-/**
- * Completion budget for the reasoning stage.
- *
- * Higher than the vision budget on purpose. Nemotron spends tokens reasoning
- * before it answers (measured: 437 reasoning tokens on Ultra, 718 on Super), so
- * a tight budget truncates mid-JSON and the whole stage is lost.
- */
+// Completion budget for the reasoning stage.
 const DEFAULT_REASONING_MAX_TOKENS = 2000;
 
-/** Reasoner deadline. Slightly longer than vision, because it must think first. */
+// Reasoner deadline. Slightly longer than vision, because it must think first.
 const DEFAULT_REASONING_TIMEOUT_MS = 90_000;
 
-/** Config used when reasoning is enabled but nothing is set explicitly. */
+// Config used when reasoning is enabled but nothing is set explicitly.
 export function defaultReasoningConfig(): ReasoningConfig {
   return {
     baseUrl: DEFAULT_NEBIUS_BASE_URL,
@@ -153,11 +100,7 @@ function readPositiveInt(
   return parsed;
 }
 
-/**
- * Resolve non-secret provider configuration from the environment.
- * A malformed base URL falls back to the documented default rather than
- * producing a request to an unintended host.
- */
+// Resolve non-secret provider configuration from the environment.
 export function resolveProviderConfig(env: NodeJS.ProcessEnv = process.env): ProviderConfig {
   const defaults = defaultProviderConfig();
 
@@ -182,11 +125,7 @@ export function resolveProviderConfig(env: NodeJS.ProcessEnv = process.env): Pro
   };
 }
 
-/**
- * Only Nebius Token Factory endpoints are accepted. This prevents a
- * misconfigured base URL from shipping construction imagery to an unintended
- * host, and blocks obvious credential-exfiltration targets.
- */
+// Only Nebius Token Factory endpoints are accepted.
 function isAllowedNebiusHost(rawUrl: string): boolean {
   let url: URL;
   try {
@@ -199,12 +138,7 @@ function isAllowedNebiusHost(rawUrl: string): boolean {
   return host === 'tokenfactory.nebius.com' || host.endsWith('.nebius.com');
 }
 
-/**
- * Resolve non-secret reasoning configuration from the environment.
- *
- * A malformed base URL falls back to the documented default rather than
- * producing a request to an unintended host, exactly as for the vision stage.
- */
+// Resolve non-secret reasoning configuration from the environment.
 export function resolveReasoningConfig(env: NodeJS.ProcessEnv = process.env): ReasoningConfig {
   const defaults = defaultReasoningConfig();
 
@@ -226,12 +160,7 @@ export function resolveReasoningConfig(env: NodeJS.ProcessEnv = process.env): Re
   };
 }
 
-/**
- * Resolve the API key. THROWS ProviderError(NOT_CONFIGURED) when absent — the
- * caller must fail closed rather than continue without a credential.
- *
- * The key is returned alone and is never logged.
- */
+// Resolve the API key. THROWS ProviderError(NOT_CONFIGURED) when absent — the caller must fail closed rather than.
 export function resolveCredentials(env: NodeJS.ProcessEnv = process.env): ResolvedCredentials {
   const apiKey = readString(env, 'NEBIUS_API_KEY');
   if (apiKey === null) {
@@ -243,10 +172,7 @@ export function resolveCredentials(env: NodeJS.ProcessEnv = process.env): Resolv
   return { apiKey };
 }
 
-/**
- * Redact secrets from any text before it is logged or returned.
- * Defence in depth: a masked credential never reaches a log line.
- */
+// Redact secrets from any text before it is logged or returned.
 export function redactSecrets(text: string, env: NodeJS.ProcessEnv = process.env): string {
   let out = text;
   const apiKey = readString(env, 'NEBIUS_API_KEY');

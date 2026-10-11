@@ -1,20 +1,9 @@
-/**
- * Observation types. Every observation is advisory: it starts AI_GENERATED and
- * UNVERIFIED and only becomes construction truth through human verification.
- */
+// Observation types. Every observation is advisory: it starts AI_GENERATED and UNVERIFIED and only becomes construction.
 
-/** Marks how an observation came into existence. Never omitted. */
+// Marks how an observation came into existence. Never omitted.
 export type ObservationOrigin = 'AI_GENERATED';
 
-/**
- * Human verification state. Every AI observation starts UNVERIFIED and can
- * only leave that state through an explicit human review action.
- *
- * NEEDS_REVIEW is the "seen but not yet decided" state: a human opened the
- * observation and asked for a site walk. It is deliberately distinct from
- * UNVERIFIED (never looked at) and from REJECTED (decided against), because
- * collapsing them loses the reason an item is still open.
- */
+// Human verification state.
 export type VerificationStatus =
   | 'UNVERIFIED'
   | 'NEEDS_REVIEW'
@@ -22,7 +11,7 @@ export type VerificationStatus =
   | 'REJECTED'
   | 'OVERRIDDEN';
 
-/** Observation categories. Deliberately descriptive of *visible reality*. */
+// Observation categories. Deliberately descriptive of *visible reality*.
 export const OBSERVATION_CATEGORIES = [
   'OBSERVED_ELEMENT',
   'PROGRESS_OBSERVATION',
@@ -39,7 +28,7 @@ export function isObservationCategory(value: unknown): value is ObservationCateg
   );
 }
 
-/** Advisory severity. Never a compliance or safety determination. */
+// Advisory severity. Never a compliance or safety determination.
 export const OBSERVATION_SEVERITIES = ['INFO', 'LOW', 'MEDIUM', 'HIGH'] as const;
 export type ObservationSeverity = (typeof OBSERVATION_SEVERITIES)[number];
 
@@ -50,7 +39,7 @@ export function isObservationSeverity(value: unknown): value is ObservationSever
   );
 }
 
-/** Advisory next step for a human reviewer. NEVER auto-executed. */
+// Advisory next step for a human reviewer. NEVER auto-executed.
 export const SUGGESTED_ACTIONS = [
   'NO_ACTION',
   'HUMAN_REVIEW',
@@ -71,49 +60,40 @@ export interface BoundingBox {
   readonly height: number;
 }
 
-/**
- * Per-observation evidence. Describes WHY the model said what it said.
- * Contains no credentials, no signed URLs and no other tenant's data.
- */
+// Per-observation evidence.
 export interface ObservationEvidence {
-  /** What in the image supports the observation. */
+  // What in the image supports the observation.
   readonly description: string;
-  /** Normalized [0,1] bounding box in image space, when the model localises. */
+  // Normalized [0,1] bounding box in image space, when the model localises.
   readonly boundingBox: BoundingBox | null;
-  /** Region the observation was drawn from, when known. */
+  // Region the observation was drawn from, when known.
   readonly zoneId: string | null;
 }
 
-/** The structured record the product displays. */
+// The structured record the product displays.
 export interface AIObservation {
   readonly id: string;
   readonly captureId: string;
-  /**
-   * Human-readable label of the photograph this observation came from.
-   *
-   * Carried on the observation itself so the reasoning prompt can attribute
-   * evidence to a frame without resolving ids back to captures at the last
-   * moment. Equal to the capture's own label for a single photograph.
-   */
+  // Human-readable label of the photograph this observation came from.
   readonly captureLabel: string;
-  /** Optional project/zone scoping, when the caller supplies tenancy. */
+  // Optional project/zone scoping, when the caller supplies tenancy.
   readonly projectId: string | null;
   readonly zoneId: string | null;
   readonly category: ObservationCategory;
   readonly observation: string;
   readonly evidence: ObservationEvidence;
-  /** Model-reported confidence in [0,1]. NOT a measurement confidence. */
+  // Model-reported confidence in [0,1]. NOT a measurement confidence.
   readonly confidence: number;
   readonly severity: ObservationSeverity;
   readonly suggestedAction: SuggestedAction;
   readonly model: string;
   readonly provider: string;
   readonly generatedAt: string;
-  /** Always 'AI_GENERATED' at creation. */
+  // Always 'AI_GENERATED' at creation.
   readonly origin: ObservationOrigin;
-  /** Always 'UNVERIFIED' at creation; only a human review changes it. */
+  // Always 'UNVERIFIED' at creation; only a human review changes it.
   readonly verificationStatus: VerificationStatus;
-  /** Human review trail; empty until a human acts. */
+  // Human review trail; empty until a human acts.
   readonly review: ObservationReview | null;
 }
 
@@ -124,11 +104,7 @@ export interface ObservationReview {
   readonly note: string | null;
 }
 
-/**
- * The raw JSON shape the model is asked to produce. This is UNTRUSTED INPUT:
- * it is validated strictly before it can become an `AIObservation`, and any
- * field may be missing, wrong-typed, or hostile.
- */
+// The raw JSON shape the model is asked to produce.
 export interface RawModelObservation {
   category?: unknown;
   observation?: unknown;
@@ -189,8 +165,7 @@ export function validateBoundingBox(
       issues.push({ field: `bounding_box.${key}`, message: `${key} must be a finite number` });
       return null;
     }
-    // Normalized coordinates only: a model that emits pixels is rejected
-    // rather than silently misinterpreted.
+    // Normalized coordinates only: a model that emits pixels is rejected rather than silently misinterpreted.
     if (raw < 0 || raw > 1) {
       issues.push({
         field: `bounding_box.${key}`,
@@ -208,7 +183,7 @@ export function validateBoundingBox(
   };
 }
 
-/** A single model observation that has passed strict validation. */
+// A single model observation that has passed strict validation.
 export interface ValidatedModelObservation {
   readonly category: ObservationCategory;
   readonly observation: string;
@@ -219,12 +194,7 @@ export interface ValidatedModelObservation {
   readonly boundingBox: BoundingBox | null;
 }
 
-/**
- * Validate ONE untrusted model observation.
- *
- * Fail-closed: anything not provably conformant is rejected, so a rejected
- * observation can never reach the product as truth.
- */
+// Validate ONE untrusted model observation.
 export function validateModelObservation(
   raw: unknown,
 ): ValidationResult<ValidatedModelObservation> {
@@ -298,10 +268,7 @@ export function validateModelObservation(
 
   const boundingBox = validateBoundingBox(raw['bounding_box'], issues);
 
-  // A model that reports zero confidence in its own observation has asserted
-  // nothing. Measured behaviour, not theory: the vision model this product runs
-  // against echoes its schema back with every field zeroed, and those entries
-  // used to pass validation and appear on screen as "0% confidence".
+  // A model that reports zero confidence in its own observation has asserted nothing.
   if (confidence !== null) {
     if (confidence <= 0) {
       issues.push({
@@ -317,8 +284,7 @@ export function validateModelObservation(
     return { ok: false, issues };
   }
 
-  // A box enclosing no area is not a localisation. Reported as absent rather
-  // than drawn, so the card can say "the model did not localise this".
+  // A box enclosing no area is not a localisation.
   const usableBox =
     boundingBox !== null && boundingBox.width > 0 && boundingBox.height > 0
       ? boundingBox
@@ -338,7 +304,7 @@ export function validateModelObservation(
   };
 }
 
-/** Display band. It never gates acceptance; any band still requires a human. */
+// Display band. It never gates acceptance; any band still requires a human.
 export function confidenceBand(confidence: number): 'LOW' | 'MEDIUM' | 'HIGH' {
   if (confidence < 0.5) return 'LOW';
   if (confidence < 0.8) return 'MEDIUM';

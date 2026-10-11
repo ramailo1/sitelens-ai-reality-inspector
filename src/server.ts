@@ -1,12 +1,4 @@
-/**
- * Local inspection server.
- *
- * Serves the Reality Inspector UI and a small JSON API over a project's
- * captures. It binds to loopback only: this is a local demonstration surface,
- * not a service, and it must not be reachable off the machine.
- *
- * The API never returns the API key, the base URL or provider internals.
- */
+// Local inspection server.
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createProvider, createReasoner, ProviderError } from './providers/factory.ts';
@@ -30,23 +22,10 @@ import { ELEMENT_KINDS, EXPECTATIONS } from './types/inspection.ts';
 
 const LOOPBACK = '127.0.0.1';
 
-/**
- * Ceiling on one consolidated inspection.
- *
- * Bounded because each photograph costs one real vision call, and an unbounded
- * list would be a way to spend a provider budget by accident. Twelve is well
- * above the realistic number of frames a site team shoots of one zone, and the
- * limit is reported rather than silently truncating a selection.
- */
+// Ceiling on one consolidated inspection.
 export const MAX_INSPECTION_IMAGES = 12;
 
-/**
- * Append a capture to a pending selection, or null when the ceiling is reached.
- *
- * Null is a distinct return rather than a truncated list, because a silently
- * shortened selection would inspect fewer photographs than the operator chose
- * without saying so — the exact class of failure this product exists to prevent.
- */
+// Append a capture to a pending selection, or null when the ceiling is reached.
 function addToSelection(current: readonly string[], captureId: string): string[] | null {
   const next = current.slice();
   if (next.includes(captureId)) return next;
@@ -64,12 +43,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   });
   res.end(payload);
 }
-/**
- * Read a request body, refusing anything past the cap.
- *
- * Streamed and counted rather than accumulated blindly, so an oversized upload
- * is rejected while it is still arriving.
- */
+// Read a request body, refusing anything past the cap.
 async function readBody(
   req: IncomingMessage,
   limitBytes = 64 * 1024,
@@ -84,13 +58,12 @@ async function readBody(
   }
   return Buffer.concat(chunks);
 }
-/**
- * Read a JSON request body. */
+// Read a JSON request body.
 async function readJsonBody(req: IncomingMessage, limitBytes?: number): Promise<string> {
   return (await readBody(req, limitBytes)).toString('utf8');
 }
 
-/** Thrown when a review or state route is called with no capture selected. */
+// Thrown when a review or state route is called with no capture selected.
 class NoActiveCapture extends Error {
   public constructor() {
     super('No capture is selected in the active project.');
@@ -98,25 +71,11 @@ class NoActiveCapture extends Error {
   }
 }
 
-/**
- * The one sentence that says why the workflow is closed.
- *
- * Exported so the client and the tests read the same words the guard throws,
- * rather than each holding their own copy that can drift.
- */
+// The one sentence that says why the workflow is closed.
 export const REVIEWER_REQUIRED_REASON =
   'Configure the inspection reviewer before adding reality or running an inspection.';
 
-/**
- * Thrown when a route that produces or attributes evidence is reached before a
- * reviewer has been named.
- *
- * The refusal is server-side on purpose. A banner in the browser is a claim
- * about this state, not the state itself; a client can be edited, replayed or
- * simply wrong. Evidence that exists without anyone to attribute it cannot be
- * retroactively attributed honestly, so the work is refused before it happens
- * rather than flagged afterwards.
- */
+// Thrown when a route that produces or attributes evidence is reached before a reviewer has been named.
 class ReviewerRequired extends Error {
   public constructor() {
     super(REVIEWER_REQUIRED_REASON);
@@ -124,14 +83,7 @@ class ReviewerRequired extends Error {
   }
 }
 
-/**
- * Whether the reviewer gate is closed for a project.
- *
- * ONE definition, read by both the route guard and the workspace payload, so the
- * state the browser renders and the state the server enforces cannot drift
- * apart. The structural parameter reads a single field and does not care which
- * module declares the project.
- */
+// Whether the reviewer gate is closed for a project.
 function reviewerGateState(
   project: { readonly reviewer: { readonly name: string } | null } | null,
 ): { readonly required: boolean; readonly reason: string | null } {
@@ -143,15 +95,7 @@ function reviewerGateState(
   return { required: true, reason: REVIEWER_REQUIRED_REASON };
 }
 
-/**
- * Capture as the UI sees it: identity, provenance and ownership, never raw bytes.
- *
- * `source` is structural, not cosmetic. It is the only thing that stops a
- * photograph from a local validation folder being presented as something this
- * application captured on this project's site, so the UI is required to render
- * `LOCAL_DATASET` as its own label rather than folding it into either existing
- * case.
- */
+// Capture as the UI sees it: identity, provenance and ownership, never raw bytes.
 function captureSummary(capture: ProjectCapture): Record<string, unknown> {
   return {
     id: capture.id,
@@ -174,33 +118,14 @@ export interface ServerOptions {
   readonly provider: AIProvider;
   readonly zoneId: string | null;
   readonly initialCaptureId: string | null;
-  /**
-   * Durable state. Omit for the in-memory surface, which then keeps reporting
-   * process memory. The API never claims durability it does not have.
-   */
+  // Durable state. Omit for the in-memory surface, which then keeps reporting process memory.
   readonly persistence?: WorkspacePersistence | null;
-  /** Stage-2 reasoning model. Omit and stage 2 is reported as switched off. */
+  // Stage-2 reasoning model. Omit and stage 2 is reported as switched off.
   readonly reasoner?: ReturnType<typeof createReasoner> | null;
-  /**
-   * Presentation translator for novel model prose. Omit (or null) and only
-   * the offline memory serves, with honest fallback. Production startup
-   * builds one from the process environment; tests pass their own or none.
-   */
+  // Presentation translator for novel model prose.
   readonly translator?: ModelTranslator | null;
 }
-/**
- * Resolve an explicit expected-state payload from the browser.
- *
- * An explicit item list from the browser is ALWAYS marked `source: 'OPERATOR'`,
- * so a preset can never be passed off as the project's own programme and an
- * operator edit can never be passed off as a preset. Named references are a
- * separate path (they go through the preset catalogue), so this function has
- * exactly one job.
- *
- * Every field is re-validated here by `cleanItems`, the same validator the
- * reference catalogue uses: the browser is an untrusted client even though it is
- * loopback-only, and two copies of this validation would eventually disagree.
- */
+// Resolve an explicit expected-state payload from the browser.
 export function resolveExpectedState(
   payload: unknown,
 ): { ok: true; state: ExpectedState } | { ok: false; reason: string } {
@@ -212,9 +137,7 @@ export function resolveExpectedState(
   const zone =
     typeof zoneRaw === 'string' && zoneRaw.trim().length > 0 ? zoneRaw.trim() : 'Unspecified zone';
 
-  // An operator may clear every expectation: "nothing is expected in this zone"
-  // is a real statement and yields zero comparison rows. A named reference may
-  // not be empty, which is exactly the rule cleanItems enforces below.
+  // An operator may clear every expectation: "nothing is expected in this zone" is a real statement and yields zero comparison rows.
   const rawItems = record['items'];
   if (Array.isArray(rawItems) && rawItems.length === 0) {
     return { ok: true, state: { zone, items: [], source: 'OPERATOR' } };
@@ -240,20 +163,9 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
   });
 
   // ORDER MATTERS, and getting it backwards destroys durable state.
-  //
-  // `restore()` must run BEFORE the demo project is seeded. Seeding calls
-  // create() -> persist(), which rewrites the workspace file from the in-memory
-  // store; doing that first overwrites whatever the previous run left behind
-  // with an empty store plus the demo shell. That was measured, not theorised:
-  // restoring a saved project reported zero restored projects for exactly this
-  // reason.
   const restored = store.restore();
 
-  // The repository has always opened on a populated demo project so the
-  // inspection flow is reachable without setup. These are the generated
-  // synthetic fixtures, labelled as fixtures throughout the UI. Seeded ONLY when
-  // nothing was restored, so a working copy that has real projects opens on the
-  // operator's own work rather than on the synthetic demo.
+  // The repository has always opened on a populated demo project so the inspection flow is reachable without setup.
   const seeded = store.list().length > 0
     ? store.ensureSelection()
     : store.seedDemoProject(
@@ -269,50 +181,23 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
     const first = store.capturesOf(store.activeProject()?.id ?? seeded.id)[0];
     if (first) store.selectCapture(first.id);
   }
-  /**
-   * Whether an inspection may be served from the local result cache.
-   *
-   * Off by default. A cached result is a real AI answer but it is not a fresh
-   * one, so serving it silently would be a false claim about what just
-   * happened. It is an explicit, visible opt-in for iterating on the UI.
-   */
+  // Whether an inspection may be served from the local result cache.
   let cacheEnabled = false;
-  /** Project-scoped view of the active session, or null when nothing is selected. */
+  // Project-scoped view of the active session, or null when nothing is selected.
   const activeSession = (): InspectionSession | null => store.activeSession();
 
-  /**
-   * The active session for routes that mutate review state.
-   *
-   * There is nothing to verify against when no capture is selected, and a
-   * request that names an id without an active capture would otherwise read from
-   * a session that does not belong to the current project.
-   */
+  // The active session for routes that mutate review state.
   const requireSession = (): InspectionSession => {
     const session = activeSession();
     if (session === null) throw new NoActiveCapture();
     return session;
   };
 
-  /**
-   * Refuse a request that would create or attribute evidence without a reviewer.
-   *
-   * Thrown BEFORE any mutation, so a rejected request leaves nothing behind: no
-   * capture stored, no bytes written, no provider call made. A route that has
-   * already written before throwing would leave the very evidence the gate
-   * exists to prevent, attributed to nobody.
-   *
-   * With no active project the gate is OPEN: a missing project is reported by
-   * that route's own NO_ACTIVE_PROJECT refusal, and inventing a reviewer error
-   * here would hide the real problem behind the wrong one.
-   */
+  // Refuse a request that would create or attribute evidence without a reviewer.
   const requireReviewer = (): void => {
     if (reviewerGateState(store.activeProject()).required) throw new ReviewerRequired();
   };
-  /**
-   * The one payload every mutating route answers with, so the client always
-   * receives the authoritative project, capture list and session view together
-   * and can never half-apply a mutation.
-   */
+  // The one payload every mutating route answers with, so the client always receives the authoritative project, capture.
   const workspace = (): Record<string, unknown> => {
     const project = store.activeProject();
     const captures = project === null ? [] : store.capturesOf(project.id);
@@ -326,19 +211,13 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       projects: store.list(),
       activeProjectId: project?.id ?? null,
       activeCaptureId: store.selectedCaptureId(),
-      // The ordered photographs of the OPEN inspection. The client renders this
-      // as one group rather than as N separate inspections.
+      // The ordered photographs of the OPEN inspection.
       activeCaptureIds: store.selectedCaptureIds(),
-      // The ceiling on one inspection, from the constant that enforces it. The
-      // client labels the masthead with this rather than repeating the number,
-      // so the header can never claim a different maximum than the server.
+      // The ceiling on one inspection, from the constant that enforces it.
       maxInspectionImages: MAX_INSPECTION_IMAGES,
-      // The gate the routes actually enforce, read from the same function the
-      // guard uses, so the banner and the refusal cannot disagree.
+      // The gate the routes actually enforce, read from the same function the guard uses, so the banner and the refusal cannot disagree.
       reviewerGate: reviewerGateState(project),
       // Photographs the last selection REFUSED as byte-identical duplicates.
-      // Reported rather than dropped silently: "2 of 3 photographs inspected"
-      // must never be shown as "3 photographs inspected".
       duplicateCaptureIds: store.refusedDuplicateIds(),
       captures: captures.map((c) => captureSummary(c)),
       reference: reference === null ? null : {
@@ -355,8 +234,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       })),
       // The storage truth of THIS instance, never a constant.
       storage: store.describeStorage(),
-      // The pipeline's two model stages, always both, so a judge can see the
-      // split without opening the provenance panel.
+      // The pipeline's two model stages, always both, so a judge can see the split without opening the provenance panel.
       pipeline: {
         vision: { provider: options.provider.name, model: options.provider.model },
         reasoning: {
@@ -365,9 +243,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
           configured: reasoner.configured,
         },
       },
-      // The local dataset, discovered at call time. Absent is reported as
-      // absent; the browser is never handed a fabricated empty list with no
-      // explanation.
+      // The local dataset, discovered at call time.
       dataset: {
         present: dataset.present,
         directory: dataset.directory,
@@ -385,9 +261,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         return;
       }
       if (error instanceof ReviewerRequired) {
-        // 409, not 400: the request itself is well formed. The project is simply
-        // not in a state where this work is allowed yet, which is a conflict
-        // between the request and the current state rather than a bad request.
+        // 409, not 400: the request itself is well formed.
         sendJson(res, 409, { error: 'REVIEWER_REQUIRED', message: error.message });
         return;
       }
@@ -397,13 +271,13 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = new URL(req.url ?? '/', `http://${LOOPBACK}`).pathname;
 
-    // --- workspace -----------------------------------------------------------
+    // workspace
     if (req.method === 'GET' && path === '/api/workspace') {
       sendJson(res, 200, workspace());
       return;
     }
 
-    // --- projects ------------------------------------------------------------
+    // projects
     if (req.method === 'GET' && path === '/api/projects') {
       sendJson(res, 200, {
         projects: store.list(),
@@ -468,9 +342,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 404, { error: 'UNKNOWN_PROJECT', message: 'That project no longer exists.' });
         return;
       }
-      // The two fields are edited through separate actions, so only the one the
-      // client actually sent is applied. Dispatching on which key is present
-      // avoids reporting a name validation failure as a location failure.
+      // The two fields are edited through separate actions, so only the one the client actually sent is applied.
       const result =
         payload.name !== undefined
           ? store.rename(projectId, payload.name)
@@ -519,7 +391,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       return;
     }
 
-    // --- captures ------------------------------------------------------------
+    // captures
     if (req.method === 'GET' && path === '/api/captures') {
       const project = store.activeProject();
       sendJson(res, 200, {
@@ -528,15 +400,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       return;
     }
 
-    /**
-     * Select a capture WITHOUT inspecting it.
-     *
-     * Selection is a view change, not a model call. Routing it through /api/run
-     * (as the client used to) spent a real vision inference on every click,
-     * burned provider quota, and reported a "result" for a capture nobody asked
-     * to inspect. Its own session already exists, so selecting restores whatever
-     * that capture was last inspected to - including its human verifications.
-     */
+    // Select a capture WITHOUT inspecting it.
     if (req.method === 'POST' && path === '/api/captures/select') {
       const body = await readJsonBody(req);
       let payload: { captureId?: unknown; captureIds?: unknown } = {};
@@ -546,9 +410,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: 'invalid JSON body' });
         return;
       }
-      // Accepts one id (the historical shape) or an ordered list for a
-      // consolidated inspection. Both go through the same ownership check, so a
-      // capture from another project is refused rather than inspected.
+      // Accepts one id (the historical shape) or an ordered list for a consolidated inspection.
       const requested: string[] = Array.isArray(payload.captureIds)
         ? payload.captureIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
         : typeof payload.captureId === 'string' && payload.captureId.length > 0
@@ -593,14 +455,14 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       return;
     }
 
-    // --- session view --------------------------------------------------------
+    // session view
     if (req.method === 'GET' && path === '/api/session') {
       const session = activeSession();
       sendJson(res, 200, session === null ? null : session.view());
       return;
     }
 
-    // --- comparison references ----------------------------------------------
+    // comparison references
     if (req.method === 'GET' && path === '/api/expected') {
       const project = store.activeProject();
       const reference = project === null ? null : store.referenceFor(project.id);
@@ -661,8 +523,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: result.reason, message: result.message });
         return;
       }
-      // A project using this preset now compares against a definition that moved,
-      // so its own copy and results are refreshed rather than left misleading.
+      // A project using this preset now compares against a definition that moved, so its own copy and results are refreshed.
       const project = store.activeProject();
       if (project !== null && store.referenceFor(project.id).presetId === presetId) {
         store.setReferenceState(project.id, presetToState(store.presets.get(presetId) as Preset));
@@ -680,8 +541,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         });
         return;
       }
-      // A project still pointing at the deleted reference falls back to the
-      // default, so the comparison always has a valid basis.
+      // A project still pointing at the deleted reference falls back to the default, so the comparison always has a valid basis.
       const project = store.activeProject();
       if (project !== null && store.referenceFor(project.id).presetId === presetId) {
         store.usePreset(project.id, store.presets.defaultId());
@@ -725,20 +585,15 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       return;
     }
 
-    // --- local dataset --------------------------------------------------------
-    // Discovery is a read-only view of the local validation folder. It never
-    // reads image bytes, so listing 38 files cannot cost 107 MB of I/O.
+    // local dataset Discovery is a read-only view of the local validation folder.
     if (req.method === 'GET' && path === '/api/dataset') {
       sendJson(res, 200, readDatasetIndex());
       return;
     }
 
     // Import turns ONE dataset image into a real capture of the active project.
-    // The id is validated against the discovered index, so this cannot be used
-    // to read an arbitrary path off the machine.
     if (req.method === 'POST' && path === '/api/dataset/import') {
-      // Before the dataset is read: importing stores a capture, which is the
-      // same unattributable evidence an upload would be.
+      // Before the dataset is read: importing stores a capture, which is the same unattributable evidence an upload would be.
       requireReviewer();
       if (store.activeProject() === null) {
         sendJson(res, 400, { error: 'create a project before importing a dataset image' });
@@ -763,8 +618,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 404, { error: imported.reason, message: imported.message });
         return;
       }
-      // Relative to the dataset directory so the state survives the repository
-      // being moved or opened from a different root.
+      // Relative to the dataset directory so the state survives the repository being moved or opened from a different root.
       const stored = store.addCapture({
         ...imported.capture,
         source: 'LOCAL_DATASET',
@@ -773,8 +627,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         exifOrientation: imported.capture.exifOrientation,
         geometryNormalized: imported.capture.geometryNormalized,
       });
-      // ADD to the pending selection, for the same reason as an upload: importing
-      // three dataset photographs must leave three selected for one inspection.
+      // ADD to the pending selection, for the same reason as an upload: importing three dataset photographs must leave three.
       const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       if (withNew === null) {
         sendJson(res, 400, {
@@ -790,7 +643,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       return;
     }
 
-    // --- capture bytes -------------------------------------------------------
+    // capture bytes
     if (req.method === 'GET' && path.startsWith('/api/capture-image/')) {
       const id = decodeURIComponent(path.slice('/api/capture-image/'.length));
       const owned = store.activeCapture(id);
@@ -810,22 +663,16 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
       return;
     }
     if (req.method === 'POST' && path === '/api/run') {
-      // First, before the body is read and before any selection changes. A run
-      // produces findings attributed to a reviewer and spends provider budget;
-      // producing them with nobody to attribute them is the failure this gate
-      // exists to prevent, and refusing afterwards would leave them already made.
+      // First, before the body is read and before any selection changes.
       requireReviewer();
       const raw = await readJsonBody(req);
       let ranExplicitSelection = false;
       if (raw.trim().length > 0) {
         try {
           const parsed = JSON.parse(raw) as { captureId?: unknown; captureIds?: unknown; cache?: unknown };
-          // Caching is opt-in per request AND gated by the server switch, so a
-          // cached answer can never be served without the UI asking for it.
+          // Caching is opt-in per request AND gated by the server switch, so a cached answer can never be served without the UI asking for it.
           if (typeof parsed.cache === 'boolean') cacheEnabled = parsed.cache;
-          // An explicit group re-selects it; otherwise the run targets whatever
-          // is already selected. Ownership is validated here either way, so a
-          // capture id from another project is refused rather than inspected.
+          // An explicit group re-selects it.
           const requested: string[] = Array.isArray(parsed.captureIds)
             ? parsed.captureIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
             : typeof parsed.captureId === 'string' ? [parsed.captureId] : [];
@@ -854,11 +701,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
           return;
         }
       }
-      // A run with no explicit ids targets the current selection. That
-      // selection must be intact: silently dropping a deleted or foreign
-      // photograph and inspecting the remainder would substitute a different
-      // inspection for the one the operator chose. Refuse instead, before any
-      // provider call, with the same state error an explicit stale id receives.
+      // A run with no explicit ids targets the current selection.
       if (!ranExplicitSelection) {
         const wanted = store.selectedCaptureIds();
         const valid = store.selectedCaptures();
@@ -873,17 +716,9 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         return;
       }
       const view = await session.run({ useCache: cacheEnabled });
-      // Written only after a run that produced a usable result, so a failed or
-      // empty inspection never becomes the record a restart restores. Keyed by
-      // the group key, so a consolidated inspection persists under the identity
-      // it will be restored with.
+      // Written only after a run that produced a usable result, so a failed or empty inspection never becomes the record a.
       const persisted = store.persistInspection(groupKey(store.selectedCaptures()));
-      // The model already ran and its result is real, so refusing here would
-      // throw away evidence the operator paid for. What must not happen is
-      // answering 200 as though it were durable: a run whose write was attempted
-      // and lost has to say so, exactly as the review routes do. A run that
-      // produced nothing usable has nothing to write, which is the expected
-      // "false" and is reported by `outcome` rather than as a storage fault.
+      // The model already ran and its result is real, so refusing here would throw away evidence the operator paid for.
       const writeAttempted =
         view.outcome !== 'FAILED' && view.outcome !== 'PENDING';
       sendJson(res, 200, persisted || !writeAttempted ? view : {
@@ -910,9 +745,7 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
     }
     // Capture upload
     if (req.method === 'POST' && path === '/api/upload') {
-      // Before the body is read: a refused upload must not cost a transfer or
-      // write a byte. Stored reality is unattributable evidence until a reviewer
-      // is named.
+      // Before the body is read: a refused upload must not cost a transfer or write a byte.
       requireReviewer();
       if (store.activeProject() === null) {
         sendJson(res, 400, { error: 'create a project before uploading a capture' });
@@ -937,19 +770,13 @@ export function createInspectionServer(options: ServerOptions): InspectionServer
         sendJson(res, 400, { error: result.reason, message: result.message });
         return;
       }
-// The upload is owned by the active project and selected immediately, so
-        // the operator can inspect it without a second step. Its session is fresh,
-        // which is what stops one image's observations appearing against another.
-      // Orientation is normalized before storage, so the model, the display and
-      // the evidence overlay all work in one coordinate system.
+// The upload is owned by the active project and selected immediately, so the operator can inspect it without a second step.
       const stored = store.addCapture({
         ...result.capture,
         bytes: normalizeOrientation(result.capture.bytes),
         source: 'UPLOAD',
       });
-      // ADD to the pending selection rather than replacing it. Uploading three
-      // photographs in a row must leave three selected for ONE inspection, which
-      // is the whole point; replacing here is what made multi-select impossible.
+      // ADD to the pending selection rather than replacing it.
 const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       if (withNew === null) {
         sendJson(res, 400, {
@@ -965,10 +792,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       return;
     }
     if (req.method === 'POST' && path === '/api/review') {
-      // The project must already name a reviewer. A reviewer string supplied in
-      // this request body does NOT open the gate: it would let any caller
-      // attribute a decision to a name the project never recorded, which is the
-      // attribution this endpoint exists to protect.
+      // The project must already name a reviewer.
       requireReviewer();
       const body = await readJsonBody(req);
       let payload: {
@@ -1000,10 +824,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
         });
         return;
       }
-      // Resolve the session BEFORE deciding, so an id that is not part of this
-      // inspection is refused rather than answered 200. A no-op review and a
-      // saved review return the same payload, so a 200 here would tell the
-      // operator their decision was recorded when nothing was.
+      // Resolve the session BEFORE deciding, so an id that is not part of this inspection is refused rather than answered 200.
       const reviewSession = requireSession();
       if (!reviewSession.hasObservation(observationId)) {
         sendJson(res, 404, {
@@ -1021,10 +842,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
         reviewer: reviewerName,
         note: typeof note === 'string' ? note : null,
       });
-      // A human decision is the most valuable thing in the product, so it is
-      // written through immediately rather than waiting for the next run.
-      // Keyed by the group, so a consolidated inspection's reviews are stored against
-      // the same identity the inspection restores under.
+      // A human decision is the most valuable thing in the product, so it is written through immediately rather than waiting.
       const persisted = store.persistInspection(groupKey(store.selectedCaptures()));
       if (!persisted) {
         reviewSession.rollbackReviewState(snapshot);
@@ -1039,8 +857,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       return;
     }
     if (req.method === 'POST' && path === '/api/review-finding') {
-      // Same trust boundary as /api/review: the named reviewer comes from the
-      // project, never from this request body.
+      // Same trust boundary as /api/review: the named reviewer comes from the project, never from this request body.
       requireReviewer();
       const body = await readJsonBody(req);
       let payload: {
@@ -1072,8 +889,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
         });
         return;
       }
-      // Same trust boundary as /api/review: an id this inspection does not hold
-      // is refused instead of returning the unchanged view as if it had settled.
+      // Same trust boundary as /api/review: an id this inspection does not hold is refused instead of returning the unchanged.
       const settleSession = requireSession();
       if (!settleSession.hasInspectionFinding(findingId)) {
         sendJson(res, 404, {
@@ -1105,9 +921,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
       return;
     }
     if (req.method === 'POST' && path === '/api/finding-state') {
-      // Changing a finding's state attributes a human triage decision to the
-      // project, so it is gated like recording one. OPEN -> CLOSED is a claim
-      // that a human dealt with the finding, which needs a name.
+      // Changing a finding's state attributes a human triage decision to the project, so it is gated like recording one.
       requireReviewer();
       const body = await readJsonBody(req);
       let payload: { findingId?: unknown; state?: unknown };
@@ -1126,10 +940,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
         sendJson(res, 400, { error: 'state must be OPEN, ACKNOWLEDGED or CLOSED' });
         return;
       }
-      // A state change is a recorded human triage decision, so an id the ledger
-      // does not hold must be refused. setFindingState() cannot report failure,
-      // and returning the unchanged view under 200 would claim the finding had
-      // been acknowledged when nothing moved.
+      // A state change is a recorded human triage decision, so an id the ledger does not hold must be refused.
       const stateSession = requireSession();
       if (!stateSession.hasLedgerFinding(findingId)) {
         sendJson(res, 404, {
@@ -1183,13 +994,7 @@ const withNew = addToSelection(store.selectedCaptureIds(), stored.id);
   }
   return { server, store };
 }
-/**
- * Entry point used by `npm run ui`.
- *
- * Persistence is ON by default here and OFF in tests, which construct a server
- * without one. That is the only reason the two behave differently, and the API
- * reports whichever is actually in force rather than a fixed string.
- */
+// Entry point used by `npm run ui`.
 export async function startInspectionServer(port = 4317): Promise<void> {
   let provider: AIProvider;
   try {
@@ -1210,8 +1015,7 @@ export async function startInspectionServer(port = 4317): Promise<void> {
       : new WorkspacePersistence();
   const dataset = readDatasetIndex();
 
-  // Live presentation translation reuses the reasoning endpoint and
-  // credential (or stays honestly unavailable when they are not configured).
+  // Live presentation translation reuses the reasoning endpoint and credential (or stays honestly unavailable when they.
   const translator = createTranslatorFromEnv(process.env);
   if (translator === null) {
     console.log('  translation: offline memory only (no reasoning credential configured)');

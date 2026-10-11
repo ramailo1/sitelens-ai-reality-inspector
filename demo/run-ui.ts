@@ -1,11 +1,4 @@
-/**
- * Entry point for the local Reality Inspector UI.
- *
- *   npm run ui
- *
- * Requires the usual environment configuration; see .env.example. The server
- * binds to loopback only.
- */
+// Entry point for the local Reality Inspector UI.
 
 import { startInspectionServer } from '../src/server.ts';
 

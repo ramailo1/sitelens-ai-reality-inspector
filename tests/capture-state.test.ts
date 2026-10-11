@@ -1,29 +1,4 @@
-/**
- * Stale capture selection: "That capture no longer exists."
- *
- * The defect: deleting a selected capture reconciled the single-image primary
- * (`activeCaptureId`) but never the multi-image group (`activeCaptureIds`), so
- * the masthead kept naming a deleted photograph. The next inspection then
- * failed inside `selectCaptureGroup` with UNKNOWN_CAPTURE, and the client
- * prefixed every such state error with "AI provider request failed:" - a
- * storage-state problem dressed up as a model outage, with no provider call
- * made at all.
- *
- * These tests prove, over the real HTTP surface with a counting provider:
- *
- *   - a stale or foreign capture id is refused with its accurate state error
- *     BEFORE any provider invocation (calls stay 0);
- *   - deleting a capture reconciles the workspace selection that every later
- *     route and render reads;
- *   - an implicit run never silently inspects a subset of the chosen group;
- *   - valid single- and multi-image inspections still complete;
- *   - persistence restoration drops group members that no longer resolve;
- *   - the client names capture-state failures for what they are and refreshes
- *     the workspace instead of blaming the provider.
- *
- * No test here performs a paid call: the counting provider answers from a
- * stubbed fetch, and the demo provider answers deterministically offline.
- */
+// Stale capture selection: "That capture no longer exists." The defect: deleting a selected capture reconciled the.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,7 +20,7 @@ const PNG = Buffer.from(
   'base64',
 );
 
-/** Minimal vision envelope: valid, empty, and never mistaken for a failure. */
+// Minimal vision envelope: valid, empty, and never mistaken for a failure.
 const EMPTY_VISION_BODY = {
   choices: [
     {
@@ -160,7 +135,7 @@ async function withDemoServer(fn: (call: Call) => Promise<void>): Promise<void> 
   }
 }
 
-/** The gate guards every run, so these tests name a reviewer as setup. */
+// The gate guards every run, so these tests name a reviewer as setup.
 async function nameReviewer(call: Call): Promise<void> {
   const res = await call.json('POST', '/api/reviewer', { name: 'State Tester', role: 'QA' });
   assert.equal(res.status, 200);
@@ -172,9 +147,7 @@ async function uploadPng(call: Call, name: string): Promise<string> {
   return (JSON.parse(res.body.toString('utf8')) as { capture: { id: string } }).capture.id;
 }
 
-/* ------------------------------------------------------------------ *
- * Explicit stale ids are refused before any provider invocation.
- * ------------------------------------------------------------------ */
+// Explicit stale ids are refused before any provider invocation.
 
 test('a run naming a capture from another project is refused as NOT_OWNED with no provider call', async () => {
   await withCountingServer(async (call, visionCalls) => {
@@ -238,8 +211,7 @@ test('a multi-image run with one foreign capture is refused without provider cal
     await nameReviewer(call);
     const captureB = await uploadPng(call, 'siteB.png');
 
-    // One owned photograph plus one foreign one: the whole run is refused,
-    // not silently narrowed to the owned half.
+    // One owned photograph plus one foreign one: the whole run is refused, not silently narrowed to the owned half.
     const run = await call.json('POST', '/api/run', { captureIds: [captureB, captureA] });
     assert.equal(run.status, 403);
     assert.equal(run.body.error, 'NOT_OWNED');
@@ -253,9 +225,7 @@ test('a multi-image run with one foreign capture is refused without provider cal
   });
 });
 
-/* ------------------------------------------------------------------ *
- * Deletion reconciles the selection the workspace reports.
- * ------------------------------------------------------------------ */
+// Deletion reconciles the selection the workspace reports.
 
 test('deleting the selected capture reconciles the workspace selection', async () => {
   await withCountingServer(async (call, visionCalls) => {
@@ -274,8 +244,7 @@ test('deleting the selected capture reconciles the workspace selection', async (
     assert.equal(removed.body.activeCaptureId, null);
     assert.deepEqual(removed.body.activeCaptureIds, []);
 
-    // With nothing selected, an implicit run states that accurately instead
-    // of failing as a provider error.
+    // With nothing selected, an implicit run states that accurately instead of failing as a provider error.
     const run = await call.json('POST', '/api/run', {});
     assert.equal(run.status, 400);
     assert.equal(run.body.error, 'no capture selected');
@@ -299,9 +268,7 @@ test('deleting one member of a group keeps the survivors selected in order', () 
   assert.deepEqual(store.selectedCaptures().map((c) => c.id), [second.id]);
   assert.equal(store.selectedCaptureId(), second.id);
 
-  // Deleting the last surviving member falls back exactly like a deleted
-  // single selection: the last remaining capture of the project opens rather
-  // than an empty group beside existing photographs.
+  // Deleting the last surviving member falls back exactly like a deleted single selection: the last remaining capture of.
   const removed2 = store.deleteCapture(second.id);
   assert.equal(removed2.ok, true);
   assert.deepEqual(store.selectedCaptureIds(), ['cap_finished_facade']);
@@ -315,9 +282,7 @@ test('an implicit run over a desynchronised selection is refused, never silently
     await nameReviewer(call);
     await uploadPng(call, 'site.png');
 
-    // White-box desync: the group names a photograph that no longer exists,
-    // as the pre-fix delete path left behind. The run must refuse with the
-    // state error rather than quietly inspecting whoever survived.
+    // White-box desync: the group names a photograph that no longer exists, as the pre-fix delete path left behind.
     (handle.store as unknown as { activeCaptureIds: string[] }).activeCaptureIds = ['cap_ghost'];
     const run = await call.json('POST', '/api/run', {});
     assert.equal(run.status, 404);
@@ -327,9 +292,7 @@ test('an implicit run over a desynchronised selection is refused, never silently
   });
 });
 
-/* ------------------------------------------------------------------ *
- * Switching projects never carries a stale selection with it.
- * ------------------------------------------------------------------ */
+// Switching projects never carries a stale selection with it.
 
 test('switching projects selects the new project\u2019s captures, never the previous project\u2019s', async () => {
   await withCountingServer(async (call, visionCalls) => {
@@ -339,8 +302,7 @@ test('switching projects selects the new project\u2019s captures, never the prev
     const captureA = await uploadPng(call, 'siteA.png');
 
     const b = await call.json('POST', '/api/projects', { name: 'Project B' });
-    // A new project starts empty; switching back and forth must track each
-    // project's own captures.
+    // A new project starts empty; switching back and forth must track each project's own captures.
     assert.deepEqual(b.body.activeCaptureIds, []);
     const back = await call.json('POST', '/api/projects/switch', { projectId: a.body.project.id });
     assert.deepEqual(back.body.activeCaptureIds, [captureA]);
@@ -352,9 +314,7 @@ test('switching projects selects the new project\u2019s captures, never the prev
   });
 });
 
-/* ------------------------------------------------------------------ *
- * Persistence restoration drops group members that no longer resolve.
- * ------------------------------------------------------------------ */
+// Persistence restoration drops group members that no longer resolve.
 
 test('restoration reconciles a group member that no longer resolves', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sitelens-capture-state-'));
@@ -380,8 +340,7 @@ test('restoration reconciles a group member that no longer resolves', async () =
     const selected = store.selectCaptureGroup([capture.id]);
     assert.equal(selected.ok, true);
 
-    // Tamper the durable record the way a stale client would: the group names
-    // a photograph whose bytes are gone.
+    // Tamper the durable record the way a stale client would: the group names a photograph whose bytes are gone.
     const workspaceFile = join(dir, 'workspace.json');
     const record = JSON.parse(readFileSync(workspaceFile, 'utf8')) as {
       activeCaptureIds: string[];
@@ -403,9 +362,7 @@ test('restoration reconciles a group member that no longer resolves', async () =
   }
 });
 
-/* ------------------------------------------------------------------ *
- * Valid inspections still complete, single and multi-image.
- * ------------------------------------------------------------------ */
+// Valid inspections still complete, single and multi-image.
 
 test('valid single-image and multi-image inspections still complete', async () => {
   await withDemoServer(async (call) => {
@@ -429,17 +386,14 @@ test('valid single-image and multi-image inspections still complete', async () =
   });
 });
 
-/* ------------------------------------------------------------------ *
- * The client names state errors for what they are and refreshes.
- * ------------------------------------------------------------------ */
+// The client names state errors for what they are and refreshes.
 
 test('the run failure path distinguishes capture-state errors from provider errors', () => {
   const start = APP_JS.indexOf('async function runInspection()');
   assert.ok(start > -1, 'runInspection must exist');
   const end = APP_JS.indexOf('\n}', APP_JS.indexOf("notify(message, 'bad')", start));
   const body = APP_JS.slice(start, end);
-  // State errors carry their server message verbatim and refresh the
-  // workspace, which bears the reconciled selection.
+  // State errors carry their server message verbatim and refresh the workspace, which bears the reconciled selection.
   assert.match(body, /error\.code === 'UNKNOWN_CAPTURE'/);
   assert.match(body, /error\.code === 'NOT_OWNED'/);
   assert.match(body, /api\('\/api\/workspace'\)/);
@@ -449,9 +403,7 @@ test('the run failure path distinguishes capture-state errors from provider erro
 });
 
 test('the header and translation work survive the capture-state fix', () => {
-  // The recent header/localization changes must remain intact: no visible
-  // disclaimer note, tooltip help, translation memory keys, and the
-  // model-translation map on a fresh inspection view.
+  // The recent header/localization changes must remain intact: no visible disclaimer note, tooltip help, translation.
   assert.doesNotMatch(INDEX_HTML, /id="lang-note"/);
   assert.match(INDEX_HTML, /data-i18n-title="lang\.hint"/);
 });

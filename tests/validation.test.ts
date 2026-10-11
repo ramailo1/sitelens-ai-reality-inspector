@@ -1,4 +1,4 @@
-/** Schema validation tests: untrusted model output must not become truth. */
+// Schema validation tests: untrusted model output must not become truth.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

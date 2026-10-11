@@ -1,13 +1,4 @@
-/**
- * Runs the full flow: capture -> inspector -> provider -> validated
- * observations -> human verification.
- *
- *   AI_PROVIDER=demo   npm run demo   # deterministic, offline
- *   AI_PROVIDER=nebius npm run demo   # real Nebius + NVIDIA call
- *
- * The output states which provider ran, so a demo run is never mistaken for a
- * real one.
- */
+// Runs the full flow: capture -> inspector -> provider -> validated observations -> human verification.
 
 import { readFileSync } from 'node:fs';
 import { createProvider, ProviderError } from '../src/providers/factory.ts';
@@ -19,26 +10,13 @@ const CAPTURE_ID = 'cap_demo_0001';
 const PROJECT_ID = 'proj_demo_site_a';
 const ZONE_ID = 'zone_level_02';
 
-/**
- * A tiny synthetic 1x1 PNG. This is the DEFAULT placeholder stand-in for a real
- * capture: the demo proves the pipeline, and it is deliberately NOT customer
- * imagery.
- *
- * A 1x1 pixel carries no scene content, so a real vision model correctly
- * reports nothing observable about it and returns an empty observations array.
- * That is a valid, honest result — it is NOT a pipeline failure.
- *
- * To exercise a real image, set DEMO_IMAGE to a local image file:
- *   DEMO_IMAGE=./path/to/site-photo.jpg AI_PROVIDER=nebius npm run demo
- *
- * Only sanitized, non-customer imagery should ever be used.
- */
+// A tiny synthetic 1x1 PNG.
 const SYNTHETIC_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 );
 
-/** Media type from a file extension, for DEMO_IMAGE. */
+// Media type from a file extension, for DEMO_IMAGE.
 function mediaTypeFor(path: string): string {
   const lower = path.toLowerCase();
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
@@ -46,11 +24,7 @@ function mediaTypeFor(path: string): string {
   return 'image/png';
 }
 
-/**
- * Resolve the capture to inspect: DEMO_IMAGE when set, otherwise the 1x1
- * placeholder. Read lazily so the demo never touches the filesystem unless the
- * developer opts in.
- */
+// Resolve the capture to inspect: DEMO_IMAGE when set, otherwise the 1x1 placeholder.
 function loadCapture(): { bytes: Buffer; mediaType: string; label: string } {
   const override = process.env['DEMO_IMAGE'];
   if (!override || override.trim().length === 0) {
@@ -181,11 +155,7 @@ async function main(): Promise<number> {
   heading('Provenance');
   console.log(`    provider         : ${result.provider}`);
   console.log(`    model            : ${result.model}`);
-  // Scope matters here. This script runs the VISION stage only, so the honest
-  // statement is about that stage and that model. Whether the NVIDIA requirement
-  // is met for the product is decided by the reasoning stage in
-  // `npm run ui`, and a model-level fact must never be printed as a verdict
-  // about the submission.
+  // Scope matters here. This script runs the VISION stage only, so the honest statement is about that stage and that model.
   const visionStage = classifyEligibility({ provider: result.provider, model: result.model });
   console.log(`    nvidia model     : ${isNvidiaModelId(result.model) ? 'yes' : 'no'}`);
   console.log(`    vision stage     : ${visionStage} (stage-level, not a submission verdict)`);

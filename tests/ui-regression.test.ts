@@ -1,27 +1,11 @@
-/**
- * Regression guards for a bug found by looking at the rendered page.
- *
- * The UI showed a broken evidence image and an untouched caption while the rail
- * painted real numbers, then blamed "Could not reach the inspector". The cause
- * was `detailRow()` returning null for an honest empty value and the caller
- * passing that null to `appendChild`, which throws. The throw aborted every
- * LATER render step, so `renderStage()` never ran and the image never got a src
- * while earlier steps stayed painted.
- */
+// Regression guards for a bug found by looking at the rendered page.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { INDEX_HTML, APP_JS, APP_CSS } from '../src/ui-assets.ts';
 
-/* ------------------------------------------------------------------ *
- * Multi-image UI.
- *
- * The original defect was a multi-file picker that silently read files[0], so
- * an operator who chose three photographs got one inspection and no indication
- * that two had been dropped. These assert the picker is multi, the whole list is
- * uploaded, and the result states how many photographs it rests on.
- * ------------------------------------------------------------------ */
+// Multi-image UI.
 
 test('the picker accepts several photographs at once', () => {
   assert.match(INDEX_HTML, /<input type="file" id="file"[^>]*\bmultiple\b/,
@@ -64,8 +48,7 @@ test('a partial run is announced as partial, before any pleasant summary', () =>
   // The notification order matters: a partial inspection must not read as a pass.
   const start = APP_JS.indexOf('const failedImages =');
   assert.ok(start > -1, 'the partial-failure branch must exist');
-  // Slice to the end of the completion branch, so the ordering assertion can see
-  // both the partial notice and the summary it must precede.
+  // Slice to the end of the completion branch, so the ordering assertion can see both the partial notice and the summary.
   const end = APP_JS.indexOf('selectStep(', start);
   const branch = APP_JS.slice(start, end);
   assert.match(branch, /run\.partialLamp/, 'a partial run must light the partial lamp');
@@ -83,16 +66,14 @@ test('every observation names the photograph it came from', () => {
 });
 
 test('detail rows are never appended unguarded', () => {
-  // appendChild(null) throws a TypeError, which previously aborted the render
-  // chain before the image was ever given a src.
+  // appendChild(null) throws a TypeError, which previously aborted the render chain before the image was ever given a src.
   assert.doesNotMatch(APP_JS, /appendChild\(detailRow\(/);
   assert.match(APP_JS, /function appendDetail\(/);
 });
 
 test('every render step is isolated so one fault cannot blank the page', () => {
   assert.match(APP_JS, /function safeRender\(/);
-  // renderAll must route every step through the guard, including renderStage,
-  // which is the one that sets the evidence image src.
+  // renderAll must route every step through the guard, including renderStage, which is the one that sets the evidence image src.
   const start = APP_JS.indexOf('function renderAll()');
   assert.ok(start > -1, 'renderAll must exist');
   const body = APP_JS.slice(start, APP_JS.indexOf('\n}', start));
@@ -102,8 +83,7 @@ test('every render step is isolated so one fault cannot blank the page', () => {
 });
 
 test('a boot failure is not reported as a network failure', () => {
-  // Both used to be lumped together, which pointed debugging at the network when
-  // the fault was actually in the render code.
+  // Both used to be lumped together, which pointed debugging at the network when the fault was actually in the render code.
   assert.match(APP_JS, /function reportBootFailure\(/);
   assert.doesNotMatch(APP_JS, /setLamp\('problem', 'Could not reach the inspector'\)/);
 });
@@ -132,10 +112,7 @@ test('the client still parses after the fix', () => {
 });
 
 test('the evidence image is driven by a real capture id, never a placeholder', () => {
-  // A multi-photo inspection rests on several captures at once, so the frame on
-  // screen is whichever of the open group is selected. The guard is that the id
-  // is always a REAL member of that group, and never a literal standing in for
-  // one.
+  // A multi-photo inspection rests on several captures at once, so the frame on screen is whichever of the open group is selected.
   assert.match(APP_JS, /\/api\/capture-image\/' \+ encodeURIComponent\(shown\)/);
   assert.match(APP_JS, /state\.captureIds\.includes\(state\.evidenceCaptureId\)/);
   assert.match(APP_JS, /evidenceCaptureId !== null/);
@@ -152,10 +129,7 @@ test('the stage keeps a minimum height so a failed image cannot collapse the lay
 });
 
 test('evidence boxes are scaled against the PAINTED photograph, not the element box', () => {
-  // The stage letterboxes the capture with object-fit: contain, so
-  // clientWidth/naturalWidth is the width of the ELEMENT, not of the photo. On a
-  // 320x240 fixture in a 1332x620 stage that made the horizontal scale 1.6x too
-  // large and every box landed partly outside the image it pointed at.
+  // The stage letterboxes the capture with object-fit: contain, so clientWidth/naturalWidth is the width of the ELEMENT.
   assert.match(APP_CSS, /\.sheet-lg img\s*\{[^}]*object-fit:\s*contain/);
   assert.match(APP_JS, /function paintedArea\(/);
   assert.match(APP_JS, /Math\.min\(elementWidth \/ naturalWidth, elementHeight \/ naturalHeight\)/);
@@ -167,17 +141,13 @@ test('evidence boxes are scaled against the PAINTED photograph, not the element 
   );
 });
 test('orientation-3/4 captures are display-flipped and their boxes flip with them', () => {
-  // The stored bytes are orientation-normalized (tag rewritten to 1, pixels
-  // untouched). Measured against the real dataset: the orientation-6 images
-  // carry pixels that are ALREADY upright, so no display rotation applies to
-  // them, while 004 and 027 (orientation 3) really are stored upside down and
-  // need a display-only 180-degree correction.
+  // The stored bytes are orientation-normalized (tag rewritten to 1, pixels untouched).
   const context: {
     result_displayNeedsFlip: boolean[] | null;
     result_flipBox180: { left: number; top: number; width: number; height: number } | null;
   } = { result_displayNeedsFlip: null, result_flipBox180: null };
   const start = APP_JS.indexOf('function displayNeedsFlip(');
-  const end = APP_JS.indexOf('/**', start);
+  const end = APP_JS.indexOf('\n}', start) + 2;
   assert.ok(start > -1, 'displayNeedsFlip must exist');
   const flipStart = APP_JS.indexOf('function flipBox180(');
   const flipEnd = APP_JS.indexOf('\n}', flipStart) + 2;
@@ -190,26 +160,16 @@ test('orientation-3/4 captures are display-flipped and their boxes flip with the
   assert.ok(Array.isArray(context.result_displayNeedsFlip), 'displayNeedsFlip results must return');
   assert.ok(context.result_flipBox180 !== null, 'flipBox180 must return a box');
   assert.deepEqual([...context.result_displayNeedsFlip], [false, true, true, false, false]);
-  // Point reflection: a box at top-left of an 800x600 frame lands at the
-  // mirrored position with unchanged size, so it stays glued to the same
-  // physical region of the scene the viewer now sees.
+  // Point reflection: a box at top-left of an 800x600 frame lands at the mirrored position with unchanged size, so it.
   assert.deepEqual({ ...context.result_flipBox180 }, { left: 500, top: 500, width: 200, height: 50 });
 
-  // The display path must actually wire the flip in: the stage image gets the
-  // class, and the overlay maps boxes through the same flip when it is set.
+  // The display path must actually wire the flip in: the stage image gets the class, and the overlay maps boxes through.
   assert.match(APP_JS, /classList\.toggle\('img-flip180', /);
   assert.match(APP_JS, /flipBox180\(box, frameWidth, frameHeight\)/);
   assert.match(APP_CSS, /\.img-flip180\s*\{[^}]*rotate\(180deg\)/);
 });
 
-/* ------------------------------------------------------------------ *
- * The evidence stage of a multi-photo inspection.
- *
- * An inspection can rest on several photographs at once, but one frame is on
- * screen. These assert the frame is selectable and that boxes belong to the
- * frame they are drawn on: a box read from another photograph would be a
- * rectangle invented out of nothing where it lands.
- * ------------------------------------------------------------------ */
+// The evidence stage of a multi-photo inspection.
 
 test('every photograph of a multi-photo inspection is reachable on the evidence stage', () => {
   assert.match(INDEX_HTML, /id="photo-switcher"/, 'the photo switcher must exist');
@@ -240,22 +200,17 @@ test('the reviewer gate states the real reason and routes to the setup dialog', 
   assert.match(APP_JS, /gateBtn\.addEventListener\('click', \(\) => openReviewerModal\(\)\)/,
     'the gate must be the route to the one action that resolves it');
   // The banner reads the gate the SERVER enforces, out of the workspace payload.
-  // It used to decide for itself from the project, which meant it could assert a
-  // closed gate while the API happily accepted the work.
   assert.match(APP_JS, /state\.reviewerGate/, 'the banner must read the server verdict');
   assert.match(APP_JS, /payload\.reviewerGate/, 'the server verdict must reach the client');
   assert.match(APP_JS, /server\.required === true/);
-  // A blank name must not open the gate. The client's own fallback is
-  // fail-closed: it closes on anything that is not a non-empty string.
+  // A blank name must not open the gate.
   assert.match(APP_JS, /typeof reviewer\.name !== 'string'/);
   assert.match(APP_JS, /reviewer\.name\.trim\(\)\.length === 0/,
     'a blank name must not open the gate');
 });
 
 test('a refused run opens the reviewer setup instead of blaming the provider', () => {
-  // The server's refusal is a setup gate, not a provider failure. Reading it as
-  // "AI provider request failed" would send the operator to a credential problem
-  // they do not have.
+  // The server's refusal is a setup gate, not a provider failure.
   assert.match(APP_JS, /err\.code = typeof body\.error === 'string' \? body\.error : ''/,
     'the machine-readable error code must survive to the caller');
   assert.match(APP_JS, /error\.code === 'REVIEWER_REQUIRED'/,
@@ -265,15 +220,13 @@ test('a refused run opens the reviewer setup instead of blaming the provider', (
 });
 
 test('the primary action is ink, so red stays reserved for destruction', () => {
-  // Inspect reality is the one primary action of the instrument; rendering it in
-  // the same red outline as Delete project made it read as a warning.
+  // Inspect reality is the one primary action of the instrument.
   assert.match(INDEX_HTML, /<button[^>]*class="btn btn-primary"[^>]*id="run"/);
   assert.match(APP_CSS, /\.btn-primary\s*\{[^}]*background:\s*var\(--ink\)/);
 });
 
 test('hidden bands cannot survive a class rule that sets display', () => {
-  // Several bands are flex or grid by class and toggled with the hidden
-  // attribute, which a later class rule of equal specificity would override.
+  // Several bands are flex or grid by class and toggled with the hidden attribute, which a later class rule of equal.
   assert.match(APP_CSS, /\[hidden\]\s*\{\s*display:\s*none\s*!important/);
 });
 
@@ -290,19 +243,11 @@ test("the project's captures can be selected as a group", () => {
 test('the identity fonts are actually delivered rather than assumed installed', () => {
   assert.match(INDEX_HTML, /fonts\.googleapis\.com[\s\S]*?IBM\+Plex\+Sans/,
     'the named sans font must be delivered, not only declared in the CSS stack');
-  // The fallback stays declared in the stylesheet, so an offline machine still
-  // resolves to a real family.
+  // The fallback stays declared in the stylesheet, so an offline machine still resolves to a real family.
   assert.match(APP_CSS, /--sans:\s*"IBM Plex Sans", "Segoe UI"/);
 });
 
-/* ------------------------------------------------------------------ *
- * The masthead.
- *
- * The identity strip has to stay the same width whether one photograph is open
- * or twelve. Listing the filenames put forty characters per photograph into a
- * band that cannot grow, which pushed the reviewer and the project selector off
- * the strip; the count is the fact that band has to carry.
- * ------------------------------------------------------------------ */
+// The masthead. The identity strip has to stay the same width whether one photograph is open or twelve.
 
 test('the masthead carries a count, never the file names', () => {
   assert.match(APP_JS, /function renderCaptureSummary\(/, 'the capture summary must be rendered');
@@ -311,8 +256,7 @@ test('the masthead carries a count, never the file names', () => {
     /setText\('meta-capture', p\.captureLabel\)/,
     'the header must not inline a capture label, which names one file at full length',
   );
-  // The group label still exists for the reasoning prompt, where naming every
-  // photograph is a correctness invariant. That separation must survive.
+  // The group label still exists for the reasoning prompt, where naming every photograph is a correctness invariant.
   assert.match(APP_JS, /qualificationPath/);
 });
 
@@ -350,18 +294,10 @@ test('the photo names are available without widening the masthead', () => {
   assert.match(APP_CSS, /\.rig-disclose-list\s*\{[^}]*overflow-y:\s*auto/);
 });
 
-/* ------------------------------------------------------------------ *
- * A partial analysis is its own state, not a softer failure.
- *
- * Found by driving the real page: a partial run rendered the SEE step as
- * 'fail' with "did not complete", and its count read "-1 of 1 analysed"
- * because it subtracted failures from a differently-sized list.
- * ------------------------------------------------------------------ */
+// A partial analysis is its own state, not a softer failure.
 
 test('a partial analysis is decided before the run outcome, not after it', () => {
-  // Order is the fix. Checking `outcome === 'FAILED'` first let a partial run
-  // borrow the failure state and wording whenever the outcome happened to be
-  // FAILED alongside a partial failure.
+  // Order is the fix. Checking `outcome === 'FAILED'` first let a partial run borrow the failure state and wording.
   const partialAt = APP_JS.indexOf('const partial = view.failure !== null');
   const failedAt = APP_JS.indexOf('const failed = view.outcome');
   assert.ok(partialAt > -1, 'the partial flag must be computed explicitly');
@@ -372,8 +308,7 @@ test('a partial analysis is decided before the run outcome, not after it', () =>
 });
 
 test('the partial count is taken from the images, so it cannot go negative', () => {
-  // It used to be `captureIds.length - failedImages`, and the open group and the
-  // image list are different lengths, which produced "-1 of 1 analysed".
+  // It used to be `captureIds.length - failedImages`, and the open group and the image list are different lengths, which.
   assert.match(APP_JS, /analysed: images\.filter\(\(i\) => i\.status !== 'FAILED'\)\.length/);
   assert.match(APP_JS, /total: images\.length/);
   assert.doesNotMatch(APP_JS, /analysed: state\.captureIds\.length - /,
@@ -381,8 +316,7 @@ test('the partial count is taken from the images, so it cannot go negative', () 
 });
 
 test('partial, done and failed are visually distinguishable from one another', () => {
-  // Partial and failure were the same amber wash, so the only difference was a
-  // word in a small label. Partial now also carries an inset rule.
+  // Partial and failure were the same amber wash, so the only difference was a word in a small label.
   assert.match(APP_CSS, /\.pipe-step\[data-state="partial"\]\s*\{[^}]*box-shadow:\s*inset/,
     'partial must carry a rule that neither done nor failed has');
   assert.match(APP_CSS, /\.pipe-step\[data-state="partial"\]\s*\{[^}]*--review/);
@@ -403,8 +337,7 @@ test('the partial panel is labelled as partial, not as a failed inspection', () 
 
 test('the NVIDIA requirement card states the verdict, the stages and the path', () => {
   assert.match(INDEX_HTML, /id="qual-subtitle"/, 'the pipeline shape must be stated');
-  // The verdict is the badge alone; the platform and the qualifying stage are
-  // rows. A verdict that carried them in one sentence could not be scanned.
+  // The verdict is the badge alone.
   assert.match(APP_JS, /qual\.met/);
   assert.match(APP_JS, /qual\.hybrid/);
   assert.match(APP_JS, /qual\.row\.vision/);
@@ -417,26 +350,14 @@ test('the NVIDIA requirement card states the verdict, the stages and the path', 
   assert.match(APP_CSS, /\.qual-tag-unknown\b/);
 });
 
-/* ------------------------------------------------------------------ *
- * Narrow-viewport layout.
- *
- * The masthead is a wrapping flex row, so its LAST line can still be wider
- * than a phone. The workflow nav holds four tabs at a fixed intrinsic width
- * (382px) and is pushed to the inline end, so it wrapped onto its own row and
- * overhung a 390px viewport by 12px: measured in a real browser as
- * document.scrollWidth 402 against a 390px window, i.e. a horizontal scrollbar
- * with the 04 Findings step partly off-screen. These assert the header line is
- * allowed to use the full row at phone widths.
- * ------------------------------------------------------------------ */
+// Narrow-viewport layout.
 
 test('the workflow nav may use the full header row at phone widths', () => {
-  // The media block contains several rules, so match up to each selector rather
-  // than assuming .rig-nav is the first declaration in the block.
+  // The media block contains several rules, so match up to each selector rather than assuming .rig-nav is the first.
   const narrow = APP_CSS.match(/@media \(max-width: 820px\)\s*\{([\s\S]*?)\n\}/);
   assert.ok(narrow, 'the 820px breakpoint must exist');
   const block = narrow[1] as string;
-  // Without flex-basis 100% the nav keeps its intrinsic 382px width and, being
-  // pushed to the inline end, overhangs a 390px viewport.
+  // Without flex-basis 100% the nav keeps its intrinsic 382px width and, being pushed to the inline end, overhangs a 390px viewport.
   assert.match(block, /\.rig-nav\s*\{[^}]*flex:\s*1 1 100%/,
     'the nav must be allowed to take the whole header row below 820px');
   // A nav wider than its row has to be able to break, or the tabs clip instead.

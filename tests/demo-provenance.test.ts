@@ -1,17 +1,11 @@
-/**
- * Demo provenance regression tests.
- *
- * Guards two defects fixed after live runs: provenance was skipped entirely on a
- * zero-observation run, and eligibility was derived from the provider name alone
- * so any live Nebius call printed "YES" even when a non-NVIDIA model ran.
- */
+// Demo provenance regression tests.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { NEBIUS_PROVIDER_NAME } from '../src/providers/nebius-nvidia.provider.ts';
 import { DEMO_PROVIDER_NAME } from '../src/providers/demo-fixture.provider.ts';
 
-/** Mirrors the decision now implemented in demo/run-demo.ts. */
+// Mirrors the decision now implemented in demo/run-demo.ts.
 function eligibility(provider: string, model: string): 'YES' | 'NO' {
   if (provider !== NEBIUS_PROVIDER_NAME) return 'NO';
   return /^nvidia\//i.test(model) ? 'YES' : 'NO';
@@ -22,8 +16,7 @@ test('an NVIDIA model on the live Nebius path is eligible', () => {
 });
 
 test('a non-NVIDIA model on the live Nebius path is NOT eligible', () => {
-  // The regression: this previously reported YES purely because the provider
-  // class was the Nebius one.
+  // The regression: this previously reported YES purely because the provider class was the Nebius one.
   assert.equal(eligibility(NEBIUS_PROVIDER_NAME, 'Qwen/Qwen3.8-27B'), 'NO');
   assert.equal(eligibility(NEBIUS_PROVIDER_NAME, 'google/gemma-3-27b-it'), 'NO');
   assert.equal(eligibility(NEBIUS_PROVIDER_NAME, 'openbmb/MiniCPM-V-4_5'), 'NO');
@@ -39,8 +32,6 @@ test('eligibility matches the model id prefix, case-insensitively', () => {
 });
 
 test('an unavailable NVIDIA model still counts as the intended eligibility path', () => {
-  // Eligibility is a statement about WHICH MODEL was invoked, not about whether
-  // the call succeeded. A 404 model is still an NVIDIA model id; the run simply
-  // fails closed and produces no observations.
+  // Eligibility is a statement about WHICH MODEL was invoked, not about whether the call succeeded.
   assert.equal(eligibility(NEBIUS_PROVIDER_NAME, 'nvidia/nemotron-3-nano-omni'), 'YES');
 });

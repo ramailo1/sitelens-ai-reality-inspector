@@ -1,10 +1,4 @@
-﻿/**
- * Image storage lifecycle over the real HTTP surface.
- *
- * The storage assertions deliberately look at the live store rather than a mock,
- * because the claim being protected is "the bytes are actually gone", which a
- * response body alone cannot prove.
- */
+﻿// Image storage lifecycle over the real HTTP surface.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -70,15 +64,7 @@ async function upload(call: Call, name = 'site.png'): Promise<string> {
   return JSON.parse(res.body.toString('utf8')).capture.id as string;
 }
 
-/**
- * Create a project that is allowed to hold evidence.
- *
- * Uploading stores reality, and stored reality is evidence, so the reviewer gate
- * refuses an upload to a project with no named reviewer. These tests are about
- * what happens to those bytes, not about the gate, so the reviewer is part of
- * their fixture rather than something each assertion re-tests. The gate's own
- * behaviour is covered in reviewer-gate.test.ts.
- */
+// Create a project that is allowed to hold evidence.
 async function projectWithReviewer(call: Call, name: string): Promise<JsonResult> {
   const created = await call.json('POST', '/api/projects', { name });
   assert.equal(created.status, 201, 'project creation must succeed');

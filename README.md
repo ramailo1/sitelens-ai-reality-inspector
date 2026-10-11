@@ -15,7 +15,7 @@ Built for the **Nebius × NVIDIA Global AI Hackathon**.
 
 ```bash
 npm install          # zero runtime dependencies
-npm test             # 614 tests passing
+npm test             # 650 tests passing
 npm run typecheck    # strict tsc, 0 errors
 
 # Option A: Real inference on Nebius Token Factory (MiniCPM-V + Nemotron):
@@ -160,13 +160,15 @@ src/
   inspector.ts             Observation validation and trust boundary
   session.ts               Inspection session pipeline (SEE -> COMPARE -> UNDERSTAND)
   server.ts                HTTP REST API and static asset server
+  evaluation-harness.ts    Labelled AI evaluation harness (offline deterministic + opt-in live)
   ui/                      Modular UI templates (index.html.ts, app.css.ts, app.js.ts)
 docs/
   ARCHITECTURE.md          System architecture and trust boundary documentation
   DEMO.md                  Hero demo script, walkthrough, and recording checklist
+  EVALUATION.md            Evaluation harness: manifest, rubric, offline/live modes
   HACKATHON-SUBMISSION.md  Formatted submission package for judges
   DEVPOST-SUBMISSION.md    Condensed submission mirror for Devpost
-tests/                     Node.js native test suite (614 tests across 33 suites)
+tests/                     Node.js native test suite (650 tests across 36 suites)
 ```
 
 ---
@@ -176,9 +178,24 @@ tests/                     Node.js native test suite (614 tests across 33 suites
 Run the full automated test suite:
 
 ```bash
-npm test             # 614 tests passing
+npm test             # 650 tests passing
 npm run typecheck    # 0 TypeScript errors
 ```
+
+Run the evaluation harness:
+
+```bash
+npm run eval         # OFFLINE evaluation: deterministic, no network, no cost
+npm run eval:live    # LIVE evaluation: explicit opt-in, uses configured provider
+```
+
+The offline evaluation scores specification conformance (trust boundaries,
+validation, deterministic comparison arithmetic, regression scenarios for
+known failure modes). Element-level accuracy metrics (precision, recall) are
+computed only in live mode against the human-authored manifest labels, and
+are never statistically conclusive on the small sample. See
+[docs/EVALUATION.md](./docs/EVALUATION.md) for the manifest, the rubric, and
+how to add labelled cases.
 
 ---
 

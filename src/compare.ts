@@ -1,20 +1,4 @@
-/**
- * Reality vs expectation.
- *
- * Given what was detected and what was expected, computes MATCH / ATTENTION /
- * UNDETERMINED with plain, auditable rules.
- *
- * The comparison is not in the prompt because a model asked to "compare expected
- * 12 columns against the image" will agree with whatever it imagined. Here the
- * arithmetic is ours, the evidence is the model's, and the verdict is still the
- * human's.
- *
- *   COUNT     equal is MATCH, different is ATTENTION, and no defensible count is
- *             UNDETERMINED rather than a fabricated shortfall.
- *   PRESENT   detected present is MATCH, explicitly absent is ATTENTION, nothing
- *             detected at all is UNDETERMINED.
- *   ABSENT    detected is ATTENTION, nothing detected is MATCH.
- */
+// Reality vs expectation.
 
 import type {
   ComparisonRow,
@@ -29,11 +13,11 @@ import { describeDisagreement, reconcileReading } from './multi-image.ts';
 import type { ImageDetections } from './multi-image.ts';
 
 export interface CompareOptions {
-  /** Overridable for tests; defaults to a deterministic id per expected item. */
+  // Overridable for tests; defaults to a deterministic id per expected item.
   readonly idFactory?: (item: ExpectedItem) => string;
 }
 
-/** Render an expected item as the sentence a site professional would use. */
+// Render an expected item as the sentence a site professional would use.
 export function expectedTextFor(item: ExpectedItem): string {
   const label = elementLabel(item.element);
   const note = item.note.trim();
@@ -48,14 +32,12 @@ export function expectedTextFor(item: ExpectedItem): string {
   }
 }
 
-/** Human phrase for a count we cannot defend from this capture. */
+// Human phrase for a count we cannot defend from this capture.
 export const NOT_DETERMINABLE_TEXT = 'not determinable from this capture';
 
 function observedTextFor(item: ExpectedItem, detection: DetectedElement | null): string {
   if (detection === null) {
-    // For an ABSENT expectation the honest reading is "none was seen", which is
-    // the answer that satisfies it. Saying "not determinable" next to a MATCH
-    // would be self-contradictory.
+    // For an ABSENT expectation the honest reading is "none was seen", which is the answer that satisfies it.
     return item.expectation === 'ABSENT' ? 'none seen in this capture' : NOT_DETERMINABLE_TEXT;
   }
   const label = elementLabel(item.element);
@@ -66,44 +48,26 @@ function observedTextFor(item: ExpectedItem, detection: DetectedElement | null):
   return `${label} detected`;
 }
 
-/**
- * The multi-image extension of CompareOptions.
- *
- * `sources` carries the per-image readings already reconciled into this row. When
- * present, `multi-image.ts` has decided `detection`, `detectionReported` and
- * the status inputs, and this module's job is only to record who contributed.
- * When absent, the single-image path runs completely unchanged.
- */
+// The multi-image extension of CompareOptions.
 export interface MultiImageCompareOptions extends CompareOptions {
   readonly sources?: readonly ComparisonSource[];
   readonly countDisputed?: boolean;
 }
 
-/**
- * Compare ONE expected item against ONE detected element.
- *
- * `detection` is the element the model reported for the same kind, or null when
- * the model reported nothing for it at all. Null and "reported absent" are
- * deliberately different: one means "I cannot tell", the other means "I looked
- * and it is not there".
- */
+// Compare ONE expected item against ONE detected element.
 export function compareItem(
   item: ExpectedItem,
   detection: DetectedElement | null,
   options: MultiImageCompareOptions = {},
 ): ComparisonRow {
-  // Deterministic id derived from the expected item, NOT a random uuid. A row
-  // that changed identity on every re-render would orphan any human review
-  // recorded against it, and finding ids are derived from this one.
+  // Deterministic id derived from the expected item, NOT a random uuid.
   const idFactory = options.idFactory ?? ((row: ExpectedItem): string => `cmp_${row.id}`);
   const expectedText = expectedTextFor(item);
   const observedText = observedTextFor(item, detection);
   const observedCount = detection !== null && detection.present ? detection.count : null;
   const confidence = detection !== null ? detection.confidence : null;
   const boundingBox = detection !== null ? detection.boundingBox : null;
-  // Reported = the model said anything about this kind, including "it is not
-  // there". Null means the model said nothing, which is an evidence statement
-  // of its own: there is no visual reading to point at, full-frame or otherwise.
+  // Reported = the model said anything about this kind, including "it is not there".
   const detectionReported = detection !== null;
 
   let status: ComparisonStatus;
@@ -113,13 +77,10 @@ export function compareItem(
     case 'COUNT': {
       const expectedCount = item.expectedCount ?? 0;
       if (detection === null || !detection.present) {
-        // The model either saw nothing, or reported the element absent. We
-        // cannot turn that into "you are N columns short" - the columns may
-        // simply be outside the frame.
+        // The model either saw nothing, or reported the element absent.
         status = 'UNDETERMINED';
       } else if (detection.count === null) {
-        // The element is visible but the model refused to count it. Reporting a
-        // shortfall here would invent exactly the number we just refused.
+        // The element is visible but the model refused to count it.
         status = 'UNDETERMINED';
       } else if (detection.count === expectedCount) {
         status = 'MATCH';
@@ -175,8 +136,7 @@ export function compareItem(
     boundingBox,
     detectionReported,
     difference,
-    // Empty on the single-image path: one image attributes itself through
-    // `captureId` and needs no list.
+    // Empty on the single-image path: one image attributes itself through `captureId` and needs no list.
     sourceCaptureIds: options.sources === undefined
       ? []
       : options.sources.map((s) => s.captureId),
@@ -184,13 +144,7 @@ export function compareItem(
   };
 }
 
-/**
- * Compare a whole expected state against a whole detection set.
- *
- * Detections are indexed by element kind; when a model reports the same kind
- * twice the most confident reading wins, so the comparison stays deterministic
- * rather than order-dependent.
- */
+// Compare a whole expected state against a whole detection set.
 export function compareExpectedState(
   expected: ExpectedState,
   detections: readonly DetectedElement[],
@@ -207,17 +161,7 @@ export function compareExpectedState(
   return expected.items.map((item) => compareItem(item, best.get(item.element) ?? null, options));
 }
 
-/**
- * Compare an expected state against SEVERAL photographs at once.
- *
- * This is the consolidated path. It reconciles each element kind across all
- * images first (see multi-image.ts for why images are never summed), then runs
- * the SAME comparison rules per row. So a consolidated inspection and a
- * single-image inspection reach their verdicts by identical arithmetic.
- *
- * `images` must carry the per-image readings produced by the real vision calls.
- * With one image this produces the same rows as `compareExpectedState`.
- */
+// Compare an expected state against SEVERAL photographs at once.
 export function compareAcrossImages(
   expected: ExpectedState,
   images: readonly ImageDetections[],
@@ -233,10 +177,6 @@ export function compareAcrossImages(
 
     if (item.expectation === 'COUNT' && reading.disputed) {
       // Photographs genuinely disagree, so neither does the group.
-      // compareItem(null) already yields UNDETERMINED with an honest
-      // "not determinable" observation; the difference is then replaced with the
-      // actual readings, so the operator sees WHICH photographs disagree rather
-      // than a bare unknown.
       const row = compareItem(item, null, {
         ...options,
         sources: reading.sources,
@@ -245,16 +185,12 @@ export function compareAcrossImages(
       return {
         ...row,
         difference: describeDisagreement(reading, images),
-        // The highest-confidence sighting is still real evidence for presence,
-        // so its box is kept for the overlay even though the count is disputed.
+        // The highest-confidence sighting is still real evidence for presence, so its box is kept for the overlay even though.
         confidence: reading.confidence,
       };
     }
 
-    // Not disputed: reconcile to the single best reading so the existing rules
-    // apply unchanged. A disputed reading above bypasses those rules on purpose,
-    // because applying a COUNT rule to a number nobody photographed is the exact
-    // fabrication this product refuses.
+    // Not disputed: reconcile to the single best reading so the existing rules apply unchanged.
     const best = pickRepresentative(item.element, images, reading);
     const row = compareItem(item, best, {
       ...options,
@@ -265,15 +201,7 @@ export function compareAcrossImages(
   });
 }
 
-/**
- * The detection the single-image rules should evaluate.
- *
- * When every image that counted agreed, that agreed count is represented by the
- * highest-confidence image that reported it, so `compareItem`'s COUNT arithmetic
- * produces the right verdict. When nothing was counted, the highest-confidence
- * sighting stands and the count stays null, which the COUNT rules already treat
- * as UNDETERMINED.
- */
+// The detection the single-image rules should evaluate.
 function pickRepresentative(
   element: string,
   images: readonly ImageDetections[],
@@ -298,7 +226,7 @@ function pickRepresentative(
   return best;
 }
 
-/** Roll comparison rows up into the counters the right-hand panel shows. */
+// Roll comparison rows up into the counters the right-hand panel shows.
 export interface ComparisonSummary {
   readonly total: number;
   readonly matched: number;

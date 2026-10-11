@@ -1,12 +1,4 @@
-/**
- * Calls a vision model through Nebius Token Factory's OpenAI-compatible API,
- * sending the image as a base64 data URL.
- *
- * The credential is read from the environment and sent only as a bearer header;
- * it is never logged or persisted. Imagery is transmitted only to a validated
- * Nebius host (see isAllowedNebiusHost in config.ts), and a deadline is always
- * enforced so a hung provider cannot stall a caller.
- */
+// Calls a vision model through Nebius Token Factory's OpenAI-compatible API, sending the image as a base64 data URL.
 
 import type {
   AIProvider,
@@ -18,32 +10,13 @@ import type { ProviderConfig, ResolvedCredentials } from '../config.ts';
 import { redactSecrets, resolveCredentials, resolveProviderConfig } from '../config.ts';
 import type { RawModelObservation } from '../types/observation.ts';
 
-/** Stable provider name, surfaced in every observation's provenance. */
+// Stable provider name, surfaced in every observation's provenance.
 export const NEBIUS_PROVIDER_NAME = 'nebius-nvidia' as const;
 
-/**
- * Largest encoded image the endpoint will accept, measured not guessed.
- *
- * The image travels as a base64 data URL inside the request body, so the wire
- * size is roughly 4/3 of the file. Probed against the live endpoint with real
- * construction photographs:
- *
- *   5.0 MB  (022)  HTTP 200
- *   7.9 MB  (030)  HTTP 200
- *   9.2 MB  (031)  HTTP 200
- *  15.9 MB  (023)  HTTP 400, schema rejection of the truncated body
- *
- * The boundary sits between the last two. A conservative 10 MB is enforced so
- * the failure is a clear product message naming the file rather than an opaque
- * provider schema error at inference time.
- */
+// Largest encoded image the endpoint will accept, measured not guessed.
 export const MAX_PROVIDER_IMAGE_BYTES = 10 * 1024 * 1024;
 
-/**
- * Instruction sent to the model. It constrains the model to OBSERVABLE site
- * reality and explicitly forbids autonomous engineering/compliance conclusions
- * — the same trust boundary SiteLens enforces on every AI path.
- */
+// Instruction sent to the model.
 export function buildInspectionPrompt(options: { expectedSummary?: string | null } = {}): string {
   const summary = options.expectedSummary ?? '';
   const expectedBlock =
@@ -165,7 +138,7 @@ export function buildInspectionPrompt(options: { expectedSummary?: string | null
   ].join('\n');
 }
 
-/** Injectable fetch, so tests never perform real network I/O. */
+// Injectable fetch, so tests never perform real network I/O.
 export type FetchLike = (
   input: string,
   init: {
@@ -199,8 +172,7 @@ export class NebiusNvidiaProvider implements AIProvider {
   constructor(options: NebiusNvidiaProviderOptions = {}) {
     this.env = options.env ?? process.env;
     this.config = options.config ?? resolveProviderConfig(this.env);
-    // Resolved eagerly but lazily consumed: a missing key must fail at inspect
-    // time with NOT_CONFIGURED, not at module import time.
+    // Resolved eagerly but lazily consumed: a missing key must fail at inspect time with NOT_CONFIGURED, not at module import time.
     this.credentials = options.credentials ?? safeResolveCredentials(this.env);
     this.model = this.config.model;
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init as RequestInit));
@@ -217,8 +189,7 @@ export class NebiusNvidiaProvider implements AIProvider {
     }
     if (image.bytes.length > MAX_PROVIDER_IMAGE_BYTES) {
       const mb = (MAX_PROVIDER_IMAGE_BYTES / (1024 * 1024)).toFixed(0);
-      // Refused here, with the real limit named, instead of producing an opaque
-      // schema rejection from the endpoint part-way through a large upload.
+      // Refused here, with the real limit named, instead of producing an opaque schema rejection from the endpoint part-way.
       throw new ProviderError(
         'ERROR',
         `This capture is ${(image.bytes.length / (1024 * 1024)).toFixed(1)} MB and the model `
@@ -239,9 +210,7 @@ export class NebiusNvidiaProvider implements AIProvider {
     const body = JSON.stringify({
       model: this.config.model,
       temperature: 0.1,
-      // Bounded on purpose. Some catalogue models are reasoning models that will
-      // otherwise spend the whole deadline emitting tokens and never return the
-      // JSON. A capped response that fails validation is far better than a hang.
+      // Bounded on purpose. Some catalogue models are reasoning models that will otherwise spend the whole deadline emitting.
       max_tokens: this.config.maxTokens,
       messages: [
         {
@@ -305,21 +274,19 @@ export class NebiusNvidiaProvider implements AIProvider {
       observations: this.sliceArray(record['observations'], this.config.maxObservations).map(
         (entry) => (isObject(entry) ? entry : {}) as RawModelObservation,
       ),
-      // elements/findings are optional: a model that only answers the original
-      // contract still produces a usable, honest inspection rather than a
-      // hard failure. An absent array means "said nothing", never "nothing there".
+      // elements/findings are optional: a model that only answers the original contract still produces a usable, honest.
       elements: this.sliceArray(record['elements'], this.config.maxObservations),
       findings: this.sliceArray(record['findings'], this.config.maxObservations),
     };
   }
 
-  /** Cap an array field so one verbose response cannot flood the UI. */
+  // Cap an array field so one verbose response cannot flood the UI.
   private sliceArray(value: unknown, limit: number): unknown[] {
     if (!Array.isArray(value)) return [];
     return value.slice(0, limit);
   }
 
-  /** Map a non-2xx status onto an explicit, loggable failure kind. */
+  // Map a non-2xx status onto an explicit, loggable failure kind.
   private mapHttpFailure(status: number, body: string): ProviderError {
     const detail = redactSecrets(truncate(body, 300), this.env);
     if (status === 401 || status === 403) {
@@ -342,13 +309,7 @@ export class NebiusNvidiaProvider implements AIProvider {
     return new ProviderError('ERROR', `Nebius request failed (HTTP ${status}).`, detail);
   }
 
-/**
-   * Unwrap the OpenAI-compatible envelope and parse the model's JSON payload.
-   *
-   * A reply that is not an object with an "observations" array is a
-   * MALFORMED_RESPONSE rather than an empty result, so a broken provider cannot
-   * masquerade as "nothing to see". `elements` and `findings` are optional.
-   */
+// Unwrap the OpenAI-compatible envelope and parse the model's JSON payload.
   private parseInnerPayload(rawText: string): unknown {
     let parsed: unknown;
     try {
@@ -397,13 +358,12 @@ export class NebiusNvidiaProvider implements AIProvider {
       );
     }
 
-    // The inner payload itself is the parsed JSON object; the caller reads the
-    // individual arrays off it.
+    // The inner payload itself is the parsed JSON object; the caller reads the individual arrays off it.
     return inner;
   }
 }
 
-/** True for a plain object, which is the only shape we pass through as data. */
+// True for a plain object, which is the only shape we pass through as data.
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -442,10 +402,7 @@ async function safeReadText(response: { text(): Promise<string> }): Promise<stri
   }
 }
 
-/**
- * Tolerate both the OpenAI-compatible envelope and a bare content string, but
- * return null (→ MALFORMED_RESPONSE) when neither is present.
- */
+// Tolerate both the OpenAI-compatible envelope and a bare content string, but return null (→ MALFORMED_RESPONSE) when.
 function extractMessageContent(parsed: Record<string, unknown>): string | null {
   const choices = parsed['choices'];
   if (!Array.isArray(choices) || choices.length === 0) return null;

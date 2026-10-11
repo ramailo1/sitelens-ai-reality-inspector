@@ -1,10 +1,4 @@
-/**
- * Reference management and project/preset isolation over HTTP.
- *
- * The invariant being protected: a comparison is always attributable to the
- * reference that produced it, and one project's reference never silently
- * becomes another's.
- */
+// Reference management and project/preset isolation over HTTP.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -163,8 +157,7 @@ test('an operator edit is recorded against the project, not the shared reference
 
 test('changing the reference discards the comparison it produced', async () => {
   await withServer(async (call) => {
-    // A run produces evidence attributed to the project's reviewer, so the gate
-    // has to be open first. This file asserts comparison semantics, not the gate.
+    // A run produces evidence attributed to the project's reviewer, so the gate has to be open first.
     await call.json('POST', '/api/reviewer', { name: 'Reference Tester', role: 'QA' });
     const run = await call.json('POST', '/api/run', {});
     assert.ok(run.body.comparison.length > 0, 'the run must produce rows first');

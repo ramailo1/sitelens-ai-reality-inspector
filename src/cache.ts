@@ -1,31 +1,15 @@
-/**
- * In-process cache of successful AI results, so iterating on the UI does not pay
- * full model latency every run.
- *
- * Three properties matter more than the speedup:
- *
- * 1. A cached result is never presented as a fresh inference. It carries
- *    `CACHED` plus the original inference time, and the UI renders a distinct
- *    badge.
- * 2. Only validated, non-empty results are stored, so a cache hit can never be
- *    a dressed-up error.
- * 3. The key is content-addressed over the image bytes, model, expected-state
- *    summary and schema version, so changing any of them is a different entry.
- *
- * Deliberately disposable: this is not a database and holds nothing of value.
- */
+// In-process cache of successful AI results, so iterating on the UI does not pay full model latency every run.
 
 import { createHash } from 'node:crypto';
 
-/** Bumped whenever the prompt or the accepted schema changes, so an old entry
- *  can never be served against a newer contract. */
+// Bumped whenever the prompt or the accepted schema changes, so an old entry can never be served against a newer contract.
 export const CACHE_SCHEMA_VERSION = 'v1-inspection';
 
-/** Where a set of detections came from. Always surfaced to the user. */
+// Where a set of detections came from. Always surfaced to the user.
 export type InferenceOrigin = 'FRESH' | 'CACHED' | 'DEMO_FIXTURE';
 
 export interface CachedInspection {
-  /** Exactly what the provider returned, unvalidated. */
+  // Exactly what the provider returned, unvalidated.
   readonly observations: readonly unknown[];
   readonly elements: readonly unknown[];
   readonly findings: readonly unknown[];
@@ -46,7 +30,7 @@ interface CacheEntry {
   readonly inferenceAt: string;
   readonly latencyMs: number;
   readonly payload: CachedInspection;
-  /** Only entries with at least one accepted entry are ever written. */
+  // Only entries with at least one accepted entry are ever written.
   readonly acceptedEntries: number;
 }
 
@@ -62,13 +46,7 @@ export function computeCacheKey(input: {
     .slice(0, 16);
   return `${CACHE_SCHEMA_VERSION}:${input.model}:${imageHash}:${contextHash}`;
 }
-
-/**
- * Process-local cache.
- *
- * Bounded so a long session cannot grow without limit; the oldest successful
- * entry is evicted first. Failure records are counted but never stored as data.
- */
+// Process-local cache. Bounded so a long session cannot grow without limit.
 export class InspectionCache {
   private readonly entries = new Map<string, CacheEntry>();
   private readonly order: string[] = [];
@@ -78,8 +56,7 @@ export class InspectionCache {
 
   private readonly limit: number;
 
-  // Not a parameter property: Node's strip-only type stripping rejects that
-  // syntax, so the field is assigned explicitly.
+  // Not a parameter property: Node's strip-only type stripping rejects that syntax, so the field is assigned explicitly.
   public constructor(limit = 200) {
     this.limit = limit;
   }
@@ -108,19 +85,12 @@ export class InspectionCache {
     };
   }
 
-  /**
-   * Store a SUCCESSFUL result.
-   *
-   * Refuses anything that is not a real, non-empty, validated observation. The
-   * caller passes the accepted-entry count because "the provider answered" and
-   * "the answer survived validation" are different statements.
-   */
+  // Store a SUCCESSFUL result.
   public store(key: string, payload: CachedInspection, meta: {
     readonly model: string; readonly latencyMs: number; readonly acceptedEntries: number;
   }): boolean {
     if (meta.acceptedEntries <= 0) {
-      // An empty or wholly-rejected response is not a usable result. Caching it
-      // would let a failure look like a fast success forever after.
+      // An empty or wholly-rejected response is not a usable result.
       this.failuresSkipped += 1;
       return false;
     }
@@ -142,5 +112,5 @@ export class InspectionCache {
   public clear(): void { this.entries.clear(); this.order.length = 0; }
 }
 
-/** Shared instance for the local server. */
+// Shared instance for the local server.
 export const inspectionCache = new InspectionCache();

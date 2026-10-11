@@ -1,7 +1,4 @@
-/**
- * Regression tests for the verified-finding ledger UI, truthful persistence
- * feedback, evidenceState presentation, and reference-change invalidation.
- */
+// Regression tests for the verified-finding ledger UI, truthful persistence feedback, evidenceState presentation, and.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,10 +16,7 @@ import { UnavailableReasoner } from '../src/providers/nemotron-reasoner.ts';
 import { APP_JS, APP_CSS, INDEX_HTML } from '../src/ui-assets.ts';
 import { DEFAULT_NEBIUS_MODEL, DEFAULT_REASONING_MODEL } from '../src/config.ts';
 
-/* ------------------------------------------------------------------ *
- * Lightweight DOM harness for driving the shipped APP_JS renderers
- * and interaction handlers in a controlled VM context.
- * ------------------------------------------------------------------ */
+// Lightweight DOM harness for driving the shipped APP_JS renderers and interaction handlers in a controlled VM context.
 
 interface StubNode {
   id: string;
@@ -417,9 +411,7 @@ function buildWorkspacePayload(store: ProjectStore): Record<string, unknown> {
   };
 }
 
-/* ------------------------------------------------------------------ *
- * 1. Verified observation -> visible ledger finding + lifecycle
- * ------------------------------------------------------------------ */
+// 1. Verified observation -> visible ledger finding + lifecycle
 
 test('verifying an observation creates a visible ledger finding and supports OPEN -> ACKNOWLEDGED -> CLOSED -> OPEN after API confirmation', async () => {
   const store = createTestStore();
@@ -530,9 +522,7 @@ test('verifying an observation creates a visible ledger finding and supports OPE
   assert.equal(apiLog.filter((c) => c.path === '/api/finding-state').length, 3);
 });
 
-/* ------------------------------------------------------------------ *
- * 2. Failed requests & duplicate in-flight protection
- * ------------------------------------------------------------------ */
+// 2. Failed requests & duplicate in-flight protection
 
 test('failed finding-state requests retain the last confirmed state, never claim saved, and block duplicate in-flight requests', async () => {
   const store = createTestStore();
@@ -611,7 +601,7 @@ test('failed finding-state requests retain the last confirmed state, never claim
   await h.updateFindingState(findingId, 'CLOSED');
   assert.equal(
     apiLog.filter((c) => c.path === '/api/finding-state').length,
-    2, // 1 from failed call + 1 from p1 (duplicate was blocked)
+    2,
     'Duplicate call while in-flight must not send another network request'
   );
 
@@ -624,9 +614,7 @@ test('failed finding-state requests retain the last confirmed state, never claim
   assert.equal(settledCard.dataset.findingState, 'ACKNOWLEDGED', 'State updates to ACKNOWLEDGED once API resolves');
 });
 
-/* ------------------------------------------------------------------ *
- * 3. Truthful persistence feedback (durable vs memory vs write failed)
- * ------------------------------------------------------------------ */
+// 3. Truthful persistence feedback (durable vs memory vs write failed)
 
 test('UI truthfully distinguishes confirmed durable writes, in-memory-only mode, and failed durable writes', async () => {
   const store = createTestStore();
@@ -688,9 +676,7 @@ test('UI truthfully distinguishes confirmed durable writes, in-memory-only mode,
   }
 });
 
-/* ------------------------------------------------------------------ *
- * 4. Undetermined evidence & evidenceState (LOCALIZED, FULL_FRAME, NONE)
- * ------------------------------------------------------------------ */
+// 4. Undetermined evidence & evidenceState (LOCALIZED, FULL_FRAME, NONE)
 
 test('renderFindings surfaces evidenceState (LOCALIZED, FULL_FRAME, NONE) and UNDETERMINED status without fabricating certainty', () => {
   const store = createTestStore();
@@ -793,21 +779,34 @@ test('renderFindings surfaces evidenceState (LOCALIZED, FULL_FRAME, NONE) and UN
   assert.equal(noneBadges.length, 1, 'NONE finding renders data-evidence-state="NONE" badge');
   assert.match(noneBadges[0]!.textContent, /No visual evidence/i);
   assert.match(cards[2]!.allText(), /No usable visual evidence for this finding in this capture/i);
+
+  // Every evidence state explains itself in context: WHAT the state means and WHY this item carries it, without the.
+  const helpNotes = cards[0]!.findAll((n) => n.getAttribute('role') === 'note');
+  assert.equal(helpNotes.length, 1, 'LOCALIZED finding carries a plain-language evidence note');
+  assert.match(helpNotes[0]!.allText(), /Why: model box present/i);
+  assert.match(helpNotes[0]!.allText(), /returned a region for this finding/i);
+
+  const fullHelp = cards[1]!.findAll((n) => n.getAttribute('role') === 'note');
+  assert.equal(fullHelp.length, 1, 'FULL_FRAME finding carries its own evidence note');
+  assert.match(fullHelp[0]!.allText(), /Why: reported without a usable box/i);
+  assert.match(fullHelp[0]!.allText(), /the inspected image plus the description/i);
+
+  const noneHelp = cards[2]!.findAll((n) => n.getAttribute('role') === 'note');
+  assert.equal(noneHelp.length, 1, 'NONE finding carries its own evidence note');
+  assert.match(noneHelp[0]!.allText(), /Why: nothing reported for this element/i);
+  // The NONE explanation must not read as compliance or failure: it routes the reader to a site walk, not to a verdict.
+  assert.match(noneHelp[0]!.allText(), /confirm it by a site walk/i);
+  assert.doesNotMatch(noneHelp[0]!.allText(), /fail|non-?complian/i);
 });
 
-/* ------------------------------------------------------------------ *
- * 5. Reference-change invalidation: warning, post-change notice,
- *    and durable disk cleanup across restarts
- * ------------------------------------------------------------------ */
+// 5. Reference-change invalidation: warning, post-change notice, and durable disk cleanup across restarts
 
 test('reference change warns before invalidating verified items, shows post-invalidation notice, and retains the audit record on disk', async () => {
   const temp = createTempDir();
   try {
     const persistence = new WorkspacePersistence({ directory: temp.dir });
     const store = createTestStore(persistence);
-    // A REAL project, not the generated demo. The demo project is deliberately
-    // never persisted, so its reference cannot survive a restart and the
-    // durable part of this assertion would be testing an impossibility.
+    // A REAL project, not the generated demo.
     const created = store.create({ name: 'Reference Change Tower', location: 'Level 03' });
     assert.equal(created.ok, true);
     if (!created.ok) return;
@@ -899,8 +898,7 @@ test('reference change warns before invalidating verified items, shows post-inva
       'Observations & Ledger panel also displays the post-invalidation notice'
     );
 
-    // 3) Restart store against the same data directory: the invalidated
-    //    inspection and its cleared ledger must NOT come back from disk...
+    // 3) Restart store against the same data directory: the invalidated inspection and its cleared ledger must NOT come back from disk...
     const restartedStore = createTestStore(new WorkspacePersistence({ directory: temp.dir }));
     const restartedView = restartedStore.activeSession()!.view();
     assert.equal(
@@ -914,12 +912,7 @@ test('reference change warns before invalidating verified items, shows post-inva
       'Restarted store must not resurrect invalidated ledger findings from disk'
     );
 
-    // ...but the record itself is RETAINED. A reference change invalidates how
-    // the inspection was JUDGED; it does not erase that a real model ran and
-    // that named humans reviewed its output. Deleting it would destroy the
-    // only copy of a paid model payload and the human verification trail
-    // `docs/ARCHITECTURE.md` documents as retained. Superseding on read keeps
-    // the audit trail and still refuses to serve it.
+    // ...but the record itself is RETAINED.
     const recordPath = persistence.inspectionFile(groupKey(store.selectedCaptures()));
     assert.equal(
       existsSync(recordPath),
@@ -954,9 +947,7 @@ test('reference change warns before invalidating verified items, shows post-inva
   }
 });
 
-/* ------------------------------------------------------------------ *
- * 6. Project & capture isolation + durable restart recovery over HTTP
- * ------------------------------------------------------------------ */
+// 6. Project & capture isolation + durable restart recovery over HTTP
 
 async function listenTestServer(dir: string) {
   const handle = createInspectionServer({
@@ -1052,9 +1043,7 @@ test('HTTP server enforces project/capture isolation for ledger findings and res
   }
 });
 
-/* ------------------------------------------------------------------ *
- * 7. HTML & responsive mobile CSS contracts
- * ------------------------------------------------------------------ */
+// 7. HTML & responsive mobile CSS contracts
 
 test('shipped HTML, JS, and CSS include the verified-finding ledger and mobile responsive rules', () => {
   assert.match(INDEX_HTML, /id="bay-findings"/, 'INDEX_HTML contains #bay-findings');
@@ -1064,19 +1053,14 @@ test('shipped HTML, JS, and CSS include the verified-finding ledger and mobile r
   assert.match(APP_CSS, /\.ledger-card\b/, 'APP_CSS styles .ledger-card');
   assert.match(APP_CSS, /\.ledger-state-acknowledged\b/, 'APP_CSS styles .ledger-state-acknowledged');
   assert.match(APP_CSS, /@media\s*\(max-width:\s*640px\)/, 'APP_CSS includes mobile breakpoint rules for ledger/observation panels');
-  // The observation row's "Ledger finding: <id>" tag names a full record id,
-  // and .tag is white-space:nowrap. Measured in Chromium at a 390px viewport
-  // that tag was 429px wide and pushed document.scrollWidth to 462: the strip
-  // ran off the screen. The class is what lets it break instead.
+  // The observation row's "Ledger finding: <id>" tag names a full record id, and .tag is white-space:nowrap.
   assert.match(APP_CSS, /\.obs-raised\s*\{[^}]*overflow-wrap:\s*anywhere/,
     'the ledger-reference tag on an observation must be able to wrap at any point');
   assert.match(APP_JS, /obs-raised/,
     'APP_JS must apply that class to the observation\'s ledger-reference tag');
 });
 
-/* ------------------------------------------------------------------ *
- * 8. Observation rejection removes ledger finding & UI scope guards
- * ------------------------------------------------------------------ */
+// 8. Observation rejection removes ledger finding & UI scope guards
 
 test('rejecting a previously verified observation removes its ledger finding, and UI scope guards filter out-of-scope findings', async () => {
   const store = createTestStore();
@@ -1111,7 +1095,7 @@ test('rejecting a previously verified observation removes its ledger finding, an
   await h.submitObservationReview(obs.id, 'REJECTED');
   assert.equal(getEl('ledger-empty').hidden, false, 'Rejecting observation removes finding and restores empty ledger state');
 
-  // Inject an out-of-scope finding from another project into view.findings and verify client scope guard hides it and refuses mutation
+  // Inject an out-of-scope finding from another project into view.findings and verify client scope guard hides it and.
   const ws = buildWorkspacePayload(store);
   const foreignView = {
     ...(ws.view as Record<string, unknown>),
@@ -1143,18 +1127,14 @@ test('rejecting a previously verified observation removes its ledger finding, an
   assert.equal(apiLog.length, countBefore, 'updateFindingState refuses out-of-scope finding without calling the API');
 });
 
-/* ------------------------------------------------------------------ *
- * 9. Consolidated multi-image (grp_*) reference-change invalidation
- * ------------------------------------------------------------------ */
+// 9. Consolidated multi-image (grp_*) reference-change invalidation
 
 test('reference change supersedes consolidated multi-image (grp_*) persisted inspections so they do not resurrect on restart, while retaining the audit record', async () => {
   const temp = createTempDir();
   try {
     const persistence = new WorkspacePersistence({ directory: temp.dir });
     const store = createTestStore(persistence);
-    // A REAL project, so its reference is durable across a restart. The demo
-    // project is never persisted and re-seeds with the default preset, which
-    // would make "the invalidation survived the restart" untestable.
+    // A REAL project, so its reference is durable across a restart.
     const created = store.create({ name: 'Consolidated Group Tower', location: 'Level 05' });
     assert.equal(created.ok, true);
     if (!created.ok) return;
@@ -1207,4 +1187,3 @@ test('reference change supersedes consolidated multi-image (grp_*) persisted ins
     temp.cleanup();
   }
 });
-
